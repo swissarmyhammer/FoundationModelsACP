@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Swift / SwiftPM
+.build/
+.swiftpm/
+Package.resolved
+*.xcodeproj
+*.xcworkspace
+
+# Local tooling
+.sah/
+.shell/
+.code-context/
+.claude/settings.local.json
