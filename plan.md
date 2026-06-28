@@ -1,6 +1,6 @@
 # FoundationModelsACP — package spec
 
-**Status:** v0.4 · **Target:** Swift 6, macOS 27, Apple Silicon · **Updated:** 2026-06-28
+**Status:** v0.5 · **Target:** Swift 6, macOS 27, Apple Silicon · **Updated:** 2026-06-28
 
 A standalone Swift Package — **`FoundationModelsACP`** — implementing the Agent Client Protocol (ACP)
 — idiomatic Swift analogs of the ACP types, both protocol roles, and JSON-RPC-over-stdio transport —
@@ -20,10 +20,20 @@ ACP is JSON-RPC over stdio at the app/editor surface, and it's **full-duplex and
 — a prompt turn is a long-lived request during which the agent streams many `session/update`
 notifications and calls back into the client (files, permission, terminals), all concurrently. That
 streaming, bidirectional surface belongs in Swift with the app, not marshaled across UniFFI per
-message. The official SDKs are Rust and TypeScript; Swift has only an early community package, so we
-build our own. The data types are generated from ACP's published JSON schema (from the Rust
-`agent-client-protocol-schema` crate) so they track the spec automatically; the connection, role
-protocols, and transport are hand-written.
+message. **Rust is the source of truth** — the official SDKs (Rust, TypeScript, Python, Kotlin, Java)
+are all generated from the Rust `agent-client-protocol-schema` crate's emitted JSON Schema. There is
+**no official Swift SDK**; the three community ones (`aptove/swift-sdk`, `wiedymi/swift-acp`,
+`rebornix/acp-swift-sdk`) are all pre-1.0, hand-write their types (so they lag the schema), and are
+partial — none covers both roles with generated types — so we build our own and steal their good ideas:
+actor-based connection, `AsyncStream` for `session/update`, and an in-memory test transport. We license
+**Apache-2.0** to match the spec and every reference SDK. Our data types are generated from ACP's
+published JSON schema (the `schema/v1/schema.json` + `meta.json` artifacts attached to the
+`agentclientprotocol` org's schema releases — the project relocated there from `zed-industries`, which
+now hosts only the schema crate) so they track the spec automatically; the connection, role protocols,
+and transport are hand-written, **porting the classic Rust async-trait connection design** (faithful
+through `rust-sdk` v0.10.4 — symmetric `*SideConnection` objects, oneshot + pending-map JSON-RPC
+engine), not the heavier `Role`/`Builder`/actor rewrite in runtime 1.0.0, which is more machinery than
+Swift's native concurrency needs.
 
 **Scope.** One target: both roles (`Agent` and `Client`), the full v1 type surface, stdio transport, a
 build-time codegen step (incremental; output checked in, §6), and the FoundationModels bridge (§7).
@@ -48,8 +58,16 @@ The generator turns the ACP JSON schema into idiomatic Swift, not a literal tran
 - **`_meta` and free-form fields** (`rawInput`, `rawOutput`, MCP server env) → `JSONValue`, a small
   enum over arbitrary JSON. `_meta` is preserved round-trip and never interpreted.
 - **Capability-gated optional fields** → Swift optionals; absence = unsupported.
-- **Versioning** — pin to ACP **v1** (the current stable surface the schema re-exports at root).
-  Generated code is checked in and regenerated on an ACP version bump, not on every build.
+- **Forgiving decoding for negotiated/optional surfaces.** Capability and `info` objects decode with
+  defaults-on-error (the Rust SDK uses `serde_as` `DefaultOnError` / `VecSkipError`): an unknown or
+  malformed capability field must degrade to "unsupported", never fail the `initialize` handshake. On
+  encode, omit `nil` (the equivalent of `skip_serializing_none`) — don't emit `null` for absent fields.
+- **`protocolVersion` is a wire integer, not a string.** Model it as a `ProtocolVersion` newtype over
+  `UInt16` that encodes/decodes as the bare integer `1` (`.v1 = 1`, `.latest = .v1`); it must **reject**
+  `"v1"` / `"1.0.0"`. The doc set and schema dir are *labelled* v1, but the value on the wire is `1`.
+- **Versioning** — target ACP **v1** (`protocolVersion == 1`); the version bumps only for breaking
+  changes, while everything else grows via capabilities + `_meta`. Generated code is checked in and
+  regenerated on a schema bump, not on every build.
 
 ---
 
@@ -62,6 +80,13 @@ Representative — the generator emits the full set; these are the load-bearing 
 public struct SessionId: RawRepresentable, Codable, Hashable, Sendable { public let rawValue: String }
 public struct ToolCallId: RawRepresentable, Codable, Hashable, Sendable { public let rawValue: String }
 public struct TerminalId: RawRepresentable, Codable, Hashable, Sendable { public let rawValue: String }
+
+// ProtocolVersion — encodes/decodes as a bare integer (wire value 1), NOT "v1"/"1.0.0"
+public struct ProtocolVersion: RawRepresentable, Codable, Hashable, Sendable {
+    public let rawValue: UInt16
+    public static let v1 = ProtocolVersion(rawValue: 1)
+    public static let latest = v1
+}
 
 // ContentBlock — baseline Text + ResourceLink; others gated by PromptCapabilities
 public enum ContentBlock: Codable, Sendable {
@@ -81,6 +106,16 @@ public enum SessionUpdate: Codable, Sendable {
     case toolCallUpdate(ToolCallUpdate)
     case plan(Plan)
     case availableCommandsUpdate([AvailableCommand])
+    case usageUpdate(UsageUpdate)              // token/usage accounting for the turn
+    case currentModeUpdate(SessionModeId)      // agent switched the active session mode
+}
+
+// JSON-RPC errors — standard codes plus ACP's two custom ones; carry structured `data`, never
+// smuggle JSON through the message string.
+public struct RequestError: Error, Codable, Sendable {
+    public var code: Int           // -32700 parse, -32600 invalid request, -32601 method-not-found,
+    public var message: String     // -32602 invalid params, -32603 internal,
+    public var data: JSONValue?    // ACP: -32000 authRequired, -32002 resourceNotFound
 }
 
 // Tool calls — string enums carry unknown(String) for forward-compat; Codable is hand-rolled
@@ -148,7 +183,15 @@ public protocol Agent: Sendable {
     func prompt(_ p: PromptRequest) async throws -> PromptResponse                  // returns StopReason
     func cancel(_ p: CancelNotification) async                                       // notification
     func authenticate(_ p: AuthenticateRequest) async throws -> AuthenticateResponse // optional
-    func setSessionMode(_ p: SetSessionModeRequest) async throws -> SetSessionModeResponse // optional
+    func setSessionConfigOption(_ p: SetSessionConfigOptionRequest) async throws -> SetSessionConfigOptionResponse // optional; supersedes session/set_mode
+    @available(*, deprecated, message: "Use setSessionConfigOption; session/set_mode is being removed")
+    func setSessionMode(_ p: SetSessionModeRequest) async throws -> SetSessionModeResponse // deprecated
+    // Session management — stabilized in the current schema (newer than the published TS/Rust-classic SDKs)
+    func listSessions(_ p: ListSessionsRequest) async throws -> ListSessionsResponse   // optional
+    func resumeSession(_ p: ResumeSessionRequest) async throws -> ResumeSessionResponse // optional
+    func deleteSession(_ p: DeleteSessionRequest) async throws                          // optional
+    func closeSession(_ p: CloseSessionRequest) async throws                            // optional
+    func logout(_ p: LogoutRequest) async throws                                        // optional
 }
 
 public protocol Client: Sendable {
@@ -181,14 +224,24 @@ Method-name mapping is internal: `session/new` → `newSession`, `fs/read_text_f
 (`clientCapabilities.terminal`, `fileSystem`, …); unsupported calls return JSON-RPC
 method-not-found.
 
-**Connections.** Two symmetric objects wrap one bidirectional byte stream:
-- `AgentSideConnection(agent:, stream:)` — dispatches incoming Client→Agent calls to your `Agent`;
-  exposes the outbound calls the agent makes *into* the client (`sessionUpdate`, `requestPermission`,
-  `fs/*`, `terminal/*`).
-- `ClientSideConnection(client:, stream:)` — the editor/host side; drives an agent and dispatches its
-  Agent→Client calls/notifications to your `Client`.
+**Connections.** Two symmetric objects wrap one bidirectional byte stream. Each takes a **factory
+closure**, not a finished handler, so the handler can capture its own connection and issue the reverse
+calls (the pattern both reference SDKs use — without it an `Agent` has no handle to fire
+`sessionUpdate`/`requestPermission` back at the client):
+- `AgentSideConnection(stream:) { conn in MyAgent(conn) }` — dispatches incoming Client→Agent calls to
+  your `Agent`; the `conn` it hands you exposes the outbound calls the agent makes *into* the client
+  (`sessionUpdate`, `requestPermission`, `fs/*`, `terminal/*`).
+- `ClientSideConnection(stream:) { agent in MyClient(agent) }` — the editor/host side; drives an agent
+  and dispatches its Agent→Client calls/notifications to your `Client`.
 
 Both sit on one shared full-duplex JSON-RPC `Connection` (§5).
+
+**Wire invariants enforced at the type boundary.** All file paths crossing the protocol are
+**absolute** and all line numbers are **1-based** — encode these in the path/location types (e.g. an
+`AbsolutePath` newtype) so a relative path or 0-based line is a compile- or decode-time error, not a
+silent interop bug. Content chunks correlate by message id and tool calls by `toolCallId`
+(`pending → in_progress → completed/failed`); the public API surfaces those ids so consumers never
+have to infer ordering.
 
 ---
 
@@ -225,9 +278,19 @@ the `session/update` stream the client reads — two streams, opposite direction
 
 **Implementation.** One read loop per connection dispatches each inbound message by kind:
 request → role handler → send a response keyed by `id`; notification → route to the handler /
-per-session `AsyncStream`; response → resolve the pending continuation for that `id`. Writes are
-serialized through an `actor`. **Long-lived requests** (`session/prompt`, `terminal/wait_for_exit`)
-are just suspended continuations — they must never block the read loop or other in-flight traffic.
+per-session `AsyncStream`; response → resolve the pending continuation for that `id`. Correlation is a
+monotonic numeric id + a `[RequestID: CheckedContinuation]` map held inside the connection `actor`,
+which also serializes writes (no separate write queue needed). **Each inbound request is dispatched as
+its own `Task`** — this is *why* a slow `session/prompt` doesn't head-of-line-block an incoming
+`session/cancel`, `request_permission`, or `fs/*` callback; cancellation only works because requests
+run concurrently. **Long-lived requests** (`session/prompt`, `terminal/wait_for_exit`) are just
+suspended continuations — they must never block the read loop or other in-flight traffic.
+
+**Fail loud on disconnect, never hang (a real TS-SDK gap).** When the read loop hits EOF or the stream
+errors, **reject every pending continuation** with a connection-closed error and finish the
+`AsyncStream`s — the published TS SDK leaves outstanding callers hung forever on disconnect, which we
+must not reproduce. Add a **per-request timeout** and honor Swift `Task` cancellation so a stuck peer
+can't wedge a caller. Reap the child process on the client side when driving an external agent.
 
 **Tolerate late and out-of-order notifications.** A `tool_call_update` can arrive *after* the prompt
 response, or after a `session/cancel`, because the agent may emit final updates before terminating
@@ -237,17 +300,32 @@ theoretical). `session/cancel` is itself a **notification**; the turn still ends
 response with `StopReason.cancelled`, possibly after more updates land.
 
 **Framing & errors.** Newline-delimited JSON over stdio (the `ndJsonStream` framing ACP uses — this
-settles the earlier framing question). A `FileHandle`/`Pipe` byte stream; JSON-RPC errors map to
-typed Swift errors; `_meta` is preserved on every message.
+settles the earlier framing question). **One JSON object per `\n`-delimited line, UTF-8, no embedded
+newlines, and crucially NO `Content-Length` headers** — this is *not* LSP framing, so we own the codec
+rather than reusing an LSP `JSONRPC` library. The read side buffers and retains a trailing partial line
+across reads, and tolerates a JSON-escaped slash in method names (`session\/update`). A line that
+fails to parse is logged and skipped, not fatal. JSON-RPC errors map to typed `RequestError`s (§3);
+`_meta` is preserved on every message.
+
+**stdout is sacred — the #1 field failure.** The agent MUST write nothing to stdout but valid ACP
+messages; **all logging goes to stderr.** A stray `print`, a banner, a `dotenv` line, or a progress bar
+on stdout corrupts framing and drops frames. The package exposes a logger/delegate and never prints to
+stdout itself, and we document this loudly for agent authors.
 
 ---
 
 ## 6. Codegen pipeline — build-time, incremental, checked-in
 
-- **Vendored schema.** ACP's `schema.json` is dropped into the repo (e.g. `Schema/acp-v1.json`),
-  generated from the Rust `agent-client-protocol-schema` crate (mirrored at
-  agentclientprotocol.com). Bumping ACP = dropping in a new schema file; nothing else changes by
+- **Vendored schema + routing manifest.** Drop BOTH `schema/v1/schema.json` and `schema/v1/meta.json`
+  into the repo (e.g. `Schema/acp-v1.json`, `Schema/acp-v1.meta.json`) — these are the canonical
+  artifacts attached to the `agentclientprotocol` org's `schema-v*` GitHub releases (Rust-sourced via
+  schemars), **not** a pinned SDK, which is how we pick up the full current method set (the published TS
+  0.4.5 / Rust-classic SDKs lag it). Bumping ACP = dropping in the new pair; nothing else changes by
   hand.
+- **Generate the method-routing table from `meta.json`, never hand-wire it.** `meta.json` carries each
+  method's `x-side`/`x-method` routing, so the dispatch table is derived, not typed by hand — this
+  structurally avoids the class of bug in the TS SDK where `setSessionModel` was wired to
+  `session/set_mode`. Generate `unstable` methods from `meta.unstable.json` into a separate namespace.
 - **Build-time, but a no-op unless the schema changed.** The generator stamps the schema's content
   hash into the generated output; on each run it compares the current schema hash to the stamp and
   exits immediately when unchanged. So a normal build does zero codegen work — real generation fires
@@ -274,9 +352,12 @@ there's nothing to split out.
 
 ```swift
 // One wrapper turns a FoundationModels session into an ACP Agent.
-let agent = FoundationModelsAgent(
-    session: LanguageModelSession(model: SystemLanguageModel.default, tools: myTools))
-try await AgentSideConnection(agent: agent, stream: .stdio).run()
+// The factory hands the agent its connection so it can fire session/update + reverse calls (§4).
+try await AgentSideConnection(stream: .stdio) { conn in
+    FoundationModelsAgent(
+        connection: conn,
+        session: LanguageModelSession(model: SystemLanguageModel.default, tools: myTools))
+}.run()
 ```
 
 `FoundationModelsAgent` conforms to `Agent` (§4) and maps the two models onto each other:
@@ -318,7 +399,10 @@ WWDC 2026).
   and asserts the agent's emitted `session/update` sequence against a golden fixture — no live model
   needed — so protocol-layer correctness (framing, ordering, tool-call pairing, late
   `tool_call_update`, `StopReason`) is tested deterministically. Capture a real run once, replay it
-  forever.
+  forever. Alongside `ReplayTransport`, ship an **`InMemoryTransport`** (a pair of in-process
+  `AsyncStream`s, as `rebornix/acp-swift-sdk` does) so a `Client` and `Agent` can be wired
+  back-to-back in a single test with no pipes or subprocess — the fastest way to exercise the full
+  bidirectional handshake.
 - **Evaluations framework → behavioral quality.** WWDC 2026's **Evaluations framework** quantifies the
   quality of model-driven behavior as prompts change. Pointed at the `FoundationModelsAgent` over the
   local model, it answers what golden fixtures can't: does this prompt reliably produce a well-formed
@@ -358,10 +442,14 @@ WWDC 2026).
   ID newtypes + `unknown` fallbacks; off-the-shelf is less code to own. The checked-in pipeline (§6)
   tilts toward custom — it runs only on a schema change, its output is reviewed as a normal diff, and
   consumers never run it.
-- **Unstable surface:** terminals are **stable** (in v1, gated by `clientCapabilities.terminal`) and
-  first-class here. What's still marked unstable is **elicitation**, **session-config options**, and
-  the list/resume/close-session methods. Generate them behind an `Unstable` namespace, gate behind
-  capability flags, and mark clearly — don't expose them as if settled.
+- **Stable vs unstable (updated to the current schema):** **stable** and first-class here are terminals
+  (gated by `clientCapabilities.terminal`), `session/set_config_option`, `logout`, and the
+  session-management methods (`session/list`, `session/resume`, `session/delete`, `session/close`) —
+  all recently stabilized; `session/set_mode` is **deprecated** in favor of `set_config_option`. What
+  remains **unstable** (only in `meta.unstable.json`) is **elicitation** (`elicitation/*`),
+  **providers/\***, **`session/fork`**, **`nes/*`** (next-edit-suggestions), **`mcp/*`**, and
+  **`document/did*`**. Generate the unstable set behind an `Unstable` namespace, gate behind capability
+  flags, and mark clearly — don't expose them as if settled.
 - **Versioning policy:** how aggressively to track ACP point releases, and whether to vendor multiple
   schema versions or pin one.
 - **Reasoning representation (bridge):** FM's `Transcript` models prompt/response/tools but reasoning
