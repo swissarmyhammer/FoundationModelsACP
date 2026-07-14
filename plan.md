@@ -1,6 +1,6 @@
 # FoundationModelsACP — package spec
 
-**Status:** v0.5 · **Target:** Swift 6, macOS 27, Apple Silicon · **Updated:** 2026-06-28
+**Status:** v0.6 · **Target:** Swift 6, macOS 27, Apple Silicon · **Updated:** 2026-07-14
 
 A standalone Swift Package — **`FoundationModelsACP`** — implementing the Agent Client Protocol (ACP)
 — idiomatic Swift analogs of the ACP types, both protocol roles, and JSON-RPC-over-stdio transport —
@@ -385,6 +385,69 @@ try await AgentSideConnection(stream: .stdio) { conn in
 `cancel` maps to FM session cancellation; the turn still terminates through the prompt response with
 `StopReason.cancelled` (§5).
 
+### 7.1 One execution path: the bridge drives only `LanguageModelSession`
+
+There is deliberately **no engine protocol**. `FoundationModelsAgent` always drives a real
+`LanguageModelSession` — the identical code path for the one-liner above and for a full product like
+**`FoundationModelsAgentHarness`** (its plan §8 moves recording/gating into a `LanguageModel`
+*handle*, so its sessions are ordinary Apple sessions with nothing to hide). What varies is only
+*where sessions come from*, expressed as a small provider the constructor takes:
+
+```swift
+public struct SessionProvider: Sendable {
+    // Required. The cwd arrives in session/new; the provider builds the session for it
+    // (config, tools, instructions) and names it.
+    public var makeSession: @Sendable (AbsolutePath, [MCPServerConfig]) async throws
+        -> (SessionId, LanguageModelSession)
+    // Optional store hooks — presence gates the session-management capabilities.
+    public var listSessions: (@Sendable () async throws -> [SessionSummary])?
+    public var restoreSession: (@Sendable (SessionId) async throws -> LanguageModelSession)?
+        // typically LanguageModelSession(model:tools:transcript:)
+    public var deleteSession: (@Sendable (SessionId) async throws -> Void)?
+
+    // Optional. Invoked by the bridge when a prompt turn completes, with the
+    // session's final Transcript. Providers use it for turn-boundary work the
+    // bridge can see but they cannot — e.g. the harness syncs Router's recording
+    // model handle so the turn-final response is durably recorded (channel
+    // events are write-only at the LanguageModel boundary; see the harness
+    // plan §8). Absence changes nothing.
+    public var onTurnEnded: (@Sendable (SessionId, Transcript) async -> Void)?
+}
+```
+
+- **The one-liner stays.** `FoundationModelsAgent(connection:session:)` is sugar for a provider
+  whose `makeSession` returns that session and whose hooks are nil — the flagship
+  "Apple-native → ACP for free" story is unchanged on the wire and in code.
+- **Overlapping `session/prompt` requests serialize naturally** on the bridge actor — a
+  `LanguageModelSession` runs one turn at a time; each pending request resolves at its own turn's
+  end. No queue abstraction leaks into this package.
+- **Session management forwards to the hooks**; absent hooks → capability off / method-not-found
+  (§4). Consumers with a durable store (the harness's `TranscriptStore`) get full `session/list` /
+  `load` / `resume` / `delete`; the bare one-liner doesn't pretend to.
+- **Recording is invisible here.** The harness's recording happens inside the `LanguageModel` its
+  sessions are built over; this package neither knows nor cares.
+
+This supersedes an earlier `ACPTurnEngine` draft of this section: a protocol over "turn engines"
+created a second execution path through the bridge, while a session *provider* keeps exactly one.
+Dependency direction is unchanged: this package keeps zero family dependencies — the provider's
+currency is `LanguageModelSession` itself; consumers (the harness, the runtime) depend on this
+package.
+
+### 7.2 Spec drift since v0.5 (checked 2026-07-14)
+
+The schema moved after this plan's 2026-06-28 draft; vendor **schema v1.19.x** and note:
+
+- **Stabilized since:** request cancellation (v1.17.0), boolean session config options (v1.18.0);
+  ID naming conventions unified across the schema (affects generated newtypes — regenerate, don't
+  patch). Elicitation gained option descriptions but remains unstable (v1.19.0).
+- **ACP v2 is in active RFD** (collection went Active 2026-07-02): `session/resume` (with
+  `replayFrom` cursors) **replaces** `session/load`; `session/list` / `resume` / `close` become
+  **baseline** whenever sessions are supported; permission requests gain required titles +
+  structured subjects; typed config values; Content types align with MCP. Consequence for this
+  package: the §7.1 session-management seam is not optional polish — it is the v2 baseline shape —
+  and the codegen pipeline (§6) should be ready to vendor a second (v2) schema behind a clearly
+  labeled unstable namespace when it publishes. Do not chase v2 RFDs into the stable surface yet.
+
 ---
 
 ## 8. Testing & evaluation — recorded transcripts + local-model evals
@@ -442,14 +505,16 @@ WWDC 2026).
   ID newtypes + `unknown` fallbacks; off-the-shelf is less code to own. The checked-in pipeline (§6)
   tilts toward custom — it runs only on a schema change, its output is reviewed as a normal diff, and
   consumers never run it.
-- **Stable vs unstable (updated to the current schema):** **stable** and first-class here are terminals
-  (gated by `clientCapabilities.terminal`), `session/set_config_option`, `logout`, and the
-  session-management methods (`session/list`, `session/resume`, `session/delete`, `session/close`) —
-  all recently stabilized; `session/set_mode` is **deprecated** in favor of `set_config_option`. What
-  remains **unstable** (only in `meta.unstable.json`) is **elicitation** (`elicitation/*`),
-  **providers/\***, **`session/fork`**, **`nes/*`** (next-edit-suggestions), **`mcp/*`**, and
-  **`document/did*`**. Generate the unstable set behind an `Unstable` namespace, gate behind capability
-  flags, and mark clearly — don't expose them as if settled.
+- **Stable vs unstable (updated to schema v1.19, 2026-07-14):** **stable** and first-class here are
+  terminals (gated by `clientCapabilities.terminal`), `session/set_config_option`, `logout`, the
+  session-management methods (`session/list`, `session/resume`, `session/delete`, `session/close`),
+  **request cancellation** (v1.17.0), and **boolean session config options** (v1.18.0);
+  `session/set_mode` is **deprecated** in favor of `set_config_option`. What remains **unstable**
+  (only in `meta.unstable.json`) is **elicitation** (`elicitation/*` — gained option descriptions in
+  v1.19.0, still unstable), **providers/\***, **`session/fork`**, **`nes/*`**
+  (next-edit-suggestions), **`mcp/*`**, and **`document/did*`**. Generate the unstable set behind an
+  `Unstable` namespace, gate behind capability flags, and mark clearly — don't expose them as if
+  settled. See §7.2 for the v2 RFD trajectory.
 - **Versioning policy:** how aggressively to track ACP point releases, and whether to vendor multiple
   schema versions or pin one.
 - **Reasoning representation (bridge):** FM's `Transcript` models prompt/response/tools but reasoning
