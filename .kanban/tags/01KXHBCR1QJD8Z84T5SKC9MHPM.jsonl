@@ -1,0 +1,1 @@
+{"id":"01KXHBCR1Q0TRVH8PT22QDEPZH","timestamp":"2026-07-14T22:19:07.191939Z","op":"create","item_id":"01KXHBCR1QJD8Z84T5SKC9MHPM","forward_patch":"--- original\n+++ modified\n@@ -0,0 +1,2 @@\n+color: e4e669\n+tag_name: '1'\n","reverse_patch":"--- original\n+++ modified\n@@ -1,2 +0,0 @@\n-color: e4e669\n-tag_name: '1'\n","transaction_id":null}
