@@ -165,7 +165,7 @@ public struct TranscriptBuilder {
     private func toolOutputEntry(from update: ToolCallUpdate) -> Transcript.Entry {
         let id = update.toolCallId.rawValue
         let toolName = toolNamesByCallId[id] ?? ""
-        let segments = (update.content ?? []).compactMap(Self.segment(fromToolContent:))
+        let segments = (update.content ?? []).compactMap(Self.segment(from:))
         return .toolOutput(Transcript.ToolOutput(id: id, toolName: toolName, segments: segments))
     }
 
@@ -215,7 +215,7 @@ public struct TranscriptBuilder {
     /// - Parameter content: The tool-call content to map.
     /// - Returns: A text segment, or nil for diff, terminal, and non-text
     ///   content, which have no transcript segment form.
-    private static func segment(fromToolContent content: ToolCallContent) -> Transcript.Segment? {
+    private static func segment(from content: ToolCallContent) -> Transcript.Segment? {
         guard case .content(let wrapper) = content,
             case .text(let text) = wrapper.content
         else {
