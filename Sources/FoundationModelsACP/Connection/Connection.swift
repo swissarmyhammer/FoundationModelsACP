@@ -204,6 +204,23 @@ public actor Connection {
             return
         }
         let id = fields["id"]
+        // The version check mirrors the write side, which stamps every
+        // outgoing envelope with `"jsonrpc": "2.0"`.
+        guard fields["jsonrpc", default: .null] == .string("2.0") else {
+            logger.log("Connection: rejecting message without jsonrpc 2.0 version")
+            if fields["method"] != nil {
+                // Request-shaped: JSON-RPC answers malformed requests -32600.
+                if let id {
+                    await respond(id: id, outcome: .failure(.invalidRequest))
+                }
+            } else if let id, fields["result"] != nil || fields["error"] != nil {
+                // Response-shaped: never answer a response — the id could
+                // collide with one of the peer's own calls. Fail the awaiting
+                // caller loud instead of leaving it hung (no-op if unknown).
+                fail(id: id, with: RequestError.invalidRequest)
+            }
+            return
+        }
         if case .string(let method) = fields["method", default: .null] {
             if let id {
                 dispatchRequest(id: id, method: method, params: fields["params"])

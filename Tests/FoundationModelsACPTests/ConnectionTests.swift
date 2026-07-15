@@ -228,6 +228,107 @@ import FoundationModelsACP
     _ = agent
 }
 
+@Test(.timeLimit(.minutes(1))) func handlerAuthRequiredErrorRoundTripsToCaller() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let agent = await Connection(
+        transport: agentEnd,
+        requestHandler: { _, _ in throw RequestError.authRequired }
+    )
+    let client = await Connection(transport: clientEnd)
+
+    do {
+        _ = try await client.request(method: "session/new")
+        Issue.record("request should have failed with auth-required")
+    } catch let error as RequestError {
+        #expect(error == RequestError.authRequired)
+    }
+    _ = agent
+}
+
+@Test(.timeLimit(.minutes(1))) func messageWithoutJsonrpcVersionIsAnsweredInvalidRequest() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let agent = await Connection(transport: agentEnd, requestHandler: { _, _ in .bool(true) })
+    let reader = WireReader(clientEnd)
+
+    // No `jsonrpc` member: the request must be rejected, not dispatched —
+    // a result response here would prove the handler ran.
+    try await send(.object(["id": .number(5), "method": .string("hello")]), over: clientEnd)
+
+    let response = try #require(try await reader.next())
+    guard case .object(let fields) = response else {
+        Issue.record("expected an error response object, got \(response)")
+        return
+    }
+    #expect(fields["id"] == .number(5))
+    guard case .object(let errorFields) = fields["error", default: .null] else {
+        Issue.record("expected an error member in \(response)")
+        return
+    }
+    #expect(errorFields["code"] == .number(-32600))
+    _ = agent
+}
+
+@Test(.timeLimit(.minutes(1))) func messageWithWrongJsonrpcVersionIsAnsweredInvalidRequest() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let agent = await Connection(transport: agentEnd, requestHandler: { _, _ in .bool(true) })
+    let reader = WireReader(clientEnd)
+
+    try await send(
+        .object(["jsonrpc": .string("1.0"), "id": .number(6), "method": .string("hello")]),
+        over: clientEnd
+    )
+
+    let response = try #require(try await reader.next())
+    guard case .object(let fields) = response else {
+        Issue.record("expected an error response object, got \(response)")
+        return
+    }
+    #expect(fields["id"] == .number(6))
+    guard case .object(let errorFields) = fields["error", default: .null] else {
+        Issue.record("expected an error member in \(response)")
+        return
+    }
+    #expect(errorFields["code"] == .number(-32600))
+    _ = agent
+}
+
+@Test(.timeLimit(.minutes(1))) func responseWithoutJsonrpcVersionFailsCallerInsteadOfHanging() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let client = await Connection(transport: clientEnd)
+    let reader = WireReader(agentEnd)
+
+    async let answer = client.request(method: "ping")
+    let request = try await reader.next()
+    let id = try #require(requestID(of: request))
+
+    // A response-shaped envelope without the version: the awaiting caller
+    // must fail loud immediately, not hang (timeouts are opt-in).
+    try await send(.object(["id": id, "result": .bool(true)]), over: agentEnd)
+    do {
+        _ = try await answer
+        Issue.record("request should have failed on the unversioned response")
+    } catch let error as RequestError {
+        #expect(error.code == -32600)
+    }
+
+    // And no -32600 reply may be echoed back — JSON-RPC only answers
+    // requests, and the id could collide with one of the peer's own calls.
+    // The next message on the wire must be the next request, nothing else.
+    async let second = client.request(method: "ping2")
+    let next = try #require(try await reader.next())
+    guard case .object(let fields) = next else {
+        Issue.record("expected the next request envelope, got \(next)")
+        return
+    }
+    #expect(fields["method"] == .string("ping2"))
+    let secondID = try #require(fields["id"])
+    try await send(
+        .object(["jsonrpc": .string("2.0"), "id": secondID, "result": .bool(true)]),
+        over: agentEnd
+    )
+    #expect(try await second == .bool(true))
+}
+
 @Test func requestErrorProvidesSpecCataloguedConstructors() {
     #expect(RequestError.parseError.code == -32700)
     #expect(RequestError.invalidRequest.code == -32600)
