@@ -1397,37 +1397,58 @@ extension Emitter {
         ".\(String(describing: side))"
     }
 
+    /// Assembles a rendered table declaration.
+    ///
+    /// Both routing tables share this builder: header lines, one line block
+    /// per entry, footer lines, joined into one declaration.
+    ///
+    /// - Parameters:
+    ///   - header: The doc comment and opening lines.
+    ///   - entries: The entries to render, in emission order.
+    ///   - entryLines: Produces one entry's rendered lines.
+    ///   - footer: The closing lines.
+    /// - Returns: The joined declaration text.
+    private static func tableDeclaration<Entry>(
+        header: [String],
+        entries: [Entry],
+        entryLines: (Entry) -> [String],
+        footer: [String]
+    ) -> String {
+        (header + entries.flatMap(entryLines) + footer).joined(separator: "\n")
+    }
+
     /// Renders the stable method-routing table.
     ///
     /// - Parameter methods: The entries in emission order.
     /// - Returns: The rendered `ACPMethodTable` declaration.
     fileprivate static func methodTableDeclaration(_ methods: [MethodModel]) -> String {
-        var lines = [
-            "/// The method-routing table for the stable ACP v1 surface.",
-            "///",
-            "/// Derived from the vendored `meta.json` routing manifest and the schema's",
-            "/// `x-side`/`x-method` annotations — never hand-wired.",
-            "public enum ACPMethodTable {",
-            "    /// Every stable method, ordered agent, client, protocol and by wire",
-            "    /// method name within each side.",
-            "    public static let methods: [MethodInfo] = [",
-        ]
-        for method in methods {
-            lines.append(contentsOf: [
-                "        MethodInfo(",
-                "            wireMethod: \(stringLiteral(method.wireMethod)),",
-                "            handlerName: \(stringLiteral(method.handlerName)),",
-                "            side: \(sideCase(method.side)),",
-                "            kind: .\(method.kind.rawValue),",
-                "            paramsTypeName: \(stringLiteral(method.paramsTypeName)),",
-                "            resultTypeName: \(method.resultTypeName.map(stringLiteral) ?? "nil"),",
-                "            deprecationMessage: \(method.deprecationMessage.map(stringLiteral) ?? "nil")",
-                "        ),",
-            ])
-        }
-        lines.append("    ]")
-        lines.append("}")
-        return lines.joined(separator: "\n")
+        tableDeclaration(
+            header: [
+                "/// The method-routing table for the stable ACP v1 surface.",
+                "///",
+                "/// Derived from the vendored `meta.json` routing manifest and the schema's",
+                "/// `x-side`/`x-method` annotations — never hand-wired.",
+                "public enum ACPMethodTable {",
+                "    /// Every stable method, ordered agent, client, protocol and by wire",
+                "    /// method name within each side.",
+                "    public static let methods: [MethodInfo] = [",
+            ],
+            entries: methods,
+            entryLines: { method in
+                [
+                    "        MethodInfo(",
+                    "            wireMethod: \(stringLiteral(method.wireMethod)),",
+                    "            handlerName: \(stringLiteral(method.handlerName)),",
+                    "            side: \(sideCase(method.side)),",
+                    "            kind: .\(method.kind.rawValue),",
+                    "            paramsTypeName: \(stringLiteral(method.paramsTypeName)),",
+                    "            resultTypeName: \(method.resultTypeName.map(stringLiteral) ?? "nil"),",
+                    "            deprecationMessage: \(method.deprecationMessage.map(stringLiteral) ?? "nil")",
+                    "        ),",
+                ]
+            },
+            footer: ["    ]", "}"]
+        )
     }
 
     /// Renders the `Unstable` namespace and its method table.
@@ -1435,32 +1456,34 @@ extension Emitter {
     /// - Parameter methods: The unstable-only entries in emission order.
     /// - Returns: The rendered `Unstable` declaration.
     fileprivate static func unstableNamespaceDeclaration(_ methods: [UnstableMethodModel]) -> String {
-        var lines = [
-            "/// Protocol surface upstream ACP has not stabilized.",
-            "///",
-            "/// Everything in this namespace is unsettled — wire names and shapes can",
-            "/// change between releases — so callers must gate use behind explicitly",
-            "/// negotiated capabilities, never protocol version alone.",
-            "public enum Unstable {",
-            "    /// Methods routed only by the vendored `meta.unstable.json` manifest.",
-            "    ///",
-            "    /// The vendored stable schema defines no parameter or result types for",
-            "    /// them, so entries carry names and side only.",
-            "    public enum MethodTable {",
-            "        /// Every unstable-only method, ordered agent, client, protocol and",
-            "        /// by wire method name within each side.",
-            "        public static let methods: [UnstableMethodInfo] = [",
-        ]
-        for method in methods {
-            lines.append(contentsOf: [
-                "            UnstableMethodInfo(",
-                "                wireMethod: \(stringLiteral(method.wireMethod)),",
-                "                handlerName: \(stringLiteral(method.handlerName)),",
-                "                side: \(sideCase(method.side))",
-                "            ),",
-            ])
-        }
-        lines.append(contentsOf: ["        ]", "    }", "}"])
-        return lines.joined(separator: "\n")
+        tableDeclaration(
+            header: [
+                "/// Protocol surface upstream ACP has not stabilized.",
+                "///",
+                "/// Everything in this namespace is unsettled — wire names and shapes can",
+                "/// change between releases — so callers must gate use behind explicitly",
+                "/// negotiated capabilities, never protocol version alone.",
+                "public enum Unstable {",
+                "    /// Methods routed only by the vendored `meta.unstable.json` manifest.",
+                "    ///",
+                "    /// The vendored stable schema defines no parameter or result types for",
+                "    /// them, so entries carry names and side only.",
+                "    public enum MethodTable {",
+                "        /// Every unstable-only method, ordered agent, client, protocol and",
+                "        /// by wire method name within each side.",
+                "        public static let methods: [UnstableMethodInfo] = [",
+            ],
+            entries: methods,
+            entryLines: { method in
+                [
+                    "            UnstableMethodInfo(",
+                    "                wireMethod: \(stringLiteral(method.wireMethod)),",
+                    "                handlerName: \(stringLiteral(method.handlerName)),",
+                    "                side: \(sideCase(method.side))",
+                    "            ),",
+                ]
+            },
+            footer: ["        ]", "    }", "}"]
+        )
     }
 }
