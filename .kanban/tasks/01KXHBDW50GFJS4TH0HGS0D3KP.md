@@ -1,9 +1,48 @@
 ---
+comments:
+- actor: wballard
+  id: 01kxkjvdk95g85y7ggydx3pt4f
+  text: |-
+    Picked up. Probed FM's REAL Transcript API via swift-symbolgraph-extract against the Xcode-beta SDK (arm64-apple-macosx27) — NOT invented. Key discoveries vs the card's illustrative names:
+
+    RESOLVED §10 REASONING QUESTION: `Transcript.Entry` has a FIRST-CLASS `.reasoning(Transcript.Reasoning)` case (alongside .instructions/.prompt/.toolCalls/.toolOutput/.response). So the bridge maps reasoning DIRECTLY from `.reasoning` entries — no synthesis from a `.structure` segment needed. `Transcript.Reasoning` = { id, segments:[Segment], signature:Data?, metadata }.
+
+    Verified-real shapes (all constructible — public inits):
+    - `Transcript.Entry`: enum { instructions, prompt, toolCalls, toolOutput, response, reasoning } — needs @unknown default (resilient).
+    - `Transcript.Segment`: enum { text(TextSegment), structure(StructuredSegment), attachment(AttachmentSegment), custom(any CustomSegment) }.
+    - `TextSegment{ id, content:String }`; `StructuredSegment{ id, source:String, schemaName:String, content:GeneratedContent }`.
+    - `Response{ id, assetIDs, segments:[Segment] }`; `Reasoning{ segments:[Segment] }`.
+    - `ToolCall{ id:String, toolName:String, arguments:GeneratedContent }`; `ToolCalls` = Collection<ToolCall> (one entry can carry several calls); `ToolOutput{ id:String, toolName:String, segments:[Segment] }`. Correlation is by id (ToolOutput.id == the ToolCall.id it answers).
+    - `GeneratedContent`: `init(json:String)` + `.jsonString` — the bridge round-trips tool args/structured content as JSON via JSONValue.
+
+    STREAMING + CANCEL (critical):
+    - `session.streamResponse(to: String) -> ResponseStream<String>`. Each streamed `Snapshot` carries `.transcriptEntries: ArraySlice<Transcript.Entry>` — THE turn's growing entries. That is the mapping source (not session.transcript, which would include prior turns and cause the per-turn mapper to re-emit).
+    - There is NO `session.cancel()`. Cancellation is via Swift structured concurrency: cancel the Task iterating the ResponseStream → iteration throws CancellationError → FM stops. So the bridge stores the active generation Task per session and cancel() cancels it.
+    - StopReason signals: normal end → .endTurn; `LanguageModelSession.GenerationError.exceededContextWindowSize` → .maxTokens; `.refusal`/`.guardrailViolation` → .refusal; Task cancellation → .cancelled.
+
+    DESIGN (next): new `Bridge/TranscriptMapper.swift` = pure, stateful (consumedCount + tool correlation) seam `consume([Transcript.Entry]) -> [SessionUpdate]` — the SCRIPTED-entry seam the card mandates (golden tests feed it directly; no live model, no SIGTRAP). Agent gets internal `runTurn(for:generate:)` taking a `TurnGenerator` seam (`(deliver) async throws -> Transcript`) — production impl drives streamResponse + snapshot.transcriptEntries; tests supply scripted deliver batches + a terminal outcome, and observe emitted updates through a real wired ClientSideConnection.updates(for:). This is NOT a fake LanguageModelSession / engine protocol (§7.1-forbidden) — it is the internal turn-driver seam the card asks for. Prompt caps advertised: text+resourceLink baseline, embeddedContext=true; image/audio=false → unadvertised image/audio blocks answer -32602 before any streaming.
+  timestamp: 2026-07-15T19:07:56.905106+00:00
+- actor: wballard
+  id: 01kxkkn6zm50zmrysmn5z8qttp
+  text: |-
+    Implementation landed (green). Files:
+    - NEW Sources/.../Bridge/TranscriptMapper.swift — pure, stateful `consume([Transcript.Entry]) -> [SessionUpdate]` seam (consumedCount dedup for growing transcripts). Mapping: .response .text→agent_message_chunk; .reasoning .text→agent_thought_chunk (FIRST-CLASS .reasoning entry, no synthesis); .toolCalls→tool_call(status .pending, rawInput=args JSON via GeneratedContent.jsonString→JSONValue); .toolOutput→tool_call_update(status .completed, content from output segments) correlated by shared id; a `.structure` segment in a response whose schemaName/source contains "plan" and decodes as an ACP Plan→plan; .instructions/.prompt→[] (input, not output); attachment/custom segments→skipped.
+    - NEW Sources/.../Bridge/PromptInputMapper.swift — `render([ContentBlock], PromptCapabilities) -> String`. Data-driven capability gate: text+resource_link baseline; resource↔embeddedContext; image↔image; audio↔audio; unknown→reject. Any unadvertised block → RequestError code -32602 (with a `reason` in data) BEFORE any streaming. Renders text verbatim, resourceLink as "[resource: name](uri)", embedded text resource inline.
+    - Sources/.../Bridge/FoundationModelsAgent.swift — real `prompt`: renders/validates input (may throw -32602), then serializeTurn → `runTurn(for:generate:)`. `runTurn` runs the generator as a registered `Task<Transcript, any Error>` (stored per-session as activeGeneration, created+stored with no await between → cancel can't miss it), feeds delivered entries through TranscriptMapper → connection.sessionUpdate, derives StopReason, then invokes provider.onTurnEnded(sessionId, finalTranscript). `cancel(_:)` cancels activeGeneration (FM has NO session.cancel — cancellation flows through Task cancellation into the ResponseStream iteration). Production generator `streamTurn` iterates session.streamResponse(to:), delivering snapshot.transcriptEntries.dropLast() as entries settle then the whole turn at stream end, and returns session.transcript for onTurnEnded. initialize now advertises promptCapabilities (embeddedContext=true, image/audio=false).
+
+    STOPREASON — CORRECTNESS FIX vs the card's illustrative names: `LanguageModelSession.GenerationError` is DEPRECATED in macOS 27; the real thrown type is `LanguageModelError`. `stopReason(error:cancelled:)` matches `LanguageModelError`: .contextSizeExceeded→.maxTokens; .refusal/.guardrailViolation→.refusal; CancellationError or cancelled flag→.cancelled; nil→.endTurn; anything else propagates. cancelled wins over any error (so a cancel that surfaced as CancellationError still answers .cancelled).
+
+    TESTING SEAM (no fake LanguageModelSession, no engine protocol — §7.1 honored): the internal `TurnGenerator` seam (`(deliver) async throws -> Transcript`) lets tests script transcript-entry batches + terminal outcome and observe emitted updates through a REAL wired ClientSideConnection.updates(for:). No concurrent real turns → no SIGTRAP. Cancellation resilience of trailing updates verified: InMemoryTransport.write uses a non-suspending yield that ignores task cancellation, so updates delivered after cancel still land.
+
+    Tests (all deterministic): TranscriptMappingTests (golden text+reasoning+2-tool-call sequence; id correlation; input entries→nothing; plan segment→plan; growing-transcript dedup), PromptInputMappingTests (multi-block render; -32602 for audio/image/unknown/embedded-off), StopReasonTests (pure fn for all 4 + CancellationError + unexpected-propagates; e2e endTurn with delivery, refusal, maxTokens, and cancel-mid-turn→trailing-update-then-cancelled), OnTurnEndedTests (final transcript received once; nil hook no-op).
+
+    VERIFICATION: swift build --build-tests 0 warnings/0 errors. swift test = 137 FoundationModelsACPTests (was 114; +23) + 108 ACPGenerateTests = 245 pass, 0 failures. FM API probed via swift-symbolgraph-extract; no divergence. Note for downstream (^gg0pz84 ACP→Transcript, ^0gxpjd4 tool-bridge, ^e2x6ra0 e2e): the mapping is the inverse to implement there; reasoning is a first-class Transcript.Reasoning entry; tool correlation is by shared id; StopReason source is LanguageModelError (not the deprecated GenerationError).
+  timestamp: 2026-07-15T19:22:02.100296+00:00
 depends_on:
 - 01KXHBDAK0NQ5RA2NWTF1ESXQP
 - 01KXHBC7FYJYRM3VNBPR4FM4NJ
-position_column: todo
-position_ordinal: 8f80
+position_column: doing
+position_ordinal: '80'
 title: 'Bridge prompt turn: Transcript → session/update mapping, StopReason, cancel'
 ---
 ## What

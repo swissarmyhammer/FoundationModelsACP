@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModels
+import Synchronization
 
 /// An ACP ``Agent`` that bridges a FoundationModels ``LanguageModelSession`` to
 /// the Agent Client Protocol (spec §7).
@@ -10,13 +11,14 @@ import FoundationModels
 /// come from is supplied by a ``SessionProvider``; there is deliberately no
 /// engine protocol — the bridge always drives a real session.
 ///
-/// This is the skeleton: `initialize` advertises capabilities and `newSession`
-/// tracks provider-built sessions, but the full turn — driving
-/// `streamResponse(to:)`, mapping the growing `Transcript` to `session/update`
-/// notifications, deriving the `StopReason`, forwarding `cancel` to FM
-/// cancellation, and invoking ``SessionProvider/onTurnEnded`` — lands in a
-/// follow-on task. `prompt` here drives a minimal turn under the real
-/// serialization so the turn chain is exercised end to end.
+/// A `session/prompt` drives `streamResponse(to:)`; the request stays open for
+/// the whole turn while the bridge fires `session/update` notifications off the
+/// growing `Transcript` (via ``TranscriptMapper``). The turn answers with the
+/// derived ``StopReason``, a `session/cancel` cancels the running generation,
+/// and ``SessionProvider/onTurnEnded`` sees the final transcript. The mapping is
+/// driven through a ``TurnGenerator`` seam so tests script transcript entries
+/// deterministically without a live model (two concurrent turns on one session
+/// trap the process).
 public actor FoundationModelsAgent: Agent {
     /// One tracked session: its live model session and the tail of its
     /// serialized turn chain.
@@ -29,6 +31,13 @@ public actor FoundationModelsAgent: Agent {
         /// publishes its own, giving strict per-session FIFO ordering.
         var turnTail: Task<Void, Never>?
 
+        /// The running turn's generation task, or `nil` when no turn is
+        /// generating. Cancelling it propagates cancellation into the response
+        /// stream, which is how a `session/cancel` reaches FoundationModels
+        /// (there is no explicit session-cancel API). Its value is the turn's
+        /// final transcript.
+        var activeGeneration: Task<Transcript, any Error>?
+
         /// Wraps a live session with an idle turn chain.
         ///
         /// - Parameter session: The live model session for this ACP session.
@@ -39,6 +48,17 @@ public actor FoundationModelsAgent: Agent {
 
     /// Identifies this bridge to clients during initialization.
     private static let agentInfo = Implementation(name: "FoundationModelsACP", version: "0.1.0")
+
+    /// The prompt content the bridge can render into a FoundationModels turn.
+    ///
+    /// Text and resource links are the baseline; embedded resources render as
+    /// inline context. Image and audio are not rendered into the text prompt, so
+    /// they stay off and a prompt carrying one is rejected with `-32602`.
+    static let promptCapabilities = PromptCapabilities(
+        audio: false,
+        embeddedContext: true,
+        image: false
+    )
 
     /// The connection the factory handed this agent, for reverse Agent→Client
     /// calls (`session/update`, `session/request_permission`, `fs/*`,
@@ -80,11 +100,12 @@ public actor FoundationModelsAgent: Agent {
     /// Negotiates the protocol version and advertises capabilities.
     ///
     /// Session-management capabilities are advertised if and only if the
-    /// corresponding provider hook is present; prompt capabilities stay at the
-    /// baseline (text and resource links) the bridge maps today. Advertising a
-    /// session-management capability here does not yet forward its method — that
-    /// forwarding is a follow-on task — so an unadvertised method still answers
-    /// method-not-found via the ``Agent`` protocol defaults.
+    /// corresponding provider hook is present; prompt capabilities advertise the
+    /// content the bridge renders (``promptCapabilities``), which `prompt` then
+    /// enforces. Advertising a session-management capability here does not yet
+    /// forward its method — that forwarding is a follow-on task — so an
+    /// unadvertised method still answers method-not-found via the ``Agent``
+    /// protocol defaults.
     ///
     /// - Parameter params: The client's initialization request.
     /// - Returns: The negotiated protocol version and advertised capabilities.
@@ -94,6 +115,7 @@ public actor FoundationModelsAgent: Agent {
         InitializeResponse(
             protocolVersion: .latest,
             agentCapabilities: AgentCapabilities(
+                promptCapabilities: Self.promptCapabilities,
                 sessionCapabilities: SessionCapabilities(
                     delete: provider.deleteSession.map { _ in SessionDeleteCapabilities() },
                     list: provider.listSessions.map { _ in SessionListCapabilities() },
@@ -118,26 +140,42 @@ public actor FoundationModelsAgent: Agent {
 
     /// Runs one prompt turn, serialized against other turns on the same session.
     ///
-    /// This drives a minimal turn so the per-session serialization is exercised;
-    /// the full `Transcript` → `session/update` mapping and `StopReason`
-    /// derivation land in a follow-on task.
+    /// The prompt's content blocks are validated and rendered into the model
+    /// prompt before the turn is enqueued, so an unadvertised block type fails
+    /// with `-32602` without touching the model. The turn then streams the
+    /// response, firing `session/update` notifications off the growing
+    /// transcript, and answers with the derived ``StopReason``.
     ///
-    /// - Parameter params: The prompt request naming its session.
-    /// - Returns: The turn's outcome.
-    /// - Throws: ``RequestError/invalidParams`` when the session is unknown.
+    /// - Parameter params: The prompt request naming its session and content.
+    /// - Returns: The turn's outcome, carrying the stop reason.
+    /// - Throws: ``RequestError`` with code `-32602` when the session is unknown
+    ///   or a content block's type is not advertised, or any unexpected model
+    ///   error.
     public func prompt(_ params: PromptRequest) async throws -> PromptResponse {
-        try await serializeTurn(for: params.sessionId) {
-            PromptResponse(stopReason: .endTurn)
+        let renderedPrompt = try PromptInputMapper.render(
+            params.prompt,
+            capabilities: Self.promptCapabilities
+        )
+        let sessionId = params.sessionId
+        return try await serializeTurn(for: sessionId) {
+            try await self.runTurn(for: sessionId) { deliver in
+                try await self.streamTurn(for: sessionId, prompt: renderedPrompt, deliver: deliver)
+            }
         }
     }
 
-    /// Handles a cancellation notification.
+    /// Cancels the running turn on a session, if any.
     ///
-    /// Mapping cancellation onto FoundationModels session cancellation lands in a
-    /// follow-on task; the minimal turn has nothing to interrupt.
+    /// FoundationModels has no explicit session-cancel API; cancelling the
+    /// generation task propagates through the response-stream iteration, so the
+    /// model stops and the turn terminates through its prompt response with
+    /// ``StopReason/cancelled`` — possibly after final updates land (spec §5).
+    /// An unknown session or an idle one is a no-op.
     ///
-    /// - Parameter params: The cancellation notification.
-    public func cancel(_ params: CancelNotification) async {}
+    /// - Parameter params: The cancellation notification naming the session.
+    public func cancel(_ params: CancelNotification) async {
+        sessions[params.sessionId]?.activeGeneration?.cancel()
+    }
 
     // MARK: - Turn serialization
 
@@ -172,4 +210,169 @@ public actor FoundationModelsAgent: Agent {
         state.turnTail = Task { _ = try? await turn.value }
         return try await turn.value
     }
+
+    // MARK: - Turn execution
+
+    /// Runs one prompt turn against the ``TurnGenerator`` seam: streams its
+    /// transcript entries into `session/update` notifications, derives the stop
+    /// reason, and hands the final transcript to ``SessionProvider/onTurnEnded``.
+    ///
+    /// The generator runs as a registered task so ``cancel(_:)`` can cancel it
+    /// mid-turn; trailing updates it delivers after cancellation still reach the
+    /// client, and the turn resolves with ``StopReason/cancelled``. Production
+    /// supplies the real streaming generator; tests supply scripted entries.
+    ///
+    /// - Parameters:
+    ///   - sessionId: The session the turn belongs to.
+    ///   - generate: The turn's generator, delivering settled transcript entries
+    ///     and returning the session's final transcript.
+    /// - Returns: The turn's outcome, carrying the derived stop reason.
+    /// - Throws: Any unexpected error the generator raised that is not a
+    ///   recognized stop-reason signal.
+    func runTurn(
+        for sessionId: SessionId,
+        generate: @escaping TurnGenerator
+    ) async throws -> PromptResponse {
+        let connection = self.connection
+        let mapper = Mutex(TranscriptMapper())
+        let latestEntries = Mutex<[Transcript.Entry]>([])
+
+        let deliver: @Sendable ([Transcript.Entry]) async -> Void = { entries in
+            latestEntries.withLock { $0 = entries }
+            let updates = mapper.withLock { $0.consume(entries) }
+            for update in updates {
+                try? await connection.sessionUpdate(
+                    SessionNotification(sessionId: sessionId, update: update)
+                )
+            }
+        }
+
+        let generation = registerGeneration(for: sessionId) {
+            try await generate(deliver)
+        }
+        var failure: (any Error)?
+        var finalTranscript: Transcript?
+        do {
+            finalTranscript = try await generation.value
+        } catch {
+            failure = error
+        }
+        clearGeneration(for: sessionId)
+
+        let stopReason = try Self.stopReason(error: failure, cancelled: generation.isCancelled)
+        let transcript = finalTranscript ?? Transcript(entries: latestEntries.withLock { $0 })
+        if let onTurnEnded = provider.onTurnEnded {
+            await onTurnEnded(sessionId, transcript)
+        }
+        return PromptResponse(stopReason: stopReason)
+    }
+
+    /// Starts a turn's generation task and records it for cancellation, with no
+    /// suspension between creation and recording so a concurrent ``cancel(_:)``
+    /// cannot miss it.
+    ///
+    /// - Parameters:
+    ///   - sessionId: The session whose generation to record.
+    ///   - work: The generation body, yielding the turn's final transcript.
+    /// - Returns: The started task.
+    private func registerGeneration(
+        for sessionId: SessionId,
+        _ work: @escaping @Sendable () async throws -> Transcript
+    ) -> Task<Transcript, any Error> {
+        let generation = Task { try await work() }
+        sessions[sessionId]?.activeGeneration = generation
+        return generation
+    }
+
+    /// Clears a session's recorded generation task once its turn has finished.
+    ///
+    /// - Parameter sessionId: The session whose generation to clear.
+    private func clearGeneration(for sessionId: SessionId) {
+        sessions[sessionId]?.activeGeneration = nil
+    }
+
+    /// Drives the real model turn: streams the response, delivering the turn's
+    /// settled transcript entries so the caller maps them, and returns the
+    /// session's final transcript.
+    ///
+    /// Each streamed snapshot carries the turn's growing entries; all but the
+    /// still-generating last entry are delivered as they settle, then the whole
+    /// turn is delivered once the stream ends. Cancellation is checked each
+    /// snapshot so a cancelled turn stops promptly.
+    ///
+    /// - Parameters:
+    ///   - sessionId: The session to run the turn on.
+    ///   - prompt: The rendered prompt string.
+    ///   - deliver: Sink for the turn's settled transcript entries.
+    /// - Returns: The session's final transcript, for the turn-ended hook.
+    /// - Throws: ``RequestError/invalidParams`` when the session is unknown, or
+    ///   any error the model raised.
+    private func streamTurn(
+        for sessionId: SessionId,
+        prompt: String,
+        deliver: @Sendable ([Transcript.Entry]) async -> Void
+    ) async throws -> Transcript {
+        guard let session = sessions[sessionId]?.session else {
+            throw RequestError.invalidParams
+        }
+        var turnEntries: [Transcript.Entry] = []
+        for try await snapshot in session.streamResponse(to: prompt) {
+            try Task.checkCancellation()
+            turnEntries = Array(snapshot.transcriptEntries)
+            if turnEntries.count > 1 {
+                await deliver(Array(turnEntries.dropLast()))
+            }
+        }
+        await deliver(turnEntries)
+        return session.transcript
+    }
+
+    /// Derives the prompt turn's stop reason from how its generation ended.
+    ///
+    /// Cancellation wins over any error, so a cancelled turn always reports
+    /// ``StopReason/cancelled`` even when the interruption surfaced as a thrown
+    /// error. A context-window overflow maps to ``StopReason/maxTokens`` and a
+    /// refusal or guardrail violation to ``StopReason/refusal``; any other error
+    /// is unexpected and propagates.
+    ///
+    /// - Parameters:
+    ///   - error: The error the generation raised, or nil on success.
+    ///   - cancelled: Whether the generation task was cancelled.
+    /// - Returns: The turn's stop reason.
+    /// - Throws: The original error when it is not a recognized stop-reason
+    ///   signal.
+    static func stopReason(error: (any Error)?, cancelled: Bool) throws -> StopReason {
+        if cancelled {
+            return .cancelled
+        }
+        guard let error else {
+            return .endTurn
+        }
+        if error is CancellationError {
+            return .cancelled
+        }
+        if let modelError = error as? LanguageModelError {
+            switch modelError {
+            case .contextSizeExceeded:
+                return .maxTokens
+            case .guardrailViolation, .refusal:
+                return .refusal
+            default:
+                throw error
+            }
+        }
+        throw error
+    }
 }
+
+/// Drives one prompt turn's generation to completion (spec §7).
+///
+/// The implementation delivers the turn's transcript entries as they settle so
+/// the bridge can map them into `session/update` notifications, and returns the
+/// session's final transcript for the turn-ended hook. Production drives a real
+/// ``LanguageModelSession``; tests drive scripted entries through the same seam
+/// without a live model, since two concurrent real turns on one session trap the
+/// process.
+typealias TurnGenerator = @Sendable (
+    _ deliver: @Sendable ([Transcript.Entry]) async -> Void
+) async throws -> Transcript

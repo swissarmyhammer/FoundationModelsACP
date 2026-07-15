@@ -78,10 +78,23 @@ comments:
 
     Current HEAD b43350f. Local commits only, nothing pushed. Task remains in `review`.
   timestamp: 2026-07-15T18:38:10.482522+00:00
+- actor: wballard
+  id: 01kxkj37c2aaegdbz8a3a0fyq2
+  text: |-
+    RESOLVED → done. Blocker cleared by human ruling: a project-level `swift` validator (`.validators/swift/`) now shadows the user validator, exempting the generated ID newtypes (SessionId/ToolCallId/TerminalId/PermissionOptionId/SessionModeId) and their `…Id` properties/labels from the ID-acronym casing rule as an intentional ACP-wire-schema documented exception (spec §6). Every other Swift rule and acronym (URL/JSON/…) still enforces fully. I did NOT rename any generated types; the package-uniform `sessionId`/`SessionId` convention is retained.
+
+    Checkpoint: committed the `.validators/swift/` project config (597a5b5) per its .gitignore (validator definitions are committed) — LOCAL only, nothing pushed.
+
+    Re-review with the exemption active: CLEAN — 0 findings, 14 validators attempted, 0 failed, 0 confirmed (reviewed fb6ae8f~1..HEAD, the full task delta; HEAD~1..HEAD alone was just the validator config = nothing in scope). The SessionId casing finding no longer fires; no new findings in any class.
+
+    Verification: swift build --build-tests 0 warnings/errors; swift test 114 FoundationModelsACPTests + 108 ACPGenerateTests = 222 pass, 0 failures. Converged CLEAN — not forced. Open review findings marked resolved on the card (SessionId casing via exemption; initialize `- Throws:` fixed earlier). Moving to done.
+
+    Local commits (nothing pushed): fb6ae8f feature, d9a6500 + f065dcc + 5899148 review-fixes, b43350f revert-to-uniform-sessionId, 597a5b5 validator exemption. Downstream (prompt-turn ^gs0d3kp, session-mgmt ^vfmstvy) unblocked; the SessionProvider shape + FM API reality are documented above.
+  timestamp: 2026-07-15T18:54:44.098328+00:00
 depends_on:
 - 01KXHBBTQ24BC8586M5K0N872Z
-position_column: review
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8e80'
 title: 'FoundationModelsAgent core: SessionProvider, one-liner init, turn serialization'
 ---
 ## What
@@ -95,15 +108,19 @@ Build the bridge's skeleton (spec §7, §7.1) in `Sources/FoundationModelsACP/Br
 - Actual turn execution, tool bridging, and session-management forwarding are follow-on tasks — stub `prompt` minimally (e.g. drive a trivial turn) so tests pass.
 
 ## Acceptance Criteria
-- [ ] One-liner construction compiles and behaves identically on the wire to an explicit single-session provider
-- [ ] `initialize` advertises session-management capabilities iff the corresponding hooks are non-nil
-- [ ] `newSession` invokes `makeSession` with the cwd and MCP configs from the request and returns its `SessionId`
-- [ ] Two concurrent `prompt` requests to one session execute strictly serially (observable via instrumented fake ordering)
+- [x] One-liner construction compiles and behaves identically on the wire to an explicit single-session provider
+- [x] `initialize` advertises session-management capabilities iff the corresponding hooks are non-nil
+- [x] `newSession` invokes `makeSession` with the cwd and MCP configs from the request and returns its `SessionId`
+- [x] Two concurrent `prompt` requests to one session execute strictly serially (observable via instrumented fake ordering)
 
 ## Tests
-- [ ] `Tests/FoundationModelsACPTests/Bridge/SessionProviderTests.swift` — capability gating by hook presence; one-liner equivalence; newSession plumbing
-- [ ] `Tests/FoundationModelsACPTests/Bridge/PromptSerializationTests.swift` — overlapping prompts serialize; each resolves at its own turn end
-- [ ] Run `swift test` — exits 0
+- [x] `Tests/FoundationModelsACPTests/Bridge/SessionProviderTests.swift` — capability gating by hook presence; one-liner equivalence; newSession plumbing
+- [x] `Tests/FoundationModelsACPTests/Bridge/PromptSerializationTests.swift` — overlapping prompts serialize; each resolves at its own turn end
+- [x] Run `swift test` — exits 0
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-07-15) — RESOLVED
+- [x] `SessionId` ID-acronym casing (recurred across review passes 1/2/4). RESOLVED by human ruling: a project-level `swift` validator exemption at `.validators/swift/rules/casing.md` documents the generated ID newtypes (SessionId, ToolCallId, TerminalId, PermissionOptionId, SessionModeId) and their `…Id` properties/labels as an intentional ACP-wire-schema exception (spec §6). NOT resolved by renaming generated code. Package-uniform `sessionId`/`SessionId` convention retained. Re-review after the exemption: 0 findings, 14 validators attempted, 0 failed.
+- [x] `initialize` missing `- Throws:` doc (review pass 3) — fixed by documenting the protocol-required `throws`.
