@@ -37,11 +37,23 @@ comments:
 
     Ready for /review.
   timestamp: 2026-07-15T17:38:56.736885+00:00
+- actor: wballard
+  id: 01kxke3er8jj16980nbq497mje
+  text: |-
+    Review pass on checkpoint 9470b50 (HEAD~1..HEAD): CLEAN — 0 findings, 14 checks attempted, 2 candidates refuted, 0 failed. Task moved review -> done in ONE implement->test->commit->review iteration. NOT forced: the engine returned zero findings on the checkpoint.
+
+    Final API shapes for downstream (README task ^0td21b4 — stdout-discipline story lives here):
+
+    - `public final class StdioTransport: ACPTransport` + `extension ACPTransport where Self == StdioTransport { public static var stdio: StdioTransport }`. Usage: `try await AgentSideConnection(stream: .stdio) { conn in MyAgent(connection: conn) }`. stdout is sacred — StdioTransport's doc block spells it out: the package writes ONLY valid ndJSON frames to stdout; a stray print/banner/dotenv/progress bar corrupts framing; route every log to stderr or the injected ACPLogger (.standardError). Writes are atomic whole-frame (partial-write + EINTR loop under a Mutex), honoring the ACPTransport concurrency contract.
+    - `public final class SubprocessTransport: ACPTransport, @unchecked Sendable` with `init(executableURL:arguments:environment:currentDirectoryURL:) throws`. Drives an external agent: `let t = try SubprocessTransport(executableURL: geminiURL, arguments: ["--experimental-acp"]); let client = await ClientSideConnection(stream: t) { _ in MyClient() }`. Child stderr is forwarded to the parent's stderr (wire stays clean). Reaped exactly once via close()/deinit/stream-teardown; closing the ClientSideConnection reaps the child (no zombie). Read-only `isRunning`/`terminationStatus` for observation.
+
+    Verification (final): swift build 0 warnings; swift test = 216 pass (FoundationModelsACPTests 108, ACPGenerateTests 108), 0 failures, 0 warnings, 0 skips. Local commit 9470b50 only — nothing pushed.
+  timestamp: 2026-07-15T17:44:57.352986+00:00
 depends_on:
 - 01KXHBBA1PN5PQJVEVHCQTBQ9T
 - 01KXHBBTQ24BC8586M5K0N872Z
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: 8d80
 title: Stdio transport, stderr-only logging, and child-process management
 ---
 ## What
