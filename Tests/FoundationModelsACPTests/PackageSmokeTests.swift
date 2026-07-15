@@ -2,11 +2,9 @@ import Testing
 
 import FoundationModelsACP
 
-/// Smoke test proving the package scaffold compiles and exposes its
-/// placeholder public namespace symbol.
+/// Verifies the package scaffold exposes its placeholder `ACP` namespace.
 @Test func packageExposesACPNamespace() {
-    // `ACP` is the placeholder public symbol from the scaffold task; the
-    // package compiles and the symbol is referenceable.
-    let namespace: ACP.Type = ACP.self
-    #expect(namespace == ACP.self)
+    // The placeholder public symbol from the scaffold task must be reachable
+    // through the package's public surface under its expected type name.
+    #expect(String(describing: ACP.self) == "ACP")
 }
