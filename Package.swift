@@ -1,8 +1,9 @@
 // swift-tools-version: 6.4
 import PackageDescription
 
-// ndJSON transcript fixtures are loaded via #filePath, not as bundle
-// resources, so every test target excludes its `Fixtures` directory.
+// The test targets that carry ndJSON transcript fixtures load them via
+// #filePath, not as bundle resources, so each excludes its `Fixtures`
+// directory. (ACPGenerateTests has none and needs no exclude.)
 let fixturesExclude = ["Fixtures"]
 
 let package = Package(
