@@ -32,10 +32,24 @@ comments:
 
     TESTS (Tests/FoundationModelsACPTests/Bridge/SessionManagementTests.swift): in-memory `InMemorySessionStore` (Mutex-backed, Sendable) backs all four hooks. Hook-present: list/delete/resume/close round-trip over the wire via ClientSideConnection outbound methods (list returns stored SessionInfos, delete removes from store, resume returns ResumeSessionResponse(), close returns empty ok); full-store initialize advertises all four caps + loadSession. Hook-absent (singleSessionProvider, no hooks): initialize caps all nil + loadSession false; direct agent.{listSessions,resumeSession,loadSession,deleteSession,closeSession} all throw -32601. Resume turn-path proof (deterministic, NO live model): pre-resume serializeTurn→invalidParams (session unknown); after resume, both the resumed id AND a fresh newSession id run prompt()'s exact serializeTurn{runTurn{scripted}} structure and behave identically — both .endTurn, both emit the same agentMessageChunk update over the wire. closeSessionDropsLiveSessionFromMap independently proves close removes the map entry (post-close serializeTurn→invalidParams). Checkpoint + review next.
   timestamp: 2026-07-15T20:44:04.574953+00:00
+- actor: wballard
+  id: 01kxkrpfbm1k2vdrqjhqctg5wz
+  text: |-
+    DONE. Review (sha HEAD~1..HEAD, the checkpoint delta): CLEAN — 0 findings, 14 validators attempted, 0 failed, 1 refuted. Converged in a single implement→test→commit→review pass; not forced.
+
+    All acceptance criteria met:
+    - Hooks present: session/list|resume|delete|close round-trip through the provider over the wire and return correct responses.
+    - Hooks absent: initialize caps off (list/resume/delete/close nil, loadSession false) AND direct calls answer -32601.
+    - A prompt on a resumed session runs the normal turn path against the restored LanguageModelSession, behaving identically to a fresh session.
+
+    Local commit only (nothing pushed): 3152345 "feat(bridge): forward session management to SessionProvider hooks" (Sources/FoundationModelsACP/Bridge/FoundationModelsAgent.swift + Tests/FoundationModelsACPTests/Bridge/SessionManagementTests.swift). swift test: 264 pass (156 FoundationModelsACPTests + 108 ACPGenerateTests), 0 failures, 0 warnings.
+
+    FOR DOWNSTREAM (e2e ^e2x6ra0): the full FoundationModelsAgent Agent surface is now live — initialize (caps gated on hooks: prompt + session list/resume/delete/close + loadSession), newSession, prompt (streaming turn → session/update, StopReason, cancel), the four session-management methods, and the FM-tools reverse-request bridge. A store-backed provider (any of listSessions/restoreSession/deleteSession non-nil) advertises + honors session management incl. close; the bare one-liner FoundationModelsAgent(connection:session:) advertises none. Restore is provider-supplied via LanguageModelSession(model:transcript:) (verified-real; exercised in InMemorySessionStore).
+  timestamp: 2026-07-15T20:50:06.324697+00:00
 depends_on:
 - 01KXHBDAK0NQ5RA2NWTF1ESXQP
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9180'
 title: 'Bridge session management: provider hooks → list/resume/delete/close'
 ---
 ## What
