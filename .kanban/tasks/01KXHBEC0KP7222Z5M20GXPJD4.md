@@ -36,10 +36,29 @@ comments:
 
     VERIFICATION: swift build --build-tests = 0 warnings / 0 errors. swift test = 147 FoundationModelsACPTests (was 137; +10) + 108 ACPGenerateTests = 255 pass, 0 failures. FM Tool protocol probed real; no API divergence. Checkpoint + review next.
   timestamp: 2026-07-15T20:16:23.611555+00:00
+- actor: wballard
+  id: 01kxkqmh1zvhcd3j3b8kjdym6z
+  text: |-
+    RESOLVED → done. Converged in 2 review passes (not forced).
+
+    Review pass 1 (sha 79367e7 = HEAD~1..HEAD): 6 findings, 6 confirmed, 1 refuted, 14 attempted, 0 failed — all style/test-clarity, 0 correctness. Fixed at root:
+    - ClientEnvironment.swift: inlined the single-use embedTerminal helper into runCommand (with a best-effort comment) — the engine's rule-of-three; single caller, no dedup.
+    - ToolBridgeTests.swift: renamed readTextFileRoundTrip→readsFileThroughClient, writeTextFileRoundTrip→writesFileThroughClient (the funcs exercise one reverse request, not a write-then-read round trip).
+    - PermissionFlowTests.swift: rewrote denialBecomesFailedUpdate so the failed status is decided by which catch branch the SUT drives (a modeled tool wrapper: grant→completed, denial→failed), replacing two trivially-true assertions on a locally-constructed value.
+    - FoundationModelsAgent.swift clearGeneration finding: NOT actioned — verified via `git diff HEAD~1..HEAD` that clearGeneration (call + definition) is entirely OUTSIDE this task's delta; it is pre-existing code authored and already-reviewed-clean in the prompt-turn task (^gs0d3kp), forming a deliberate register/clear pair. Modifying it would be an unrelated refactor into a done task's committed code. The fix commit (848ee3d) does not touch that file, so it is out of scope for the re-review.
+
+    Commits (local only, nothing pushed): 79367e7 feature, 848ee3d review-fixes.
+
+    Review pass 2 (sha 848ee3d = HEAD~1..HEAD): CLEAN — 0 findings, 14 validators attempted, 0 failed, 0 confirmed. clearGeneration did not recur (file not in the checkpoint delta).
+
+    Verification: swift build --build-tests = 0 warnings / 0 errors. swift test = 147 FoundationModelsACPTests (was 137; +10) + 108 ACPGenerateTests = 255 pass, 0 failures.
+
+    All four acceptance criteria met: fs read produces fs/read_text_file and returns content; a command run produces terminal/create → embeds ToolCallContent.terminal → wait_for_exit → output → release in order; permission grant/deny/cancel round-trip with denial as a typed error → failed tool_call_update; un-advertised capability throws locally with zero wire traffic. Moving to done. Downstream e2e (^e2x6ra0) unblocked; the ClientEnvironment handle API + ambient ClientEnvironment.current injection are documented above.
+  timestamp: 2026-07-15T20:31:33.951700+00:00
 depends_on:
 - 01KXHBDW50GFJS4TH0HGS0D3KP
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9080'
 title: Bridge FM tools → reverse ACP requests (fs/*, terminal/*, permission)
 ---
 ## What
