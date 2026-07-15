@@ -20,12 +20,16 @@ public struct GeneratedFile: Equatable, Sendable {
     }
 }
 
-/// Emits Swift source for the non-union shapes of an ACP JSON schema:
-/// object structs, distinct ID newtypes, and placeholder seams for the
-/// definitions later generator stages resolve (tagged unions, string enums).
+/// Emits Swift source from an ACP JSON schema document.
+///
+/// This stage covers object structs, distinct ID newtypes, string enums,
+/// tagged unions, the method-routing table, and placeholder seams for the
+/// definitions later generator stages resolve.
 public struct SchemaGenerator: Sendable {
-    /// The configuration describing renames, hand-written types, and
-    /// wire-invariant field overrides.
+    /// The configuration for this generator run.
+    ///
+    /// Describes renames, hand-written types, wire-invariant field
+    /// overrides, and deprecated methods.
     public let config: GeneratorConfig
 
     /// Creates a generator with the given configuration.
@@ -325,9 +329,10 @@ public struct SchemaGenerator: Sendable {
         )
     }
 
-    /// Swift keywords that cannot appear as bare `case` names; a wire value
-    /// mapping onto one would emit uncompilable source, so generation fails
-    /// loudly instead.
+    /// Swift keywords that cannot appear as bare `case` names.
+    ///
+    /// A wire value mapping onto one would emit uncompilable source, so
+    /// generation fails loudly instead.
     private static let swiftKeywords: Set<String> = [
         "as", "associatedtype", "any", "break", "case", "catch", "class",
         "continue", "default", "defer", "deinit", "do", "else", "enum",
@@ -698,9 +703,11 @@ public struct SchemaGenerator: Sendable {
         }
     }
 
-    /// Verifies every `Type()` default targets a generated struct whose
-    /// memberwise initializer is fully defaulted, so the expression compiles
-    /// and equals the schema's nested default object.
+    /// Verifies every `Type()` default is compilable and value-faithful.
+    ///
+    /// Each such default must target a generated struct whose memberwise
+    /// initializer is fully defaulted, so the expression compiles and
+    /// equals the schema's nested default object.
     ///
     /// - Parameter models: All generated struct models.
     /// - Throws: `GeneratorError.unsupportedShape` when a `Type()` default
@@ -720,11 +727,13 @@ public struct SchemaGenerator: Sendable {
         }
     }
 
-    /// Verifies a `Type()` default is faithful: the target is a generated,
-    /// fully-defaulted struct, and every member of the schema's default
-    /// object equals the target property's own default — recursing into
-    /// nested object defaults. A divergence would make `Type()` silently
-    /// encode the wrong value, so it fails generation instead.
+    /// Verifies one `Type()` default against the target struct's defaults.
+    ///
+    /// The target must be a generated, fully-defaulted struct, and every
+    /// member of the schema's default object must equal the target
+    /// property's own default — recursing into nested object defaults. A
+    /// divergence would make `Type()` silently encode the wrong value, so
+    /// it fails generation instead.
     ///
     /// - Parameters:
     ///   - members: The schema default object's members.

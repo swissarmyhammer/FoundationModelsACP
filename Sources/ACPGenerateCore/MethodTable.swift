@@ -1,15 +1,18 @@
 import Foundation
 import FoundationModelsACP
 
-/// A parsed routing manifest (`meta.json` / `meta.unstable.json`): the three
-/// side groups, each mapping a snake_case routing key to a wire method name.
+/// A parsed routing manifest (`meta.json` / `meta.unstable.json`).
+///
+/// The manifest carries three side groups, each mapping a snake_case
+/// routing key to a wire method name.
 struct RoutingManifest {
     /// Routing groups keyed by side: routing key → wire method name.
     let methodsBySide: [MethodSide: [String: String]]
 }
 
-/// One `x-side`/`x-method` annotation target in the schema: the (side, wire
-/// method) pair a definition belongs to.
+/// One `x-side`/`x-method` annotation target in the schema.
+///
+/// The (side, wire method) pair a definition belongs to.
 private struct SchemaRoute: Hashable {
     /// The participant that serves the method.
     let side: MethodSide
@@ -37,8 +40,10 @@ extension SchemaGenerator {
         manifestGroups.firstIndex { $0.side == side } ?? manifestGroups.count
     }
 
-    /// Builds the method-routing table file from the routing manifests and
-    /// the schema's `x-side`/`x-method` annotations.
+    /// Builds the method-routing table file.
+    ///
+    /// Routing is derived from the routing manifests and the schema's
+    /// `x-side`/`x-method` annotations.
     ///
     /// - Parameters:
     ///   - definitions: The schema's `$defs` object.
@@ -157,12 +162,13 @@ extension SchemaGenerator {
         return routes
     }
 
-    /// Builds the stable routing-table entries, cross-validating the
-    /// manifest against the schema's annotations in both directions.
+    /// Builds the stable routing-table entries.
     ///
-    /// Every manifest route must resolve to schema definitions and every
-    /// annotated definition must be routed by the manifest — the double-entry
-    /// check that makes hand-miswiring structurally impossible.
+    /// Cross-validates the manifest against the schema's annotations in
+    /// both directions: every manifest route must resolve to schema
+    /// definitions and every annotated definition must be routed by the
+    /// manifest — the double-entry check that makes hand-miswiring
+    /// structurally impossible.
     ///
     /// - Parameters:
     ///   - manifest: The parsed stable routing manifest.
@@ -286,12 +292,12 @@ extension SchemaGenerator {
         )
     }
 
-    /// Builds the `Unstable` namespace entries: methods the unstable
-    /// manifest routes beyond the stable manifest, per side.
+    /// Builds the `Unstable` namespace entries.
     ///
-    /// The vendored stable schema defines no types for these methods, so
-    /// entries carry names and side only, with handlers camelCased from the
-    /// manifest routing keys.
+    /// These are the methods the unstable manifest routes beyond the stable
+    /// manifest, per side. The vendored stable schema defines no types for
+    /// them, so entries carry names and side only, with handlers camelCased
+    /// from the manifest routing keys.
     ///
     /// - Parameters:
     ///   - stable: The parsed stable routing manifest.
