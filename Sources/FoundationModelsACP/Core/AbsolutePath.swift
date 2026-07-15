@@ -21,7 +21,7 @@ public struct AbsolutePath: WireRawValueCodable, Hashable, Sendable {
     ///
     /// - Parameter rawValue: The relative path that was rejected.
     /// - Returns: A statement of the absolute-path wire invariant.
-    public static func invalidWireValueDescription(_ rawValue: String) -> String {
+    public static func invalidWireValueDescription(of rawValue: String) -> String {
         "ACP paths must be absolute; got \"\(rawValue)\""
     }
 }

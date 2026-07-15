@@ -5,14 +5,14 @@
 /// wrapper — and re-validate through `init?(rawValue:)` on decode so wire
 /// invariants (spec §4) hold for received data too. Conforming types get both
 /// `Codable` requirements from the extension below; invariant-carrying types
-/// override `invalidWireValueDescription(_:)` to explain a rejection.
+/// override `invalidWireValueDescription(of:)` to explain a rejection.
 public protocol WireRawValueCodable: RawRepresentable, Codable where RawValue: Codable {
     /// Describes why `rawValue` was rejected, for `DecodingError` messages.
     ///
     /// - Parameter rawValue: The decoded raw value that `init?(rawValue:)`
     ///   returned `nil` for.
     /// - Returns: A human-readable statement of the violated wire invariant.
-    static func invalidWireValueDescription(_ rawValue: RawValue) -> String
+    static func invalidWireValueDescription(of rawValue: RawValue) -> String
 }
 
 extension WireRawValueCodable {
@@ -21,7 +21,7 @@ extension WireRawValueCodable {
     ///
     /// - Parameter rawValue: The rejected raw value.
     /// - Returns: A generic invalid-value description naming the type.
-    public static func invalidWireValueDescription(_ rawValue: RawValue) -> String {
+    public static func invalidWireValueDescription(of rawValue: RawValue) -> String {
         "Invalid \(Self.self) wire value: \(rawValue)"
     }
 
@@ -37,7 +37,7 @@ extension WireRawValueCodable {
         guard let value = Self(rawValue: raw) else {
             throw DecodingError.dataCorruptedError(
                 in: container,
-                debugDescription: Self.invalidWireValueDescription(raw)
+                debugDescription: Self.invalidWireValueDescription(of: raw)
             )
         }
         self = value

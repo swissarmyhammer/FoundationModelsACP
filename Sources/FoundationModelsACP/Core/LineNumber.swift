@@ -21,7 +21,7 @@ public struct LineNumber: WireRawValueCodable, Hashable, Sendable {
     ///
     /// - Parameter rawValue: The non-positive line number that was rejected.
     /// - Returns: A statement of the 1-based wire invariant.
-    public static func invalidWireValueDescription(_ rawValue: Int) -> String {
+    public static func invalidWireValueDescription(of rawValue: Int) -> String {
         "ACP line numbers are 1-based; got \(rawValue)"
     }
 }

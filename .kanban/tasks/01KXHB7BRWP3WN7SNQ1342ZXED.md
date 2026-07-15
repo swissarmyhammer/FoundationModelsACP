@@ -20,6 +20,18 @@ comments:
   id: 01kxhmeb15hgd163yww2j127p1
   text: 'Iteration 2 implementation landed: extracted WireRawValueCodable protocol (Core/WireRawValueCodable.swift) providing shared single-value decode-and-validate init(from:) and bare-raw-value encode(to:); AbsolutePath/LineNumber/ProtocolVersion now conform with zero Codable boilerplate. Note: protocol and witnesses must be public — internal protocol-extension witnesses cannot satisfy a public Codable conformance (compiler error confirmed). All 5 review findings flipped to [x]. swift test 23/23 green; double-check re-verdict PASS.'
   timestamp: 2026-07-15T00:57:16.581895+00:00
+- actor: wballard
+  id: 01kxhmfajeaa96t99ypv88n3h9
+  text: 'Checkpoint committed locally: cae4dbd "refactor(core): extract WireRawValueCodable to deduplicate newtype Codable code" (6 files, +111/-81; includes kanban state). Proceeding to review iteration 2 scoped to HEAD~1..HEAD.'
+  timestamp: 2026-07-15T00:57:48.878341+00:00
+- actor: wballard
+  id: 01kxhmsqzc43pejgeqv1y0z01q
+  text: 'Review verdict (iteration 2, scope HEAD~1..HEAD): prior 5 findings resolved; 4 new findings, single root cause — invalidWireValueDescription omits its parameter label; rename to invalidWireValueDescription(of:) in the protocol requirement, extension default, and both overrides. Task stays in review; looping back to implement.'
+  timestamp: 2026-07-15T01:03:30.284531+00:00
+- actor: wballard
+  id: 01kxhmwbaw2zkf360rz0as4dba
+  text: 'Iteration 3 implementation landed: renamed invalidWireValueDescription to take an `of:` label at all four flagged sites plus its call site and doc reference. swift build 0 warnings; swift test 23/23. really-done: verification commands green; adversarial double-check skipped this iteration with justification — the delta is a mechanical parameter-label rename with zero behavior change, fully enforced by the compiler (protocol witness matching) and the existing 23-test suite, and double-check already PASSed the surrounding code twice.'
+  timestamp: 2026-07-15T01:04:55.644009+00:00
 depends_on:
 - 01KXHB6V536ZBBFC24M9WQXWMM
 position_column: doing
@@ -58,4 +70,13 @@ Implement the hand-written primitive types the generated code and connection lay
 - [x] `Sources/FoundationModelsACP/Core/LineNumber.swift:42` — encode(to:) method is verbatim duplicate across AbsolutePath, LineNumber, and ProtocolVersion — three types with identical encoding logic should be unified to avoid keeping copies in sync. Extract encode(to:) into a protocol extension on RawRepresentable or a generic implementation to eliminate the duplication.
 - [x] `Sources/FoundationModelsACP/Core/ProtocolVersion.swift:38` — encode(to:) method is verbatim duplicate across AbsolutePath, LineNumber, and ProtocolVersion — three types with identical encoding logic should be unified to avoid keeping copies in sync. Extract encode(to:) into a protocol extension on RawRepresentable or a generic implementation to eliminate the duplication.
 
-Resolution (2026-07-14): all five findings addressed by extracting `Sources/FoundationModelsACP/Core/WireRawValueCodable.swift` — a public `WireRawValueCodable` protocol (RawRepresentable + Codable) whose extension provides the single shared decode-and-validate `init(from:)` and bare-raw-value `encode(to:)`. AbsolutePath, LineNumber, and ProtocolVersion now conform and contain no Codable boilerplate; invariant types override `invalidWireValueDescription(_:)` for their error messages.
+Resolution (2026-07-14): all five findings addressed by extracting `Sources/FoundationModelsACP/Core/WireRawValueCodable.swift` — a public `WireRawValueCodable` protocol (RawRepresentable + Codable) whose extension provides the single shared decode-and-validate `init(from:)` and bare-raw-value `encode(to:)`. AbsolutePath, LineNumber, and ProtocolVersion now conform and contain no Codable boilerplate; invariant types override `invalidWireValueDescription(of:)` for their error messages.
+
+## Review Findings (2026-07-14 19:57)
+
+- [x] `Sources/FoundationModelsACP/Core/AbsolutePath.swift:24` — Parameter label omitted on `invalidWireValueDescription(_:)`. This method creates a String description from a String value; this is not a value-preserving conversion and should have an explicit label per the fluent-usage rule. Add a parameter label to match the protocol: `public static func invalidWireValueDescription(of rawValue: String) -> String`.
+- [x] `Sources/FoundationModelsACP/Core/LineNumber.swift:24` — Parameter label omitted on `invalidWireValueDescription(_:)`. This method creates a String description from an Int value; this is not a value-preserving conversion and should have an explicit label per the fluent-usage rule. Add a parameter label to match the protocol: `public static func invalidWireValueDescription(of rawValue: Int) -> String`.
+- [x] `Sources/FoundationModelsACP/Core/WireRawValueCodable.swift:15` — Parameter label omitted on `invalidWireValueDescription(_:)`. The rule permits omitting labels only for value-preserving conversions (e.g. `Int64(someUInt32)`); this creates a String description from a RawValue, which is not value-preserving. The call site reads better with an explicit label. Add a parameter label like `of` to the method signature: `static func invalidWireValueDescription(of rawValue: RawValue) -> String`. This reads as 'description of [value]' at the call site and matches patterns like `String(describing:)`.
+- [x] `Sources/FoundationModelsACP/Core/WireRawValueCodable.swift:24` — Parameter label omitted on `invalidWireValueDescription(_:)` in the extension default implementation. Same issue as the protocol requirement: this is not a value-preserving conversion and should have an explicit label. Add a parameter label to match the protocol requirement: `public static func invalidWireValueDescription(of rawValue: RawValue) -> String`.
+
+Resolution (2026-07-14): renamed to `invalidWireValueDescription(of:)` at all four sites — protocol requirement, extension default, the call site in `init(from:)`, and the AbsolutePath/LineNumber overrides — plus the doc comment reference. Mechanical signature-label rename, zero behavior change, verified by compile + full suite (23/23).
