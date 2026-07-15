@@ -1,8 +1,56 @@
 ---
+comments:
+- actor: wballard
+  id: 01kxkete98vxvamxt0pkxfc3ym
+  text: |-
+    Picked up. Research + FoundationModels API verification complete (first task to import Apple's framework).
+
+    FOUNDATIONMODELS AVAILABILITY — VERIFIED REAL, NOT STUBBED.
+    - Toolchain: Apple Swift 6.4 (swiftlang-6.4.0.25.4), target arm64-apple-macosx27.0.0, SDK MacOSX.sdk (Xcode-beta). `import FoundationModels` builds; a probe SwiftPM package (.macOS(.v27)) compiled and RAN.
+    - `SystemLanguageModel.default.availability` returns `.available` on this machine (enum: `.available` / `.unavailable(reason)`).
+    - Verified-real API (probed by compile+run, NOT invented):
+      - `LanguageModelSession(model: SystemLanguageModel.default)` and `LanguageModelSession(model:transcript:)` (the restore ctor).
+      - `session.isResponding: Bool`; `session.transcript: Transcript` (Transcript is a Collection — `.count` works).
+      - Turn exec: `try await session.respond(to: String) -> Response` with `Response.content: String`; `session.streamResponse(to: String)` returns an async sequence (used by the ^gs0d3kp turn task).
+      - `LanguageModelSession`, `Transcript`, `SystemLanguageModel` are all `Sendable` — so the §7.1 provider closure signatures and actor storage compile with no wrappers.
+    - CRITICAL: two concurrent `respond(to:)` on the SAME session TRAP the process (SIGTRAP, exit 133) — an unrecoverable precondition, NOT a catchable error. This is exactly why §7.1 mandates one-turn-at-a-time serialization, and it means the serialization test must NOT drive concurrent real turns (a serialization bug would crash the test runner, not fail an assertion).
+
+    TYPE MAPPING (card's illustrative signatures → real generated types; check Generated/ confirmed):
+    - `MCPServerConfig` → `public typealias MCPServerConfig = McpServer`. `McpServer` is the generated type `NewSessionRequest.mcpServers: [McpServer]` actually carries (currently `= JSONValue` in Unresolved.generated). Typealiasing keeps makeSession's `[MCPServerConfig]` lossless with what `session/new` delivers.
+    - `SessionSummary` → `public typealias SessionSummary = SessionInfo` (the generated element type of `ListSessionsResponse.sessions`), so the later ^vfmstvy session/list forwarding maps directly with no re-shaping.
+    - `SessionId(rawValue: String)`, `AbsolutePath(rawValue:)?` (rejects non-absolute), `ProtocolVersion.latest`.
+
+    CAPABILITY GATING (initialize) — hook presence → `AgentCapabilities.sessionCapabilities` fields:
+    - `provider.listSessions != nil` → `.list = SessionListCapabilities()`
+    - `provider.restoreSession != nil` → `.resume = SessionResumeCapabilities()` (restore ↔ session/resume)
+    - `provider.deleteSession != nil` → `.delete = SessionDeleteCapabilities()`
+    - `onTurnEnded` gates no capability. Prompt caps advertised conservatively (baseline text + resourceLink only; `PromptCapabilities()` defaults) — the ^gs0d3kp turn task expands caps as it adds block-type mapping (it rejects unadvertised blocks with -32602), so over-claiming now would be wrong.
+    NOTE: this task ADVERTISES session-mgmt caps by hook presence but does NOT yet forward session/list|resume|delete to the hooks (they keep the Agent protocol's -32601 default). Actual forwarding is ^vfmstvy per the card's scope split. Documented so the advertise-vs-honor window is intentional.
+
+    SERIALIZATION DESIGN (no engine protocol; no queue abstraction leaked):
+    - `FoundationModelsAgent` is an actor storing `[SessionId: SessionState]` where SessionState is an actor-owned reference holding the real `LanguageModelSession` + a `turnTail: Task<Void,Never>?`.
+    - Per-session FIFO via Task-tail chaining: read predecessor tail + publish new tail with NO await between the two statements (atomic under actor isolation → immune to actor reentrancy, which matters because the real turn body suspends on the model). Turn N+1 awaits N's completion token before running. Different sessions run concurrently (safe: each is single-turn).
+    - The primitive is an internal `serializeTurn(for:_ body:)`; `prompt` calls it with the trivial-turn body. PromptSerializationTests exercises `serializeTurn` directly (via @testable) with INSTRUMENTED FAKE bodies (record start/end order, force overlap attempts) — deterministic, no live model, no SIGTRAP risk. This is the "instrumented fake ordering" the card asks for; it is NOT a fake LanguageModelSession (§7.1-forbidden) — it's the agent's own turn-ordering seam.
+
+    STUB BOUNDARY: `prompt` runs the trivial turn under serialization and returns `.endTurn`; `cancel` is a no-op. Real `streamResponse`→Transcript→session/update mapping, StopReason logic, cancel→FM cancellation, and `onTurnEnded` invocation all belong to ^gs0d3kp (its card feeds scripted Transcripts through a seam it introduces). One-liner `FoundationModelsAgent(connection:session:)` = SessionProvider whose makeSession returns (generated UUID SessionId, that session) with all hooks nil.
+
+    Files: Sources/FoundationModelsACP/Bridge/{SessionProvider.swift, FoundationModelsAgent.swift}; Tests/FoundationModelsACPTests/Bridge/{SessionProviderTests.swift, PromptSerializationTests.swift}. TDD next.
+  timestamp: 2026-07-15T17:57:30.536798+00:00
+- actor: wballard
+  id: 01kxkfbx186ch2chqq5wwn86f0
+  text: |-
+    Implementation landed (TDD). Files:
+    - Sources/FoundationModelsACP/Bridge/SessionProvider.swift — `SessionProvider` struct (required `makeSession`, optional `listSessions`/`restoreSession`/`deleteSession`/`onTurnEnded`), `SessionProvider(session:sessionId:)` sugar init, `typealias MCPServerConfig = McpServer`, `typealias SessionSummary = SessionInfo`.
+    - Sources/FoundationModelsACP/Bridge/FoundationModelsAgent.swift — `public actor FoundationModelsAgent: Agent`. `init(connection:provider:)` + one-liner `init(connection:session:)`. `initialize` (caps gated on hook presence), `newSession` (makeSession → track SessionState), `prompt` (trivial `.endTurn` turn under serialization), `cancel` (no-op stub). Internal `serializeTurn(for:_:)` = per-session Task-tail FIFO chain (read-predecessor/publish-tail with no await between → reentrancy-safe; failed turn still completes its token).
+
+    Tests (Tests/FoundationModelsACPTests/Bridge/): BridgeTestSupport.swift (TurnRecorder/TurnGate/makeBridgeAgent/makeWiredBridge helpers), SessionProviderTests.swift (parameterized capability gating over StoreHook set; newSession cwd+MCP plumbing; one-liner==explicit-provider on the wire), PromptSerializationTests.swift (FIFO order [start1,end1,start2,end2] via instrumented fake bodies through the real serializeTurn seam; cross-session concurrency proof; unknown-session → -32602).
+
+    VERIFICATION: swift build --build-tests zero warnings/errors. swift test = 114 FoundationModelsACPTests + 108 ACPGenerateTests, 0 failures, 0 warnings. Serialization tests ran 5x consecutively — deterministic, no flakiness, no live-model dependency, no SIGTRAP risk (fake bodies never touch the model). FoundationModels imported and linked in the library target on macOS 27 with zero divergence from the verified API. Checkpoint + review next.
+  timestamp: 2026-07-15T18:07:02.696225+00:00
 depends_on:
 - 01KXHBBTQ24BC8586M5K0N872Z
-position_column: todo
-position_ordinal: '8e80'
+position_column: doing
+position_ordinal: '80'
 title: 'FoundationModelsAgent core: SessionProvider, one-liner init, turn serialization'
 ---
 ## What
