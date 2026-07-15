@@ -70,8 +70,8 @@ public struct SchemaGenerator: Sendable {
             )
         }
         let schema = try decodeJSON(data: schemaJSON, context: "schema document")
-        guard let definitions = schema["$defs"]?.objectValue else {
-            throw GeneratorError.invalidSchema("missing top-level $defs object")
+        guard let definitions = schema[Self.defsKey]?.objectValue else {
+            throw GeneratorError.invalidSchema("missing top-level \(Self.defsKey) object")
         }
 
         var identifiers: [String] = []
@@ -80,7 +80,7 @@ public struct SchemaGenerator: Sendable {
         var placeholders: [String] = []
 
         for (name, fragment) in definitions.sorted(by: { $0.key < $1.key }) {
-            let documentation = fragment["description"]?.stringValue
+            let documentation = fragment[Self.descriptionKey]?.stringValue
             switch try classify(name: name, fragment: fragment) {
             case .handwritten:
                 continue
@@ -149,6 +149,41 @@ public struct SchemaGenerator: Sendable {
         return files
     }
 
+    // MARK: - Schema keywords
+
+    /// The schema keyword holding the document's definitions.
+    private static let defsKey = "$defs"
+
+    /// The schema keyword referencing another definition.
+    private static let refKey = "$ref"
+
+    /// The schema keyword naming a fragment's JSON type.
+    private static let typeKey = "type"
+
+    /// The schema keyword for exclusive unions.
+    private static let oneOfKey = "oneOf"
+
+    /// The schema keyword for inclusive unions.
+    private static let anyOfKey = "anyOf"
+
+    /// The schema keyword for intersections (single-ref wrappers here).
+    private static let allOfKey = "allOf"
+
+    /// The schema keyword for closed value sets.
+    private static let enumKey = "enum"
+
+    /// The schema keyword carrying a fragment's documentation.
+    private static let descriptionKey = "description"
+
+    /// The schema keyword pinning a member to a single value.
+    private static let constKey = "const"
+
+    /// The schema keyword listing an object's required members.
+    private static let requiredKey = "required"
+
+    /// The schema keyword declaring an object's members.
+    private static let propertiesKey = "properties"
+
     // MARK: - Classification
 
     /// Classifies a definition into the shape family the generator emits.
@@ -166,26 +201,26 @@ public struct SchemaGenerator: Sendable {
         guard let members = fragment.objectValue else {
             throw GeneratorError.unsupportedShape(context: name, detail: "definition is not a JSON object")
         }
-        if members["oneOf"] != nil {
-            guard let variants = members["oneOf"]?.arrayValue else {
-                throw GeneratorError.unsupportedShape(context: name, detail: "oneOf is not an array")
+        if members[Self.oneOfKey] != nil {
+            guard let variants = members[Self.oneOfKey]?.arrayValue else {
+                throw GeneratorError.unsupportedShape(context: name, detail: "\(Self.oneOfKey) is not an array")
             }
             return try classifyOneOf(name: name, variants: variants)
         }
-        for keyword in ["anyOf", "enum"] where members[keyword] != nil {
+        for keyword in [Self.anyOfKey, Self.enumKey] where members[keyword] != nil {
             return .deferredUnion(keyword: keyword)
         }
-        switch members["type"]?.stringValue {
+        switch members[Self.typeKey]?.stringValue {
         case "object":
             return .objectStruct
         case "string":
             return .stringIdentifier
-        case nil where members["type"] == nil:
+        case nil where members[Self.typeKey] == nil:
             return .freeform
         case let other:
             throw GeneratorError.unsupportedShape(
                 context: name,
-                detail: "unhandled definition type \(other.map { "\"\($0)\"" } ?? String(describing: members["type"]))"
+                detail: "unhandled definition type \(other.map { "\"\($0)\"" } ?? String(describing: members[Self.typeKey]))"
             )
         }
     }
@@ -229,9 +264,9 @@ public struct SchemaGenerator: Sendable {
     ///   mixed-shape `oneOf`, so unknown constructs fail loudly.
     private func classifyOneOf(name: String, variants: [JSONValue]) throws -> DefinitionKind {
         guard !variants.isEmpty else {
-            throw GeneratorError.unsupportedShape(context: name, detail: "empty oneOf")
+            throw GeneratorError.unsupportedShape(context: name, detail: "empty \(Self.oneOfKey)")
         }
-        let types = variants.map { $0["type"]?.stringValue }
+        let types = variants.map { $0[Self.typeKey]?.stringValue }
         if types.allSatisfy({ $0 == "string" }) {
             return .stringEnum
         }
@@ -240,7 +275,7 @@ public struct SchemaGenerator: Sendable {
         }
         throw GeneratorError.unsupportedShape(
             context: name,
-            detail: "oneOf mixes variant shapes; expected all string consts or all discriminated objects"
+            detail: "\(Self.oneOfKey) mixes variant shapes; expected all string consts or all discriminated objects"
         )
     }
 
@@ -253,22 +288,22 @@ public struct SchemaGenerator: Sendable {
     /// - Throws: `GeneratorError.unsupportedShape` when a variant lacks a
     ///   const value or the case names collide.
     private func stringEnumModel(name: String, fragment: JSONValue) throws -> StringEnumModel {
-        let variants = fragment["oneOf"]?.arrayValue ?? []
+        let variants = fragment[Self.oneOfKey]?.arrayValue ?? []
         let cases = try variants.enumerated().map { index, variant in
             let context = "\(name) variant \(index)"
-            guard let wireValue = variant["const"]?.stringValue else {
+            guard let wireValue = variant[Self.constKey]?.stringValue else {
                 throw GeneratorError.unsupportedShape(context: context, detail: "string variant without a const value")
             }
             return EnumCaseModel(
                 wireValue: wireValue,
                 swiftName: try swiftCaseName(fromWire: wireValue, context: context),
-                documentation: variant["description"]?.stringValue
+                documentation: variant[Self.descriptionKey]?.stringValue
             )
         }
         try validateCaseNames(names: cases.map(\.swiftName), context: name)
         return StringEnumModel(
             name: emittedName(name: name),
-            documentation: fragment["description"]?.stringValue,
+            documentation: fragment[Self.descriptionKey]?.stringValue,
             cases: cases
         )
     }
@@ -287,11 +322,11 @@ public struct SchemaGenerator: Sendable {
     /// - Throws: `GeneratorError.unsupportedShape` when a variant deviates
     ///   from the internally-tagged shape or the case names collide.
     private func taggedUnionModel(name: String, fragment: JSONValue) throws -> TaggedUnionModel {
-        let variants = fragment["oneOf"]?.arrayValue ?? []
+        let variants = fragment[Self.oneOfKey]?.arrayValue ?? []
         var discriminator: String?
         let cases = try variants.enumerated().map { index, variant in
             let context = "\(name) variant \(index)"
-            guard let properties = variant["properties"]?.objectValue, properties.count == 1,
+            guard let properties = variant[Self.propertiesKey]?.objectValue, properties.count == 1,
                 let (key, keyFragment) = properties.first
             else {
                 throw GeneratorError.unsupportedShape(
@@ -299,10 +334,10 @@ public struct SchemaGenerator: Sendable {
                     detail: "expected exactly one inline property (the discriminator)"
                 )
             }
-            guard let tag = keyFragment["const"]?.stringValue else {
+            guard let tag = keyFragment[Self.constKey]?.stringValue else {
                 throw GeneratorError.unsupportedShape(context: context, detail: "discriminator \(key) has no const value")
             }
-            let required = (variant["required"]?.arrayValue ?? []).compactMap(\.stringValue)
+            let required = (variant[Self.requiredKey]?.arrayValue ?? []).compactMap(\.stringValue)
             guard required == [key] else {
                 throw GeneratorError.unsupportedShape(context: context, detail: "expected required to be exactly [\(key)]")
             }
@@ -314,9 +349,9 @@ public struct SchemaGenerator: Sendable {
             }
             discriminator = key
             var payloadType: String?
-            if let allOf = variant["allOf"]?.arrayValue {
-                guard allOf.count == 1, let reference = allOf[0]["$ref"]?.stringValue else {
-                    throw GeneratorError.unsupportedShape(context: context, detail: "expected allOf to be a single payload $ref")
+            if let allOf = variant[Self.allOfKey]?.arrayValue {
+                guard allOf.count == 1, let reference = allOf[0][Self.refKey]?.stringValue else {
+                    throw GeneratorError.unsupportedShape(context: context, detail: "expected \(Self.allOfKey) to be a single payload \(Self.refKey)")
                 }
                 payloadType = try referencedTypeName(reference: reference, context: context)
             }
@@ -324,11 +359,11 @@ public struct SchemaGenerator: Sendable {
                 tag: tag,
                 swiftName: try swiftCaseName(fromWire: tag, context: context),
                 payloadType: payloadType,
-                documentation: variant["description"]?.stringValue
+                documentation: variant[Self.descriptionKey]?.stringValue
             )
         }
         guard let discriminator else {
-            throw GeneratorError.unsupportedShape(context: name, detail: "empty oneOf")
+            throw GeneratorError.unsupportedShape(context: name, detail: "empty \(Self.oneOfKey)")
         }
         try validateCaseNames(names: cases.map(\.swiftName), context: name)
         // The discriminator becomes the CodingKeys case, so it must itself
@@ -336,7 +371,7 @@ public struct SchemaGenerator: Sendable {
         _ = try swiftCaseName(fromWire: discriminator, context: "\(name) discriminator")
         return TaggedUnionModel(
             name: emittedName(name: name),
-            documentation: fragment["description"]?.stringValue,
+            documentation: fragment[Self.descriptionKey]?.stringValue,
             discriminator: discriminator,
             cases: cases
         )
@@ -412,8 +447,8 @@ public struct SchemaGenerator: Sendable {
     /// - Returns: The struct model with properties in emission order.
     /// - Throws: `GeneratorError.unsupportedShape` for un-modelable fields.
     private func structModel(name: String, fragment: JSONValue) throws -> StructModel {
-        let properties = fragment["properties"]?.objectValue ?? [:]
-        let required = Set((fragment["required"]?.arrayValue ?? []).compactMap(\.stringValue))
+        let properties = fragment[Self.propertiesKey]?.objectValue ?? [:]
+        let required = Set((fragment[Self.requiredKey]?.arrayValue ?? []).compactMap(\.stringValue))
         var models = try properties
             .sorted(by: { $0.key < $1.key })
             .map { wireName, propertyFragment in
@@ -429,7 +464,7 @@ public struct SchemaGenerator: Sendable {
         }
         return StructModel(
             name: emittedName(name: name),
-            documentation: fragment["description"]?.stringValue,
+            documentation: fragment[Self.descriptionKey]?.stringValue,
             properties: models
         )
     }
@@ -490,7 +525,7 @@ public struct SchemaGenerator: Sendable {
             defaultsToEmptyInstance: defaults.isEmptyInstance,
             objectDefaultMembers: defaults.objectMembers,
             strategy: strategy,
-            documentation: fragment["description"]?.stringValue
+            documentation: fragment[Self.descriptionKey]?.stringValue
         )
     }
 
@@ -642,7 +677,7 @@ public struct SchemaGenerator: Sendable {
 
         var nullable = false
         let typeName: String
-        switch members["type"] {
+        switch members[Self.typeKey] {
         case .some(.string(let single)):
             typeName = single
         case .some(.array(let list)):
@@ -685,17 +720,17 @@ public struct SchemaGenerator: Sendable {
         override: GeneratorConfig.InvariantType?,
         context: String
     ) throws -> ResolvedType? {
-        if let reference = members["$ref"]?.stringValue {
+        if let reference = members[Self.refKey]?.stringValue {
             return ResolvedType(base: try referencedTypeName(reference: reference, context: context), element: nil, nullable: false)
         }
-        if let allOf = members["allOf"]?.arrayValue {
+        if let allOf = members[Self.allOfKey]?.arrayValue {
             guard allOf.count == 1 else {
-                throw GeneratorError.unsupportedShape(context: context, detail: "allOf with \(allOf.count) entries")
+                throw GeneratorError.unsupportedShape(context: context, detail: "\(Self.allOfKey) with \(allOf.count) entries")
             }
             return try resolveType(fragment: allOf[0], override: override, context: context)
         }
-        if let anyOf = members["anyOf"]?.arrayValue {
-            let nonNull = anyOf.filter { $0["type"]?.stringValue != "null" }
+        if let anyOf = members[Self.anyOfKey]?.arrayValue {
+            let nonNull = anyOf.filter { $0[Self.typeKey]?.stringValue != "null" }
             if anyOf.count == 2, nonNull.count == 1 {
                 var inner = try resolveType(fragment: nonNull[0], override: override, context: context)
                 inner.nullable = true
@@ -707,7 +742,7 @@ public struct SchemaGenerator: Sendable {
             // Inline anonymous union — the tagged-union stage's seam.
             return ResolvedType(base: "JSONValue", element: nil, nullable: false)
         }
-        if members["oneOf"] != nil {
+        if members[Self.oneOfKey] != nil {
             return ResolvedType(base: "JSONValue", element: nil, nullable: false)
         }
         return nil
@@ -798,9 +833,9 @@ public struct SchemaGenerator: Sendable {
     /// - Returns: The referenced type's emitted name.
     /// - Throws: `GeneratorError.unsupportedShape` for external references.
     private func referencedTypeName(reference: String, context: String) throws -> String {
-        let prefix = "#/$defs/"
+        let prefix = "#/\(Self.defsKey)/"
         guard reference.hasPrefix(prefix) else {
-            throw GeneratorError.unsupportedShape(context: context, detail: "unsupported $ref \"\(reference)\"")
+            throw GeneratorError.unsupportedShape(context: context, detail: "unsupported \(Self.refKey) \"\(reference)\"")
         }
         return emittedName(name: String(reference.dropFirst(prefix.count)))
     }

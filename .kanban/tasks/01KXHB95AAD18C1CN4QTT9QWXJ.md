@@ -83,6 +83,15 @@ comments:
 
     Verification: applied via count-asserting script; swift test 167/167 green, zero warnings, regeneration leaves Generated/ byte-identical. Committing, then review pass 7.
   timestamp: 2026-07-15T14:09:36.090218+00:00
+- actor: wballard
+  id: 01kxk290csj4zx7yfdgqzh1fq1
+  text: |-
+    Review pass 7: 1 finding, fixed:
+
+    - [x] SchemaGenerator.swift:835 — methodTableDeclaration and unstableNamespaceDeclaration now both delegate to a shared generic tableDeclaration(header:entries:entryLines:footer:) builder; each keeps only its own header, per-entry formatter, and footer.
+
+    Verification: swift test 167/167 green, zero warnings, regeneration leaves Generated/ byte-identical. Commit b850ab9. Running review pass 8.
+  timestamp: 2026-07-15T14:18:16.345487+00:00
 depends_on:
 - 01KXHB88Q1GSGHMPXHNSMKM2XF
 position_column: review
