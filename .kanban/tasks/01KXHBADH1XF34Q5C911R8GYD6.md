@@ -15,10 +15,14 @@ comments:
     - Write side: `NDJSONCodec.encode(some Encodable) -> Data` uses compact JSONEncoder with [.sortedKeys, .withoutEscapingSlashes]; the appended 0x0A is provably the only newline (JSON escapes control chars in strings).
     - Known non-issue (probed by double-check): a peer that never sends `\n` grows the framer buffer unboundedly — standard NDJSON behavior, no cap required by spec.
   timestamp: 2026-07-15T03:09:21.837414+00:00
+- actor: wballard
+  id: 01kxhw9t9cr07v84e5jyhqhr00
+  text: 'Review pass on checkpoint 118e24b (HEAD~1..HEAD) came back clean: 0 findings, 14 checks attempted, 1 candidate refuted. Task moved to done in one implement→test→commit→review iteration. Downstream tasks (stdio/in-memory/replay transports, connection): consume `ACPTransport.bytes` via `NDJSONCodec.messages(from:logger:)` and write with `transport.write(try NDJSONCodec.encode(message))` — see the prior comment for the full decision log.'
+  timestamp: 2026-07-15T03:14:36.972900+00:00
 depends_on:
 - 01KXHB7BRWP3WN7SNQ1342ZXED
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8480'
 title: ndJSON framing codec
 ---
 ## What
