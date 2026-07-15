@@ -33,6 +33,8 @@ func requireTreeRelative(_ path: String, role: String) {
 
 // Usage: acp-generate [schema-path] [output-dir]
 // Defaults assume execution from the package root (`swift run acp-generate`).
+// The routing manifests are derived from the schema path by the vendoring
+// convention: `<base>.json` → `<base>.meta.json` + `<base>.meta.unstable.json`.
 let arguments = CommandLine.arguments
 guard arguments.count <= 3 else {
     die(message: "usage: acp-generate [schema-path] [output-dir]")
@@ -45,9 +47,20 @@ let outputPath = arguments.count > 2 ? arguments[2] : "Sources/FoundationModelsA
 requireTreeRelative(schemaPath, role: "schema-path")
 requireTreeRelative(outputPath, role: "output-dir")
 
+guard schemaPath.hasSuffix(".json") else {
+    die(message: "\(toolPrefix)schema-path must end in .json to locate its routing manifests; got \"\(schemaPath)\"")
+}
+let manifestBasePath = String(schemaPath.dropLast(".json".count))
+
 do {
     let schemaJSON = try Data(contentsOf: URL(fileURLWithPath: schemaPath))
-    let files = try SchemaGenerator().generate(schemaJSON: schemaJSON)
+    let metaJSON = try Data(contentsOf: URL(fileURLWithPath: manifestBasePath + ".meta.json"))
+    let unstableMetaJSON = try Data(contentsOf: URL(fileURLWithPath: manifestBasePath + ".meta.unstable.json"))
+    let files = try SchemaGenerator().generate(
+        schemaJSON: schemaJSON,
+        metaJSON: metaJSON,
+        unstableMetaJSON: unstableMetaJSON
+    )
     let outputDirectory = URL(fileURLWithPath: outputPath, isDirectory: true)
     try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
     for file in files {

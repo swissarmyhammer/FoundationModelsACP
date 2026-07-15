@@ -32,20 +32,30 @@ public struct GeneratorConfig: Sendable {
     /// them.
     public var handwrittenDefinitions: Set<String>
 
+    /// Wire method names deprecated upstream, mapped to the human-readable
+    /// deprecation message the routing table carries. Neither the schema nor
+    /// the routing manifests mark deprecations, so this is config-carried;
+    /// every entry must name a routed method or generation fails, so a stale
+    /// entry cannot linger after a schema bump.
+    public var deprecatedMethods: [String: String]
+
     /// Creates a configuration.
     ///
     /// - Parameters:
     ///   - wireInvariantFields: Field→invariant-type overrides.
     ///   - typeRenames: Definition-name renames.
     ///   - handwrittenDefinitions: Definitions to skip emitting.
+    ///   - deprecatedMethods: Wire method → deprecation message markers.
     public init(
         wireInvariantFields: [String: InvariantType] = [:],
         typeRenames: [String: String] = [:],
-        handwrittenDefinitions: Set<String> = []
+        handwrittenDefinitions: Set<String> = [],
+        deprecatedMethods: [String: String] = [:]
     ) {
         self.wireInvariantFields = wireInvariantFields
         self.typeRenames = typeRenames
         self.handwrittenDefinitions = handwrittenDefinitions
+        self.deprecatedMethods = deprecatedMethods
     }
 
     /// Configuration for the vendored `Schema/acp-v1.json` document.
@@ -83,6 +93,11 @@ public struct GeneratorConfig: Sendable {
         handwrittenDefinitions: [
             // Hand-written in Core with the negotiated-version invariant.
             "ProtocolVersion"
+        ],
+        deprecatedMethods: [
+            // v1.19 supersedes session modes with boolean/select session
+            // config options; neither schema nor manifest carries the marker.
+            "session/set_mode": "Deprecated upstream in favor of session/set_config_option."
         ]
     )
 }

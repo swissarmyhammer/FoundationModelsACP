@@ -55,10 +55,20 @@ comments:
 
     swift test 143/143 green (70 + 73), zero warnings; regeneration leaves Generated/ byte-identical (escaping is a no-op for real schema wire names). Committing checkpoint, then re-review.
   timestamp: 2026-07-15T12:11:54.468667+00:00
+- actor: wballard
+  id: 01kxjv9j76rx5kpfxqq8jd49xa
+  text: |-
+    Review pass 3 clean (0 findings on HEAD~1..HEAD). Task complete → done. Final: 3 local commits (4945073 feature, c703c7f pass-1 fixes, 9c698a4 pass-2 fixes), swift test 143/143 green (70 FoundationModelsACPTests + 73 ACPGenerateTests), zero warnings, regeneration byte-idempotent.
+
+    Emitted types now live in Sources/FoundationModelsACP/Generated/Unions.generated.swift (~34 KB):
+    - Tagged unions (5): ContentBlock (text/image/audio/resourceLink/resource), SessionUpdate (11 cases incl. usageUpdate, currentModeUpdate, configOptionUpdate, sessionInfoUpdate), ToolCallContent (content/diff/terminal(Terminal)), RequestPermissionOutcome (cancelled payload-less, selected(SelectedPermissionOutcome), disc `outcome`), SessionConfigOption (select/boolean) — each with unknown(String) discriminator fallback (payload not preserved on unknown, by design).
+    - String enums (7): ToolKind, ToolCallStatus, StopReason, PermissionOptionKind, PlanEntryPriority, PlanEntryStatus, Role — hand-rolled Codable via wireValue/init(wireValue:), unknown(String) re-encodes captured string.
+    Unresolved.generated.swift now holds only the 11 anyOf seams + 3 free-form Ext* — the remaining scope for ^jx2apm3/routing.
+  timestamp: 2026-07-15T12:16:14.566627+00:00
 depends_on:
 - 01KXHB88Q1GSGHMPXHNSMKM2XF
-position_column: review
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8780'
 title: 'Codegen: tagged unions and string enums with unknown(String) fallback'
 ---
 ## What

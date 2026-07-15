@@ -26,7 +26,7 @@ enum Emitter {
     ///
     /// - Parameter text: The schema-derived text (wire name, value, or tag).
     /// - Returns: The quoted, escaped Swift string literal.
-    private static func stringLiteral(_ text: String) -> String {
+    static func stringLiteral(_ text: String) -> String {
         let escaped = text
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")

@@ -179,3 +179,40 @@ struct StructModel {
     /// alphabetical within each group.
     let properties: [PropertyModel]
 }
+
+/// The emission model for one stable routing-table entry.
+struct MethodModel {
+    /// The method name as it crosses the wire (e.g. `session/new`).
+    let wireMethod: String
+
+    /// The Swift handler name (e.g. `newSession`).
+    let handlerName: String
+
+    /// The participant that serves the method.
+    let side: MethodSide
+
+    /// Whether the method is a request or a notification.
+    let kind: MethodKind
+
+    /// The emitted Swift type name of the method's parameters.
+    let paramsTypeName: String
+
+    /// The emitted Swift type name of the method's result; `nil` for
+    /// notifications.
+    let resultTypeName: String?
+
+    /// The configured deprecation message, if the method is deprecated.
+    let deprecationMessage: String?
+}
+
+/// The emission model for one unstable routing-table entry.
+struct UnstableMethodModel {
+    /// The method name as it crosses the wire (e.g. `session/fork`).
+    let wireMethod: String
+
+    /// The Swift handler name derived from the manifest's routing key.
+    let handlerName: String
+
+    /// The participant that serves the method.
+    let side: MethodSide
+}

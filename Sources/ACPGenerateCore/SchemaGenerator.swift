@@ -42,11 +42,29 @@ public struct SchemaGenerator: Sendable {
     /// properties are emitted required-first, `_meta` last, alphabetical
     /// within each group.
     ///
-    /// - Parameter schemaJSON: The raw bytes of the schema document.
+    /// - Parameters:
+    ///   - schemaJSON: The raw bytes of the schema document.
+    ///   - metaJSON: The raw bytes of the stable routing manifest
+    ///     (`meta.json`); when present, the method-routing table is emitted.
+    ///   - unstableMetaJSON: The raw bytes of the unstable routing manifest
+    ///     (`meta.unstable.json`); when present, methods it routes beyond
+    ///     the stable manifest are emitted into the `Unstable` namespace.
+    ///     Requires `metaJSON`.
     /// - Returns: The generated Swift files.
-    /// - Throws: `GeneratorError` when the schema cannot be parsed or
-    ///   contains a shape the generator does not understand.
-    public func generate(schemaJSON: Data) throws -> [GeneratedFile] {
+    /// - Throws: `GeneratorError` when an input cannot be parsed, the schema
+    ///   contains a shape the generator does not understand, or the routing
+    ///   manifests disagree with the schema's `x-side`/`x-method`
+    ///   annotations.
+    public func generate(
+        schemaJSON: Data,
+        metaJSON: Data? = nil,
+        unstableMetaJSON: Data? = nil
+    ) throws -> [GeneratedFile] {
+        guard metaJSON != nil || unstableMetaJSON == nil else {
+            throw GeneratorError.invalidSchema(
+                "unstable routing manifest requires the stable routing manifest"
+            )
+        }
         let schema: JSONValue
         do {
             schema = try JSONDecoder().decode(JSONValue.self, from: schemaJSON)
@@ -102,7 +120,7 @@ public struct SchemaGenerator: Sendable {
 
         try validateEmptyInstanceDefaults(structModels)
 
-        return [
+        var files = [
             GeneratedFile(
                 name: "Identifiers.generated.swift",
                 contents: Emitter.file(declarations: identifiers)
@@ -120,6 +138,16 @@ public struct SchemaGenerator: Sendable {
                 contents: Emitter.file(declarations: placeholders)
             ),
         ]
+        if let metaJSON {
+            files.append(
+                try methodTableFile(
+                    definitions: definitions,
+                    metaJSON: metaJSON,
+                    unstableMetaJSON: unstableMetaJSON
+                )
+            )
+        }
+        return files
     }
 
     // MARK: - Classification
@@ -167,7 +195,7 @@ public struct SchemaGenerator: Sendable {
     ///
     /// - Parameter name: The schema definition name.
     /// - Returns: The renamed Swift type name, or the name unchanged.
-    private func emittedName(_ name: String) -> String {
+    func emittedName(_ name: String) -> String {
         config.typeRenames[name] ?? name
     }
 
@@ -319,7 +347,7 @@ public struct SchemaGenerator: Sendable {
     /// - Returns: The camelCase Swift identifier (e.g. `switchMode`).
     /// - Throws: `GeneratorError.unsupportedShape` when the wire value does
     ///   not map to a plain, non-keyword Swift identifier.
-    private func swiftCaseName(fromWire wireValue: String, context: String) throws -> String {
+    func swiftCaseName(fromWire wireValue: String, context: String) throws -> String {
         let parts = wireValue.split(separator: "_")
         let name = parts.enumerated()
             .map { index, part in
