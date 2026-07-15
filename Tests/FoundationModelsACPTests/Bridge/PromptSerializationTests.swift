@@ -9,12 +9,12 @@ import Testing
 )
 func overlappingTurnsOnOneSessionSerializeInOrder() async throws {
     let (connection, agent) = await makeBridgeAgent(provider: singleSessionProvider())
-    let sessionId = try await agent.newSession(bridgeNewSessionRequest()).sessionId
+    let sessionID = try await agent.newSession(bridgeNewSessionRequest()).sessionId
     let recorder = TurnRecorder()
     let firstGate = TurnGate()
     let secondGate = TurnGate()
 
-    async let first = agent.serializeTurn(for: sessionId) { () -> Int in
+    async let first = agent.serializeTurn(for: sessionID) { () -> Int in
         await recorder.record("start1")
         await firstGate.wait()
         await recorder.record("end1")
@@ -24,7 +24,7 @@ func overlappingTurnsOnOneSessionSerializeInOrder() async throws {
     // the second, so the second is strictly behind it in the chain.
     await waitUntil(recorder, records: "start1")
 
-    async let second = agent.serializeTurn(for: sessionId) { () -> Int in
+    async let second = agent.serializeTurn(for: sessionID) { () -> Int in
         await recorder.record("start2")
         await secondGate.wait()
         await recorder.record("end2")

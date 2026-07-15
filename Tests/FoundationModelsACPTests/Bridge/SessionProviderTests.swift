@@ -55,12 +55,12 @@ func newSessionPlumbsRequestToProvider() async throws {
     let recordedCwd = Mutex<AbsolutePath?>(nil)
     let recordedServers = Mutex<[MCPServerConfig]?>(nil)
     let session = makeModelSession()
-    let assignedId = SessionId(rawValue: "plumbed-session")
+    let assignedID = SessionId(rawValue: "plumbed-session")
 
     let provider = SessionProvider { cwd, servers in
         recordedCwd.withLock { $0 = cwd }
         recordedServers.withLock { $0 = servers }
-        return (assignedId, session)
+        return (assignedID, session)
     }
     let (connection, agent) = await makeBridgeAgent(provider: provider)
 
@@ -68,7 +68,7 @@ func newSessionPlumbsRequestToProvider() async throws {
     let servers: [MCPServerConfig] = [.object(["name": .string("srv"), "command": .string("run")])]
     let response = try await agent.newSession(NewSessionRequest(cwd: cwd, mcpServers: servers))
 
-    #expect(response.sessionId == assignedId)
+    #expect(response.sessionId == assignedID)
     #expect(recordedCwd.withLock { $0 } == cwd)
     #expect(recordedServers.withLock { $0 } == servers)
     _ = connection
@@ -80,11 +80,11 @@ func oneLinerMatchesExplicitProvider() async throws {
     let oneLiner = await makeWiredBridge { connection in
         FoundationModelsAgent(connection: connection, session: session)
     }
-    let explicitId = SessionId(rawValue: "explicit-session")
+    let explicitID = SessionId(rawValue: "explicit-session")
     let explicit = await makeWiredBridge { connection in
         FoundationModelsAgent(
             connection: connection,
-            provider: SessionProvider(makeSession: { _, _ in (explicitId, session) })
+            provider: SessionProvider(makeSession: { _, _ in (explicitID, session) })
         )
     }
 
@@ -103,7 +103,7 @@ func oneLinerMatchesExplicitProvider() async throws {
 
     // The explicit provider's id plumbs straight through to the wire response.
     let explicitSession = try await explicit.client.newSession(bridgeNewSessionRequest())
-    #expect(explicitSession.sessionId == explicitId)
+    #expect(explicitSession.sessionId == explicitID)
 
     // A prompt turn resolves at its own turn's end over the wire.
     let prompt = PromptRequest(
