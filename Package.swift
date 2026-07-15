@@ -23,10 +23,25 @@ let package = Package(
                 "Bridge/.gitkeep",
             ]
         ),
+        .target(
+            name: "ACPGenerateCore",
+            dependencies: ["FoundationModelsACP"],
+            path: "Sources/ACPGenerateCore"
+        ),
+        .executableTarget(
+            name: "acp-generate",
+            dependencies: ["ACPGenerateCore"],
+            path: "Sources/acp-generate"
+        ),
         .testTarget(
             name: "FoundationModelsACPTests",
             dependencies: ["FoundationModelsACP"],
             path: "Tests/FoundationModelsACPTests"
+        ),
+        .testTarget(
+            name: "ACPGenerateTests",
+            dependencies: ["ACPGenerateCore", "FoundationModelsACP"],
+            path: "Tests/ACPGenerateTests"
         ),
     ]
 )
