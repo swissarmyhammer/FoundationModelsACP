@@ -487,23 +487,49 @@ public struct SchemaGenerator: Sendable {
             isOptional: isOptional,
             isRequired: isRequired,
             defaultExpression: defaults.expression,
-            defaultsToEmptyInstance: defaults.emptyInstance,
+            defaultsToEmptyInstance: defaults.isEmptyInstance,
             objectDefaultMembers: defaults.objectMembers,
             strategy: strategy,
             documentation: fragment["description"]?.stringValue
         )
     }
 
-    /// The parsed `default` facets of a property fragment.
-    private struct DefaultParts {
+    /// The parsed `default` state of a property fragment.
+    ///
+    /// The three mutually exclusive states are explicit cases, so an
+    /// impossible combination (say, object members without an empty
+    /// instance) cannot be represented.
+    private enum DefaultParts {
+        /// The fragment carries no schema `default`.
+        case none
+
+        /// A plain rendered Swift default expression.
+        case simple(expression: String)
+
+        /// A `Type()` empty-instance default with the schema's object
+        /// members to validate against the target's own defaults.
+        case emptyInstance(expression: String, members: [String: JSONValue])
+
         /// The rendered Swift default expression, if any.
-        let expression: String?
+        var expression: String? {
+            switch self {
+            case .none: nil
+            case .simple(let expression): expression
+            case .emptyInstance(let expression, _): expression
+            }
+        }
 
         /// Whether the expression is a `Type()` empty instance.
-        let emptyInstance: Bool
+        var isEmptyInstance: Bool {
+            if case .emptyInstance = self { return true }
+            return false
+        }
 
-        /// The schema default's object members when `emptyInstance`.
-        let objectMembers: [String: JSONValue]?
+        /// The schema default's object members for empty-instance defaults.
+        var objectMembers: [String: JSONValue]? {
+            if case .emptyInstance(_, let members) = self { return members }
+            return nil
+        }
     }
 
     /// Parses a property fragment's schema `default`, if any.
@@ -512,7 +538,7 @@ public struct SchemaGenerator: Sendable {
     ///   - fragment: The property's schema fragment.
     ///   - type: The property's resolved type.
     ///   - context: `Definition.field` for error messages.
-    /// - Returns: The parsed default facets; all-empty when absent.
+    /// - Returns: The parsed default state; `.none` when absent.
     /// - Throws: `GeneratorError.unsupportedShape` for un-renderable
     ///   defaults.
     private func defaultParts(
@@ -521,18 +547,17 @@ public struct SchemaGenerator: Sendable {
         context: String
     ) throws -> DefaultParts {
         guard let rawDefault = fragment["default"], rawDefault != .null else {
-            return DefaultParts(expression: nil, emptyInstance: false, objectMembers: nil)
+            return .none
         }
         let (expression, emptyInstance) = try defaultExpressionParts(
             for: rawDefault,
             type: type,
             context: context
         )
-        return DefaultParts(
-            expression: expression,
-            emptyInstance: emptyInstance,
-            objectMembers: emptyInstance ? rawDefault.objectValue : nil
-        )
+        guard emptyInstance else {
+            return .simple(expression: expression)
+        }
+        return .emptyInstance(expression: expression, members: rawDefault.objectValue ?? [:])
     }
 
     /// Chooses how the generated `init(from:)` decodes a property.
@@ -699,6 +724,19 @@ public struct SchemaGenerator: Sendable {
     /// - Returns: The resolved type.
     /// - Throws: `GeneratorError.unsupportedShape` for unknown keywords and
     ///   un-modelable arrays.
+    /// The scalar JSON `type` keywords mapped to Swift types and the
+    /// wire-invariant kind each may carry.
+    ///
+    /// `object` without a `$ref` is a free-form map (`additionalProperties`),
+    /// so it maps to raw JSON.
+    private static let scalarTypes: [String: (swiftName: String, allowedInvariant: GeneratorConfig.InvariantType?)] = [
+        "string": ("String", .absolutePath),
+        "integer": ("Int", .lineNumber),
+        "boolean": ("Bool", nil),
+        "number": ("Double", nil),
+        "object": ("JSONValue", nil),
+    ]
+
     private func resolveScalarType(
         named typeName: String,
         nullable: Bool,
@@ -706,30 +744,24 @@ public struct SchemaGenerator: Sendable {
         override: GeneratorConfig.InvariantType?,
         context: String
     ) throws -> ResolvedType {
-        switch typeName {
-        case "string":
-            return ResolvedType(base: try scalarName(plain: "String", override: override, allowed: .absolutePath, context: context), element: nil, nullable: nullable)
-        case "integer":
-            return ResolvedType(base: try scalarName(plain: "Int", override: override, allowed: .lineNumber, context: context), element: nil, nullable: nullable)
-        case "boolean":
-            return ResolvedType(base: "Bool", element: nil, nullable: nullable)
-        case "number":
-            return ResolvedType(base: "Double", element: nil, nullable: nullable)
-        case "object":
-            // Objects without a $ref are free-form maps (`additionalProperties`).
-            return ResolvedType(base: "JSONValue", element: nil, nullable: nullable)
-        case "array":
-            guard let items = members["items"] else {
-                throw GeneratorError.unsupportedShape(context: context, detail: "array without items")
+        if let scalar = Self.scalarTypes[typeName] {
+            var base = scalar.swiftName
+            if let allowed = scalar.allowedInvariant {
+                base = try scalarName(plain: base, override: override, allowed: allowed, context: context)
             }
-            let element = try resolveType(fragment: items, override: override, context: context)
-            guard element.element == nil else {
-                throw GeneratorError.unsupportedShape(context: context, detail: "nested arrays are not modeled")
-            }
-            return ResolvedType(base: "[\(element.base)]", element: element.base, nullable: nullable)
-        default:
+            return ResolvedType(base: base, element: nil, nullable: nullable)
+        }
+        guard typeName == "array" else {
             throw GeneratorError.unsupportedShape(context: context, detail: "unhandled scalar type \"\(typeName)\"")
         }
+        guard let items = members["items"] else {
+            throw GeneratorError.unsupportedShape(context: context, detail: "array without items")
+        }
+        let element = try resolveType(fragment: items, override: override, context: context)
+        guard element.element == nil else {
+            throw GeneratorError.unsupportedShape(context: context, detail: "nested arrays are not modeled")
+        }
+        return ResolvedType(base: "[\(element.base)]", element: element.base, nullable: nullable)
     }
 
     /// Resolves a scalar type name, applying a wire-invariant override.
@@ -1006,6 +1038,12 @@ extension SchemaGenerator {
     /// The definition-name suffix classifying a route's notification shape.
     private static let notificationSuffix = "Notification"
 
+    /// The shape suffixes in match order.
+    ///
+    /// `Notification` is matched first so a name ending in it can never be
+    /// misread as one of the shorter suffixes.
+    private static let definitionSuffixes = [notificationSuffix, responseSuffix, requestSuffix]
+
     /// A side's position in emission order (agent, client, protocol).
     ///
     /// - Parameter side: The side to rank.
@@ -1230,23 +1268,19 @@ extension SchemaGenerator {
         definitionNames: [String]
     ) throws -> MethodModel {
         let context = "method \(wireMethod)"
-        var requests: [String] = []
-        var responses: [String] = []
-        var notifications: [String] = []
+        var definitionsBySuffix: [String: [String]] = [:]
         for name in definitionNames.sorted() {
-            if name.hasSuffix(Self.notificationSuffix) {
-                notifications.append(name)
-            } else if name.hasSuffix(Self.responseSuffix) {
-                responses.append(name)
-            } else if name.hasSuffix(Self.requestSuffix) {
-                requests.append(name)
-            } else {
+            guard let suffix = Self.definitionSuffixes.first(where: { name.hasSuffix($0) }) else {
                 throw GeneratorError.unsupportedShape(
                     context: context,
                     detail: "definition \(name) is neither a \(Self.requestSuffix), a \(Self.responseSuffix), nor a \(Self.notificationSuffix)"
                 )
             }
+            definitionsBySuffix[suffix, default: []].append(name)
         }
+        let requests = definitionsBySuffix[Self.requestSuffix] ?? []
+        let responses = definitionsBySuffix[Self.responseSuffix] ?? []
+        let notifications = definitionsBySuffix[Self.notificationSuffix] ?? []
         let deprecationMessage = config.deprecatedMethods[wireMethod]
         if requests.count == 1, responses.count == 1, notifications.isEmpty {
             let base = String(requests[0].dropLast(Self.requestSuffix.count))
@@ -1353,14 +1387,14 @@ extension SchemaGenerator {
 extension Emitter {
     /// Maps a side to the emitted `MethodSide` case reference.
     ///
+    /// `MethodSide` carries no associated values, so reflecting a value
+    /// yields exactly its case name — the emitted member reference tracks
+    /// the enum with no per-case mapping to keep in sync.
+    ///
     /// - Parameter side: The side to render.
     /// - Returns: The Swift member-access expression (e.g. `.agent`).
     private static func sideCase(_ side: MethodSide) -> String {
-        switch side {
-        case .agent: ".agent"
-        case .client: ".client"
-        case .protocolLevel: ".protocolLevel"
-        }
+        ".\(String(describing: side))"
     }
 
     /// Renders the stable method-routing table.

@@ -71,6 +71,18 @@ comments:
   id: 01kxk1140dy7ryf1ez7k5mtp43
   text: 'Review pass 5: 13 findings, all fixed — 11 first-parameter-label additions (emittedName(name:), decodeJSON(data:), resolveType(fragment:), scalarName(plain:), referencedTypeName(reference:), parseRoutingManifest(data:), parseRoutingGroup(group:), validateEmptyInstanceDefaults(models:), validateDefaultMember(value:), registerHandlerName(handlerName:), lowerFirst(name:)) plus the same-cause unflagged validateCaseNames(names:); and 2 complexity extractions: resolveType now delegates composites to resolveCompositeType(members:override:context:) and the scalar switch to resolveScalarType(named:...), and propertyModel now delegates to defaultParts(of:type:context:) (new DefaultParts struct) and decodeStrategy(of:resolved:override:isOptional:hasDefault:context:). Applied via a count-asserting script so no call site was silently missed. Verification: swift test 167/167 green, zero warnings, regeneration leaves Generated/ byte-identical. Note: this pass reached into pre-existing generator-core code (resolveType/propertyModel and their callers) because the whole file is now in scope; all changes remain behavior-neutral and are covered by the existing GeneratorCoreTests/ForgivingDecodingTests. Committing, then review pass 6.'
   timestamp: 2026-07-15T13:56:29.325882+00:00
+- actor: wballard
+  id: 01kxk1s4atg2dvmvt8cw6a9hk5
+  text: |-
+    Review pass 6: 4 findings, all fixed (recorded here rather than growing the card description further; the card already carries five dated findings sections):
+
+    - [x] SchemaGenerator.swift:475 — DefaultParts converted from struct-with-flags to a three-case enum (.none / .simple(expression:) / .emptyInstance(expression:members:)) with computed expression/isEmptyInstance/objectMembers accessors, so invalid state combinations are unrepresentable.
+    - [x] SchemaGenerator.swift:654 — resolveScalarType's scalar switch replaced by the scalarTypes data table (keyword → Swift type + optional allowed invariant); array stays the one special case. Behavior preserved exactly, including that boolean/number/object never route through scalarName.
+    - [x] SchemaGenerator.swift:930 — methodModel's suffix if/else chain replaced by the definitionSuffixes match-order table + a definitionsBySuffix dictionary (Notification matched first, preserving original precedence).
+    - [x] Emitter sideCase switch removed entirely: MethodSide has no associated values so String(describing:) yields exactly the case name; the emitted member reference now tracks the enum with no per-case mapping.
+
+    Verification: applied via count-asserting script; swift test 167/167 green, zero warnings, regeneration leaves Generated/ byte-identical. Committing, then review pass 7.
+  timestamp: 2026-07-15T14:09:36.090218+00:00
 depends_on:
 - 01KXHB88Q1GSGHMPXHNSMKM2XF
 position_column: review
