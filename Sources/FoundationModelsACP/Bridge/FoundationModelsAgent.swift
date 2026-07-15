@@ -71,6 +71,11 @@ public actor FoundationModelsAgent: Agent {
     /// Live sessions, keyed by the identity the provider assigned.
     private var sessions: [SessionId: SessionState] = [:]
 
+    /// The capabilities the client advertised during initialization, used to
+    /// build each turn's ``ClientEnvironment``. Empty until `initialize`, so a
+    /// tool cannot reach an un-advertised capability before negotiation.
+    private var clientCapabilities = ClientCapabilities()
+
     /// Creates a bridge agent from a connection and a session provider.
     ///
     /// - Parameters:
@@ -112,7 +117,8 @@ public actor FoundationModelsAgent: Agent {
     /// - Throws: Never; capability negotiation cannot fail. The `throws` is the
     ///   ``Agent`` protocol requirement.
     public func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
-        InitializeResponse(
+        clientCapabilities = params.clientCapabilities
+        return InitializeResponse(
             protocolVersion: .latest,
             agentCapabilities: AgentCapabilities(
                 promptCapabilities: Self.promptCapabilities,
@@ -247,8 +253,15 @@ public actor FoundationModelsAgent: Agent {
             }
         }
 
+        let environment = ClientEnvironment(
+            connection: connection,
+            sessionId: sessionId,
+            capabilities: clientCapabilities
+        )
         let generation = registerGeneration(for: sessionId) {
-            try await generate(deliver)
+            try await ClientEnvironment.$current.withValue(environment) {
+                try await generate(deliver)
+            }
         }
         var failure: (any Error)?
         var finalTranscript: Transcript?

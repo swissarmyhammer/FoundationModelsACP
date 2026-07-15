@@ -1,8 +1,45 @@
 ---
+comments:
+- actor: wballard
+  id: 01kxkpc6mzhz4s242wqs0v9sn4
+  text: |-
+    Picked up. Research + FM Tool API probe complete.
+
+    FM `Tool` PROTOCOL (probed via swift-symbolgraph-extract, arm64-apple-macosx27, NOT invented):
+    - `protocol Tool<Arguments, Output>: Sendable` with `var name/description/parameters/includesSchemaInInstructions` and `func call(arguments: Self.Arguments) async throws -> Self.Output`. `Arguments: ConvertibleFromGeneratedContent`, `Output: PromptRepresentable`.
+    - There is NO free-standing `ToolOutput` type (the card's "ToolOutput" refers to `Transcript.ToolOutput`, a transcript entry from the prompt-turn task). `GeneratedContent` has `init(json:)` + `.jsonString`.
+    - KEY CONSEQUENCE: FM constructs and calls tools in-process; the bridge does NOT wrap tool construction (tools are attached to `LanguageModelSession(tools:)` by the consumer's `makeSession`). So a tool reaches the client-environment handle through an AMBIENT `@TaskLocal ClientEnvironment.current` the bridge binds around the turn generation — NOT constructor injection (the bridge can't touch already-built tools). Direct construction of the handle is also public so tests/consumers use it explicitly.
+
+    DESIGN (Sources/.../Bridge/ClientEnvironment.swift): `public struct ClientEnvironment: Sendable` wrapping (AgentSideConnection, SessionId, negotiated ClientCapabilities). Offers, injecting sessionId automatically + gating on caps BEFORE any wire call:
+    - readTextFile(path:line:limit:)->String / writeTextFile(path:content:) → fs/* ; gated on clientCapabilities.fs.readTextFile / .writeTextFile.
+    - requestPermission(toolCall:options:) → session/request_permission; maps RequestPermissionOutcome: .selected(allow_*)→returns the chosen PermissionOption; .selected(reject_*)/.cancelled→throws ClientEnvironmentError.permissionDenied (the typed error the tool turns into a failed tool_call_update).
+    - terminal primitives createTerminal/terminalOutput(bounded output+truncated)/waitForTerminalExit/killTerminal/releaseTerminal ; gated on clientCapabilities.terminal.
+    - runCommand(toolCallId:command:...) composes: createTerminal → emit tool_call_update embedding ToolCallContent.terminal(Terminal(terminalId)) via connection.sessionUpdate (so the client renders live output, spec §9) → waitForTerminalExit → terminalOutput → releaseTerminal, returning CommandOutcome{output,truncated,exitStatus}. Best-effort release on error.
+    Typed errors: ClientEnvironmentError.capabilityUnavailable(ClientEnvironment.Capability) / .permissionDenied(ClientEnvironment.PermissionDenial). Un-advertised capability throws locally with zero wire traffic.
+
+    Agent wiring: FoundationModelsAgent captures params.clientCapabilities in initialize (default empty → gated off pre-init), and runTurn binds ClientEnvironment.$current around the generation.
+
+    Tests (deterministic, no live model): ToolBridgeTests + PermissionFlowTests over a wired fake Client (RecordingEnvironmentClient) on InMemoryTransport, asserting wire sequences and capability gating. TDD next.
+  timestamp: 2026-07-15T20:09:32.575261+00:00
+- actor: wballard
+  id: 01kxkprr1vp7n2f3dh7wryrhsp
+  text: |-
+    Implementation landed (green). Files:
+    - NEW Sources/.../Bridge/ClientEnvironment.swift — `public struct ClientEnvironment: Sendable` (the client-environment handle). Wraps (AgentSideConnection, SessionId, ClientCapabilities). API: readTextFile(path:line:limit:)->String, writeTextFile(path:content:), requestPermission(toolCall:options:)->PermissionOption, createTerminal/terminalOutput/waitForTerminalExit/killTerminal/releaseTerminal, and runCommand(toolCallId:command:args:...) -> CommandResult. Each fs/terminal op calls a private require(_:Capability) gate that reads capabilities.fs.readTextFile/.writeTextFile/.terminal and throws ClientEnvironmentError.capabilityUnavailable BEFORE any wire call. requestPermission maps RequestPermissionOutcome via static grantedOption(from:options:): .selected matched to an allow_* option → returns it; reject_*/unknown-option/.cancelled/.unknown → throws ClientEnvironmentError.permissionDenied(.rejected(id)/.cancelled). runCommand composes createTerminal → emit tool_call_update embedding ToolCallContent.terminal(Terminal(terminalId)) via connection.sessionUpdate → waitForTerminalExit → terminalOutput → releaseTerminal; best-effort release on error so a mid-run failure never leaks a client terminal. `@TaskLocal public static var current: ClientEnvironment?` is the ambient reach for FM tools.
+    - Sources/.../Bridge/FoundationModelsAgent.swift — capture params.clientCapabilities in initialize (default empty ClientCapabilities → all gated ops off before negotiation); runTurn builds the per-turn ClientEnvironment and binds ClientEnvironment.$current around the generation task (the per session/turn injection). No change to the wire behavior of existing turns.
+
+    HOW FM TOOLS REACH IT: the bridge does NOT construct FM tools (the consumer attaches them to LanguageModelSession in makeSession), so injection is ambient, not constructor-based: the agent binds ClientEnvironment.$current for the whole turn generation; a tool's call(arguments:) reads ClientEnvironment.current. The handle is also directly constructible (public init) for tests/consumers.
+
+    CAPABILITY GATING: gated ops (fs read/write, all terminal/*) throw locally with zero wire traffic when the matching clientCapabilities flag is false; requestPermission is NOT gated (core Client method).
+
+    Tests (Tests/.../Bridge/): ToolBridgeTestSupport.swift (RecordingEnvironmentClient — a fake Client recording an ordered handler-name log + captured requests + received session updates, configurable canned responses; makeWiredEnvironment wires it to an AgentSideConnection over InMemoryTransport; ClientCapabilities.readOnly/.writeOnly/.terminalOnly fixtures). ToolBridgeTests (fs read round-trip; fs write round-trip; runCommand asserts the exact wire sequence [createTerminal, sessionUpdate(embed), waitForTerminalExit, terminalOutput, releaseTerminal] + the embedded ToolCallContent.terminal + bounded outputByteLimit; three un-advertised-capability tests each assert a typed throw AND recordedCalls.isEmpty). PermissionFlowTests (grant returns the allow option; reject → permissionDenied(.rejected); cancel → permissionDenied(.cancelled); denial converted into a failed tool_call_update). Deterministic ordering holds because the Connection read loop awaits notifications inline in arrival order and the handle awaits each request's response before the next — no live model, no concurrent real turns, no SIGTRAP risk.
+
+    VERIFICATION: swift build --build-tests = 0 warnings / 0 errors. swift test = 147 FoundationModelsACPTests (was 137; +10) + 108 ACPGenerateTests = 255 pass, 0 failures. FM Tool protocol probed real; no API divergence. Checkpoint + review next.
+  timestamp: 2026-07-15T20:16:23.611555+00:00
 depends_on:
 - 01KXHBDW50GFJS4TH0HGS0D3KP
-position_column: todo
-position_ordinal: '9080'
+position_column: doing
+position_ordinal: '80'
 title: Bridge FM tools → reverse ACP requests (fs/*, terminal/*, permission)
 ---
 ## What
