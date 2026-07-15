@@ -94,7 +94,6 @@ private func startPrompt(
 func updatesDemuxAcrossInterleavedSessions() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
-    defer { Task { await client.close() } }
 
     var firstUpdates = client.updates(for: sessionOne).makeAsyncIterator()
     var secondUpdates = client.updates(for: sessionTwo).makeAsyncIterator()
@@ -110,6 +109,8 @@ func updatesDemuxAcrossInterleavedSessions() async throws {
     #expect(firstA == messageChunk("a1"))
     #expect(firstB == messageChunk("a2"))
     #expect(secondA == messageChunk("b1"))
+
+    await client.close()
 }
 
 // MARK: - Straggler after the prompt response
@@ -118,7 +119,6 @@ func updatesDemuxAcrossInterleavedSessions() async throws {
 func lateToolCallUpdateAfterPromptResponseIsDelivered() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
-    defer { Task { await client.close() } }
     let reader = WireReader(agentEnd)
 
     var updates = client.updates(for: sessionOne).makeAsyncIterator()
@@ -135,6 +135,8 @@ func lateToolCallUpdateAfterPromptResponseIsDelivered() async throws {
 
     #expect(await updates.next() == messageChunk("mid-turn"))
     #expect(await updates.next() == toolCallUpdate("call-late"))
+
+    await client.close()
 }
 
 // MARK: - Post-cancel stragglers then the cancelled stop reason
@@ -143,7 +145,6 @@ func lateToolCallUpdateAfterPromptResponseIsDelivered() async throws {
 func postCancelTrailingUpdatesThenCancelledStopReasonInOrder() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
-    defer { Task { await client.close() } }
     let reader = WireReader(agentEnd)
 
     var updates = client.updates(for: sessionOne).makeAsyncIterator()
@@ -163,6 +164,8 @@ func postCancelTrailingUpdatesThenCancelledStopReasonInOrder() async throws {
     // The trailing updates are observed on the stream, in wire order.
     #expect(await updates.next() == toolCallUpdate("call-trailing"))
     #expect(await updates.next() == messageChunk("winding down"))
+
+    await client.close()
 }
 
 // MARK: - Stream finish on disconnect
