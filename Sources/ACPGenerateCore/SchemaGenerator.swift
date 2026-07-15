@@ -79,7 +79,7 @@ public struct SchemaGenerator: Sendable {
         var unions: [String] = []
         var placeholders: [String] = []
 
-        for (name, fragment) in definitions.sorted(by: { $0.key < $1.key }) {
+        for (name, fragment) in Self.orderedEntries(of: definitions) {
             let documentation = fragment[Self.descriptionKey]?.stringValue
             switch try classify(name: name, fragment: fragment) {
             case .handwritten:
@@ -163,6 +163,9 @@ public struct SchemaGenerator: Sendable {
     /// The schema keyword for exclusive unions.
     private static let oneOfKey = "oneOf"
 
+    /// The error detail for a union with no variants.
+    private static let emptyUnionDetail = "empty \(oneOfKey)"
+
     /// The schema keyword for inclusive unions.
     private static let anyOfKey = "anyOf"
 
@@ -198,9 +201,7 @@ public struct SchemaGenerator: Sendable {
         if config.handwrittenDefinitions.contains(name) {
             return .handwritten
         }
-        guard let members = fragment.objectValue else {
-            throw GeneratorError.unsupportedShape(context: name, detail: "definition is not a JSON object")
-        }
+        let members = try objectMembers(of: fragment, context: name, subject: "definition")
         if members[Self.oneOfKey] != nil {
             guard let variants = members[Self.oneOfKey]?.arrayValue else {
                 throw GeneratorError.unsupportedShape(context: name, detail: "\(Self.oneOfKey) is not an array")
@@ -251,6 +252,35 @@ public struct SchemaGenerator: Sendable {
         }
     }
 
+    /// A string-keyed map's entries in deterministic key order.
+    ///
+    /// - Parameter members: The map to order.
+    /// - Returns: The entries sorted by key.
+    private static func orderedEntries<Value>(of members: [String: Value]) -> [(key: String, value: Value)] {
+        members.sorted { $0.key < $1.key }
+    }
+
+    /// Unwraps a fragment's object members, failing loudly otherwise.
+    ///
+    /// - Parameters:
+    ///   - fragment: The schema fragment.
+    ///   - context: The definition or field, for error messages.
+    ///   - subject: What the fragment is (`definition`/`fragment`), for the
+    ///     error message.
+    /// - Returns: The fragment's object members.
+    /// - Throws: `GeneratorError.unsupportedShape` when the fragment is not
+    ///   a JSON object.
+    private func objectMembers(
+        of fragment: JSONValue,
+        context: String,
+        subject: String
+    ) throws -> [String: JSONValue] {
+        guard let members = fragment.objectValue else {
+            throw GeneratorError.unsupportedShape(context: context, detail: "\(subject) is not a JSON object")
+        }
+        return members
+    }
+
     // MARK: - Union models
 
     /// Distinguishes the two `oneOf` families this stage emits.
@@ -264,7 +294,7 @@ public struct SchemaGenerator: Sendable {
     ///   mixed-shape `oneOf`, so unknown constructs fail loudly.
     private func classifyOneOf(name: String, variants: [JSONValue]) throws -> DefinitionKind {
         guard !variants.isEmpty else {
-            throw GeneratorError.unsupportedShape(context: name, detail: "empty \(Self.oneOfKey)")
+            throw GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail)
         }
         let types = variants.map { $0[Self.typeKey]?.stringValue }
         if types.allSatisfy({ $0 == "string" }) {
@@ -288,11 +318,11 @@ public struct SchemaGenerator: Sendable {
     /// - Throws: `GeneratorError.unsupportedShape` when a variant lacks a
     ///   const value or the case names collide.
     private func stringEnumModel(name: String, fragment: JSONValue) throws -> StringEnumModel {
-        let variants = fragment[Self.oneOfKey]?.arrayValue ?? []
+        let variants = unionVariants(of: fragment)
         let cases = try variants.enumerated().map { index, variant in
             let context = "\(name) variant \(index)"
             guard let wireValue = variant[Self.constKey]?.stringValue else {
-                throw GeneratorError.unsupportedShape(context: context, detail: "string variant without a const value")
+                throw GeneratorError.unsupportedShape(context: context, detail: "string variant without a \(Self.constKey) value")
             }
             return EnumCaseModel(
                 wireValue: wireValue,
@@ -322,7 +352,7 @@ public struct SchemaGenerator: Sendable {
     /// - Throws: `GeneratorError.unsupportedShape` when a variant deviates
     ///   from the internally-tagged shape or the case names collide.
     private func taggedUnionModel(name: String, fragment: JSONValue) throws -> TaggedUnionModel {
-        let variants = fragment[Self.oneOfKey]?.arrayValue ?? []
+        let variants = unionVariants(of: fragment)
         var discriminator: String?
         let cases = try variants.enumerated().map { index, variant in
             let context = "\(name) variant \(index)"
@@ -335,11 +365,11 @@ public struct SchemaGenerator: Sendable {
                 )
             }
             guard let tag = keyFragment[Self.constKey]?.stringValue else {
-                throw GeneratorError.unsupportedShape(context: context, detail: "discriminator \(key) has no const value")
+                throw GeneratorError.unsupportedShape(context: context, detail: "discriminator \(key) has no \(Self.constKey) value")
             }
             let required = (variant[Self.requiredKey]?.arrayValue ?? []).compactMap(\.stringValue)
             guard required == [key] else {
-                throw GeneratorError.unsupportedShape(context: context, detail: "expected required to be exactly [\(key)]")
+                throw GeneratorError.unsupportedShape(context: context, detail: "expected \(Self.requiredKey) to be exactly [\(key)]")
             }
             if let established = discriminator, established != key {
                 throw GeneratorError.unsupportedShape(
@@ -363,7 +393,7 @@ public struct SchemaGenerator: Sendable {
             )
         }
         guard let discriminator else {
-            throw GeneratorError.unsupportedShape(context: name, detail: "empty \(Self.oneOfKey)")
+            throw GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail)
         }
         try validateCaseNames(names: cases.map(\.swiftName), context: name)
         // The discriminator becomes the CodingKeys case, so it must itself
@@ -449,8 +479,7 @@ public struct SchemaGenerator: Sendable {
     private func structModel(name: String, fragment: JSONValue) throws -> StructModel {
         let properties = fragment[Self.propertiesKey]?.objectValue ?? [:]
         let required = Set((fragment[Self.requiredKey]?.arrayValue ?? []).compactMap(\.stringValue))
-        var models = try properties
-            .sorted(by: { $0.key < $1.key })
+        var models = try Self.orderedEntries(of: properties)
             .map { wireName, propertyFragment in
                 try propertyModel(
                     definition: name,
@@ -668,9 +697,7 @@ public struct SchemaGenerator: Sendable {
         override: GeneratorConfig.InvariantType?,
         context: String
     ) throws -> ResolvedType {
-        guard let members = fragment.objectValue else {
-            throw GeneratorError.unsupportedShape(context: context, detail: "fragment is not a JSON object")
-        }
+        let members = try objectMembers(of: fragment, context: context, subject: "fragment")
         if let composite = try resolveCompositeType(members: members, override: override, context: context) {
             return composite
         }
@@ -947,7 +974,7 @@ public struct SchemaGenerator: Sendable {
                 detail: "object default targets \(targetName), which has required field \(property.wireName)"
             )
         }
-        for (wireName, value) in members.sorted(by: { $0.key < $1.key }) {
+        for (wireName, value) in Self.orderedEntries(of: members) {
             try validateDefaultMember(
                 value: value,
                 wireName: wireName,
@@ -1087,6 +1114,31 @@ extension SchemaGenerator {
         manifestGroups.firstIndex { $0.side == side } ?? manifestGroups.count
     }
 
+    /// Collects the entries produced for each manifest side.
+    ///
+    /// - Parameter entries: Produces one side's entries.
+    /// - Returns: All sides' entries: agent, then client, then protocol.
+    /// - Throws: Rethrows the producer's error.
+    private func collectBySide<Entry>(entries: (MethodSide) throws -> [Entry]) rethrows -> [Entry] {
+        try Self.manifestGroups.flatMap { try entries($0.side) }
+    }
+
+    /// A routing group's entries ordered by wire method name.
+    ///
+    /// - Parameter group: The group's routing key → wire method map.
+    /// - Returns: The entries sorted by wire method name.
+    private static func orderedByWireMethod(of group: [String: String]) -> [(key: String, value: String)] {
+        group.sorted { $0.value < $1.value }
+    }
+
+    /// A definition's `oneOf` variants, empty when absent.
+    ///
+    /// - Parameter fragment: The definition's schema fragment.
+    /// - Returns: The variant fragments in schema order.
+    private func unionVariants(of fragment: JSONValue) -> [JSONValue] {
+        fragment[Self.oneOfKey]?.arrayValue ?? []
+    }
+
     /// Builds the method-routing table file.
     ///
     /// Routing is derived from the routing manifests and the schema's
@@ -1176,7 +1228,7 @@ extension SchemaGenerator {
     ) throws -> [String: String] {
         var methods: [String: String] = [:]
         var seenWires = Set<String>()
-        for (routingKey, value) in group.sorted(by: { $0.key < $1.key }) {
+        for (routingKey, value) in Self.orderedEntries(of: group) {
             guard let wireMethod = value.stringValue else {
                 throw GeneratorError.invalidSchema("\(context) member \(key).\(routingKey) is not a string")
             }
@@ -1197,7 +1249,7 @@ extension SchemaGenerator {
     ///   only one of the two annotations or an unknown side.
     private func schemaRoutes(from definitions: [String: JSONValue]) throws -> [SchemaRoute: [String]] {
         var routes: [SchemaRoute: [String]] = [:]
-        for (name, fragment) in definitions.sorted(by: { $0.key < $1.key }) {
+        for (name, fragment) in Self.orderedEntries(of: definitions) {
             let sideValue = fragment[Self.sideAnnotationKey]?.stringValue
             let methodValue = fragment[Self.methodAnnotationKey]?.stringValue
             if sideValue == nil, methodValue == nil {
@@ -1239,12 +1291,12 @@ extension SchemaGenerator {
         manifest: RoutingManifest,
         routes: [SchemaRoute: [String]]
     ) throws -> [MethodModel] {
-        var models: [MethodModel] = []
         var consumed = Set<SchemaRoute>()
-        for (_, side) in Self.manifestGroups {
+        let models = try collectBySide { (side: MethodSide) -> [MethodModel] in
             let group = manifest.methodsBySide[side] ?? [:]
             var handlerNames = Set<String>()
-            for (routingKey, wireMethod) in group.sorted(by: { $0.value < $1.value }) {
+            var sideModels: [MethodModel] = []
+            for (routingKey, wireMethod) in Self.orderedByWireMethod(of: group) {
                 let route = SchemaRoute(side: side, wireMethod: wireMethod)
                 guard let definitionNames = routes[route] else {
                     throw GeneratorError.invalidSchema(
@@ -1259,8 +1311,9 @@ extension SchemaGenerator {
                     definitionNames: definitionNames
                 )
                 try registerHandlerName(handlerName: model.handlerName, side: side, in: &handlerNames, label: "handler")
-                models.append(model)
+                sideModels.append(model)
             }
+            return sideModels
         }
 
         let unrouted = routes.keys
@@ -1364,24 +1417,24 @@ extension SchemaGenerator {
         stable: RoutingManifest,
         unstable: RoutingManifest
     ) throws -> [UnstableMethodModel] {
-        var models: [UnstableMethodModel] = []
-        for (_, side) in Self.manifestGroups {
+        try collectBySide { (side: MethodSide) -> [UnstableMethodModel] in
             let stableWires = Set((stable.methodsBySide[side] ?? [:]).values)
             let group = unstable.methodsBySide[side] ?? [:]
             var handlerNames = Set<String>()
-            for (routingKey, wireMethod) in group.sorted(by: { $0.value < $1.value })
+            var sideModels: [UnstableMethodModel] = []
+            for (routingKey, wireMethod) in Self.orderedByWireMethod(of: group)
             where !stableWires.contains(wireMethod) {
                 let handlerName = try swiftCaseName(
                     fromWire: routingKey,
                     context: "unstable method \(wireMethod)"
                 )
                 try registerHandlerName(handlerName: handlerName, side: side, in: &handlerNames, label: "unstable handler")
-                models.append(
+                sideModels.append(
                     UnstableMethodModel(wireMethod: wireMethod, handlerName: handlerName, side: side)
                 )
             }
+            return sideModels
         }
-        return models
     }
 
     /// Records a handler name in a side's seen-set, failing on a collision.

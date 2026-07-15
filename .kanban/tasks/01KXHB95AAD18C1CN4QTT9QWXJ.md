@@ -92,6 +92,10 @@ comments:
 
     Verification: swift test 167/167 green, zero warnings, regeneration leaves Generated/ byte-identical. Commit b850ab9. Running review pass 8.
   timestamp: 2026-07-15T14:18:16.345487+00:00
+- actor: wballard
+  id: 01kxk2y3gh6wtrpmdmgtzk38e6
+  text: 'Review pass 8: 15 findings, all one class (hardcoded JSON schema keywords), all fixed in commit 5b6204a: every schema keyword used as a lookup key in SchemaGenerator.swift is now a named constant (defsKey, refKey, typeKey, oneOfKey, anyOfKey, allOfKey, enumKey, descriptionKey, constKey, requiredKey, propertiesKey) under a "Schema keywords" MARK, the "#/$defs/" pointer prefix is built from defsKey, and the error messages that cite those keywords interpolate the same constants. Verification: count-asserting script (caught a sixth ["type"] site the plan missed), swift test 167/167 green, zero warnings, regeneration leaves Generated/ byte-identical. Running review pass 9.'
+  timestamp: 2026-07-15T14:29:47.665225+00:00
 depends_on:
 - 01KXHB88Q1GSGHMPXHNSMKM2XF
 position_column: review
