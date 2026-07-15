@@ -82,6 +82,19 @@ enum RoleRouting {
         }
         return match.wireMethod
     }
+
+    /// A method-not-found error naming a handler's wire method.
+    ///
+    /// Shared by the `Agent` and `Client` default implementations so the
+    /// error-construction logic lives in one place.
+    ///
+    /// - Parameters:
+    ///   - handler: The Swift handler name of the unsupported method.
+    ///   - side: The side that serves the method.
+    /// - Returns: The `-32601` error carrying the method's wire name.
+    static func methodNotFound(handler: String, on side: MethodSide) -> RequestError {
+        .methodNotFound(wire(handler: handler, on: side))
+    }
 }
 
 // MARK: - Inbound / outbound dispatch helpers

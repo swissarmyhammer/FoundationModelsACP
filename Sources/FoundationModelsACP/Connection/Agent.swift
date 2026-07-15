@@ -100,50 +100,51 @@ public protocol Agent: Sendable {
 /// Default implementations that answer method-not-found for every optional
 /// method, so a conformer implements only what its capabilities advertise.
 extension Agent {
-    /// Throws method-not-found for an unsupported optional agent method.
-    ///
-    /// - Parameter handler: The handler name of the unsupported method.
-    /// - Throws: `RequestError.methodNotFound` carrying the method's wire name.
-    private func unsupported(_ handler: String) throws -> Never {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: handler, on: .agent))
-    }
-
+    /// Default implementation; throws method-not-found unless overridden.
     public func loadSession(_ params: LoadSessionRequest) async throws -> LoadSessionResponse {
-        try unsupported("loadSession")
+        throw RoleRouting.methodNotFound(handler: "loadSession", on: .agent)
     }
 
+    /// Default implementation; throws method-not-found unless overridden.
     public func authenticate(_ params: AuthenticateRequest) async throws -> AuthenticateResponse {
-        try unsupported("authenticate")
+        throw RoleRouting.methodNotFound(handler: "authenticate", on: .agent)
     }
 
+    /// Default implementation; throws method-not-found unless overridden.
     public func setSessionConfigOption(
         _ params: SetSessionConfigOptionRequest
     ) async throws -> SetSessionConfigOptionResponse {
-        try unsupported("setSessionConfigOption")
+        throw RoleRouting.methodNotFound(handler: "setSessionConfigOption", on: .agent)
     }
 
+    /// Default implementation; throws method-not-found unless overridden.
     @available(*, deprecated, message: "Use setSessionConfigOption; session/set_mode is being removed")
     public func setSessionMode(_ params: SetSessionModeRequest) async throws -> SetSessionModeResponse {
-        try unsupported("setSessionMode")
+        throw RoleRouting.methodNotFound(handler: "setSessionMode", on: .agent)
     }
 
+    /// Default implementation; throws method-not-found unless overridden.
     public func listSessions(_ params: ListSessionsRequest) async throws -> ListSessionsResponse {
-        try unsupported("listSessions")
+        throw RoleRouting.methodNotFound(handler: "listSessions", on: .agent)
     }
 
+    /// Default implementation; throws method-not-found unless overridden.
     public func resumeSession(_ params: ResumeSessionRequest) async throws -> ResumeSessionResponse {
-        try unsupported("resumeSession")
+        throw RoleRouting.methodNotFound(handler: "resumeSession", on: .agent)
     }
 
+    /// Default implementation; throws method-not-found unless overridden.
     public func deleteSession(_ params: DeleteSessionRequest) async throws {
-        try unsupported("deleteSession")
+        throw RoleRouting.methodNotFound(handler: "deleteSession", on: .agent)
     }
 
+    /// Default implementation; throws method-not-found unless overridden.
     public func closeSession(_ params: CloseSessionRequest) async throws {
-        try unsupported("closeSession")
+        throw RoleRouting.methodNotFound(handler: "closeSession", on: .agent)
     }
 
+    /// Default implementation; throws method-not-found unless overridden.
     public func logout(_ params: LogoutRequest) async throws {
-        try unsupported("logout")
+        throw RoleRouting.methodNotFound(handler: "logout", on: .agent)
     }
 }

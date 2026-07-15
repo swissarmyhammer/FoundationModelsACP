@@ -8,9 +8,6 @@ import Foundation
 /// `newSession`, `prompt`, and the rest of the agent surface) so a host can
 /// drive the agent.
 public final class ClientSideConnection: Sendable {
-    /// The side this connection calls outbound: the agent-side methods.
-    private static let peerSide: MethodSide = .agent
-
     /// The shared engine owning the connection and the served client.
     private let core: RoleConnectionCore<any Client>
 
@@ -37,6 +34,7 @@ public final class ClientSideConnection: Sendable {
             logger: logger,
             requestTimeout: requestTimeout,
             servedSide: .client,
+            peerSide: .agent,
             dispatchRequest: { handler, params, client in
                 try await Self.serve(handler, params: params, to: client)
             },
@@ -121,48 +119,6 @@ public final class ClientSideConnection: Sendable {
         }
     }
 
-    // MARK: - Outbound helpers (Client → Agent)
-
-    /// Issues an outbound agent request and decodes its typed response.
-    ///
-    /// - Parameters:
-    ///   - handler: The Swift handler name of the agent method to call.
-    ///   - params: The typed request parameters.
-    ///   - responseType: The expected response model type.
-    /// - Returns: The decoded response.
-    /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
-    ///   disconnect.
-    private func call<Request: Encodable, Response: Decodable>(
-        _ handler: String,
-        _ params: Request,
-        returning responseType: Response.Type
-    ) async throws -> Response {
-        try await RoleDispatch.callResult(
-            core.connection, handler: handler, on: Self.peerSide, params, returning: responseType
-        )
-    }
-
-    /// Issues an outbound agent request whose response carries no value.
-    ///
-    /// - Parameters:
-    ///   - handler: The Swift handler name of the agent method to call.
-    ///   - params: The typed request parameters.
-    /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
-    ///   disconnect.
-    private func callEmpty<Request: Encodable>(_ handler: String, _ params: Request) async throws {
-        try await RoleDispatch.callEmpty(core.connection, handler: handler, on: Self.peerSide, params)
-    }
-
-    /// Sends an outbound agent notification.
-    ///
-    /// - Parameters:
-    ///   - handler: The Swift handler name of the agent notification to send.
-    ///   - params: The typed notification parameters.
-    /// - Throws: `ConnectionError.closed` after disconnect.
-    private func notify<Params: Encodable>(_ handler: String, _ params: Params) async throws {
-        try await RoleDispatch.notify(core.connection, handler: handler, on: Self.peerSide, params)
-    }
-
     // MARK: - Outbound (Client → Agent)
 
     /// Negotiates protocol version and capabilities with the agent.
@@ -172,7 +128,7 @@ public final class ClientSideConnection: Sendable {
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
     ///   disconnect.
     public func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
-        try await call("initialize", params, returning: InitializeResponse.self)
+        try await core.call("initialize", params, returning: InitializeResponse.self)
     }
 
     /// Creates a new session on the agent.
@@ -182,7 +138,7 @@ public final class ClientSideConnection: Sendable {
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
     ///   disconnect.
     public func newSession(_ params: NewSessionRequest) async throws -> NewSessionResponse {
-        try await call("newSession", params, returning: NewSessionResponse.self)
+        try await core.call("newSession", params, returning: NewSessionResponse.self)
     }
 
     /// Loads an existing session on the agent.
@@ -192,7 +148,7 @@ public final class ClientSideConnection: Sendable {
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
     ///   disconnect.
     public func loadSession(_ params: LoadSessionRequest) async throws -> LoadSessionResponse {
-        try await call("loadSession", params, returning: LoadSessionResponse.self)
+        try await core.call("loadSession", params, returning: LoadSessionResponse.self)
     }
 
     /// Runs one prompt turn on the agent, returning when the turn stops.
@@ -202,7 +158,7 @@ public final class ClientSideConnection: Sendable {
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
     ///   disconnect.
     public func prompt(_ params: PromptRequest) async throws -> PromptResponse {
-        try await call("prompt", params, returning: PromptResponse.self)
+        try await core.call("prompt", params, returning: PromptResponse.self)
     }
 
     /// Cancels the current turn on the agent.
@@ -210,7 +166,7 @@ public final class ClientSideConnection: Sendable {
     /// - Parameter notification: The cancellation notification.
     /// - Throws: `ConnectionError.closed` after disconnect.
     public func cancel(_ notification: CancelNotification) async throws {
-        try await notify("sessionCancel", notification)
+        try await core.notify("sessionCancel", notification)
     }
 
     /// Authenticates with the agent.
@@ -220,7 +176,7 @@ public final class ClientSideConnection: Sendable {
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
     ///   disconnect.
     public func authenticate(_ params: AuthenticateRequest) async throws -> AuthenticateResponse {
-        try await call("authenticate", params, returning: AuthenticateResponse.self)
+        try await core.call("authenticate", params, returning: AuthenticateResponse.self)
     }
 
     /// Sets a session configuration option on the agent.
@@ -232,7 +188,7 @@ public final class ClientSideConnection: Sendable {
     public func setSessionConfigOption(
         _ params: SetSessionConfigOptionRequest
     ) async throws -> SetSessionConfigOptionResponse {
-        try await call("setSessionConfigOption", params, returning: SetSessionConfigOptionResponse.self)
+        try await core.call("setSessionConfigOption", params, returning: SetSessionConfigOptionResponse.self)
     }
 
     /// Sets the session mode on the agent.
@@ -243,7 +199,7 @@ public final class ClientSideConnection: Sendable {
     ///   disconnect.
     @available(*, deprecated, message: "Use setSessionConfigOption; session/set_mode is being removed")
     public func setSessionMode(_ params: SetSessionModeRequest) async throws -> SetSessionModeResponse {
-        try await call("setSessionMode", params, returning: SetSessionModeResponse.self)
+        try await core.call("setSessionMode", params, returning: SetSessionModeResponse.self)
     }
 
     /// Lists sessions on the agent.
@@ -253,7 +209,7 @@ public final class ClientSideConnection: Sendable {
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
     ///   disconnect.
     public func listSessions(_ params: ListSessionsRequest) async throws -> ListSessionsResponse {
-        try await call("listSessions", params, returning: ListSessionsResponse.self)
+        try await core.call("listSessions", params, returning: ListSessionsResponse.self)
     }
 
     /// Resumes a session on the agent.
@@ -263,7 +219,7 @@ public final class ClientSideConnection: Sendable {
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
     ///   disconnect.
     public func resumeSession(_ params: ResumeSessionRequest) async throws -> ResumeSessionResponse {
-        try await call("resumeSession", params, returning: ResumeSessionResponse.self)
+        try await core.call("resumeSession", params, returning: ResumeSessionResponse.self)
     }
 
     /// Deletes a session on the agent.
@@ -272,7 +228,7 @@ public final class ClientSideConnection: Sendable {
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
     ///   disconnect.
     public func deleteSession(_ params: DeleteSessionRequest) async throws {
-        try await callEmpty("deleteSession", params)
+        try await core.callEmpty("deleteSession", params)
     }
 
     /// Closes a session on the agent.
@@ -281,7 +237,7 @@ public final class ClientSideConnection: Sendable {
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
     ///   disconnect.
     public func closeSession(_ params: CloseSessionRequest) async throws {
-        try await callEmpty("closeSession", params)
+        try await core.callEmpty("closeSession", params)
     }
 
     /// Logs out of the agent.
@@ -290,7 +246,7 @@ public final class ClientSideConnection: Sendable {
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
     ///   disconnect.
     public func logout(_ params: LogoutRequest) async throws {
-        try await callEmpty("logout", params)
+        try await core.callEmpty("logout", params)
     }
 
     /// Shuts the connection down, rejecting every pending request.

@@ -18,7 +18,10 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
         @Sendable (_ handler: String, _ params: JSONValue?, _ role: Role) async -> Void
 
     /// The underlying full-duplex JSON-RPC engine.
-    let connection: Connection
+    private let connection: Connection
+
+    /// The side this connection calls outbound: the peer role's methods.
+    private let peerSide: MethodSide
 
     /// The write-once cell holding the served role.
     private let holder: RoleHolder<Role>
@@ -34,6 +37,7 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
     ///   - requestTimeout: Default outbound request timeout; `nil` waits
     ///     forever.
     ///   - servedSide: The side whose methods this connection serves inbound.
+    ///   - peerSide: The side whose methods this connection calls outbound.
     ///   - dispatchRequest: Routes an inbound request to the role's handler.
     ///   - dispatchNotification: Routes an inbound notification to the role's
     ///     handler.
@@ -42,9 +46,11 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
         logger: ACPLogger,
         requestTimeout: Duration?,
         servedSide: MethodSide,
+        peerSide: MethodSide,
         dispatchRequest: @escaping RequestDispatch,
         dispatchNotification: @escaping NotificationDispatch
     ) async {
+        self.peerSide = peerSide
         let holder = RoleHolder<Role>()
         let served = RoleRouting.served(on: servedSide)
         connection = await Connection(
@@ -72,6 +78,46 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
     /// - Parameter role: The role object to serve inbound calls.
     func setRole(_ role: Role) {
         holder.set(role)
+    }
+
+    /// Issues an outbound peer request and decodes its typed response.
+    ///
+    /// - Parameters:
+    ///   - handler: The Swift handler name of the peer method to call.
+    ///   - params: The typed request parameters.
+    ///   - responseType: The expected response model type.
+    /// - Returns: The decoded response.
+    /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
+    ///   disconnect.
+    func call<Request: Encodable, Response: Decodable>(
+        _ handler: String,
+        _ params: Request,
+        returning responseType: Response.Type
+    ) async throws -> Response {
+        try await RoleDispatch.callResult(
+            connection, handler: handler, on: peerSide, params, returning: responseType
+        )
+    }
+
+    /// Issues an outbound peer request whose response carries no value.
+    ///
+    /// - Parameters:
+    ///   - handler: The Swift handler name of the peer method to call.
+    ///   - params: The typed request parameters.
+    /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
+    ///   disconnect.
+    func callEmpty<Request: Encodable>(_ handler: String, _ params: Request) async throws {
+        try await RoleDispatch.callEmpty(connection, handler: handler, on: peerSide, params)
+    }
+
+    /// Sends an outbound peer notification.
+    ///
+    /// - Parameters:
+    ///   - handler: The Swift handler name of the peer notification to send.
+    ///   - params: The typed notification parameters.
+    /// - Throws: `ConnectionError.closed` after disconnect.
+    func notify<Params: Encodable>(_ handler: String, _ params: Params) async throws {
+        try await RoleDispatch.notify(connection, handler: handler, on: peerSide, params)
     }
 
     /// Shuts the connection down, rejecting every pending request.

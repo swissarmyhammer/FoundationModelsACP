@@ -73,41 +73,40 @@ public protocol Client: Sendable {
 /// Default implementations that answer method-not-found for every gated
 /// method, so a conformer implements only what its capabilities advertise.
 extension Client {
-    /// Throws method-not-found for an unsupported gated client method.
-    ///
-    /// - Parameter handler: The handler name of the unsupported method.
-    /// - Throws: `RequestError.methodNotFound` carrying the method's wire name.
-    private func unsupported(_ handler: String) throws -> Never {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: handler, on: .client))
-    }
-
+    /// Default implementation; throws method-not-found unless overridden.
     public func readTextFile(_ params: ReadTextFileRequest) async throws -> ReadTextFileResponse {
-        try unsupported("readTextFile")
+        throw RoleRouting.methodNotFound(handler: "readTextFile", on: .client)
     }
 
+    /// Default implementation; throws method-not-found unless overridden.
     public func writeTextFile(_ params: WriteTextFileRequest) async throws {
-        try unsupported("writeTextFile")
+        throw RoleRouting.methodNotFound(handler: "writeTextFile", on: .client)
     }
 
+    /// Default implementation; throws method-not-found unless overridden.
     public func createTerminal(_ params: CreateTerminalRequest) async throws -> CreateTerminalResponse {
-        try unsupported("createTerminal")
+        throw RoleRouting.methodNotFound(handler: "createTerminal", on: .client)
     }
 
+    /// Default implementation; throws method-not-found unless overridden.
     public func terminalOutput(_ params: TerminalOutputRequest) async throws -> TerminalOutputResponse {
-        try unsupported("terminalOutput")
+        throw RoleRouting.methodNotFound(handler: "terminalOutput", on: .client)
     }
 
+    /// Default implementation; throws method-not-found unless overridden.
     public func waitForTerminalExit(
         _ params: WaitForTerminalExitRequest
     ) async throws -> WaitForTerminalExitResponse {
-        try unsupported("waitForTerminalExit")
+        throw RoleRouting.methodNotFound(handler: "waitForTerminalExit", on: .client)
     }
 
+    /// Default implementation; throws method-not-found unless overridden.
     public func killTerminal(_ params: KillTerminalRequest) async throws {
-        try unsupported("killTerminal")
+        throw RoleRouting.methodNotFound(handler: "killTerminal", on: .client)
     }
 
+    /// Default implementation; throws method-not-found unless overridden.
     public func releaseTerminal(_ params: ReleaseTerminalRequest) async throws {
-        try unsupported("releaseTerminal")
+        throw RoleRouting.methodNotFound(handler: "releaseTerminal", on: .client)
     }
 }
