@@ -113,7 +113,7 @@ import Testing
 
     /// Generates from the miniature schema and returns the file contents by name.
     ///
-    /// - Parameter name: The generated file name to look up.
+    /// - Parameter named: The generated file name to look up.
     /// - Returns: The Swift source text of that file.
     /// - Throws: A test failure when generation fails or the file is missing.
     private func miniatureOutput(named name: String) throws -> String {

@@ -73,7 +73,7 @@ private struct ListFixture: Codable, Hashable {
 ///
 /// - Parameters:
 ///   - type: The type to decode.
-///   - json: The JSON document text.
+///   - from: The JSON document text.
 /// - Returns: The decoded value.
 /// - Throws: Any decoding error, which most tests expect not to happen.
 private func decode<T: Decodable>(_ type: T.Type, from json: String) throws -> T {
