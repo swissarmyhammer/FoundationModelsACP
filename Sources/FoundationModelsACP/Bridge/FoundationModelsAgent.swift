@@ -104,13 +104,13 @@ public actor FoundationModelsAgent: Agent {
 
     /// Negotiates the protocol version and advertises capabilities.
     ///
-    /// Session-management capabilities are advertised if and only if the
-    /// corresponding provider hook is present; prompt capabilities advertise the
-    /// content the bridge renders (``promptCapabilities``), which `prompt` then
-    /// enforces. Advertising a session-management capability here does not yet
-    /// forward its method — that forwarding is a follow-on task — so an
-    /// unadvertised method still answers method-not-found via the ``Agent``
-    /// protocol defaults.
+    /// Session-management capabilities are advertised if and only if the bridge
+    /// honors them: `list`, `resume`, and `delete` track their provider hook's
+    /// presence; `close` is advertised whenever the provider manages a store
+    /// (it needs no hook — it just drops the live session); and `loadSession`
+    /// tracks the same restore hook `resume` forwards to. Prompt capabilities
+    /// advertise the content the bridge renders (``promptCapabilities``), which
+    /// `prompt` then enforces.
     ///
     /// - Parameter params: The client's initialization request.
     /// - Returns: The negotiated protocol version and advertised capabilities.
@@ -121,8 +121,10 @@ public actor FoundationModelsAgent: Agent {
         return InitializeResponse(
             protocolVersion: .latest,
             agentCapabilities: AgentCapabilities(
+                loadSession: provider.restoreSession != nil,
                 promptCapabilities: Self.promptCapabilities,
                 sessionCapabilities: SessionCapabilities(
+                    close: managesSessionStore ? SessionCloseCapabilities() : nil,
                     delete: provider.deleteSession.map { _ in SessionDeleteCapabilities() },
                     list: provider.listSessions.map { _ in SessionListCapabilities() },
                     resume: provider.restoreSession.map { _ in SessionResumeCapabilities() }
@@ -181,6 +183,117 @@ public actor FoundationModelsAgent: Agent {
     /// - Parameter params: The cancellation notification naming the session.
     public func cancel(_ params: CancelNotification) async {
         sessions[params.sessionId]?.activeGeneration?.cancel()
+    }
+
+    // MARK: - Session management
+
+    /// Whether this agent manages a session store — true when the provider
+    /// carries any store hook. The session-close surface is supported for any
+    /// store (it just drops the live session), so it is advertised and honored
+    /// together with them; the bare one-liner carries no hooks and advertises no
+    /// session management at all.
+    private var managesSessionStore: Bool {
+        provider.listSessions != nil
+            || provider.restoreSession != nil
+            || provider.deleteSession != nil
+    }
+
+    /// Lists the provider's stored sessions.
+    ///
+    /// Forwards to ``SessionProvider/listSessions``; the request's pagination
+    /// and filtering are not surfaced, since the hook reports the whole store.
+    ///
+    /// - Parameter params: The list-sessions request.
+    /// - Returns: The stored sessions the provider reports.
+    /// - Throws: Method-not-found (`-32601`) when the provider has no list hook,
+    ///   or any error the hook throws.
+    public func listSessions(_ params: ListSessionsRequest) async throws -> ListSessionsResponse {
+        guard let listSessions = provider.listSessions else {
+            throw Self.unsupported("listSessions")
+        }
+        return ListSessionsResponse(sessions: try await listSessions())
+    }
+
+    /// Resumes a stored session, so subsequent prompts run the normal turn path
+    /// against the restored session.
+    ///
+    /// - Parameter params: The resume-session request naming the session.
+    /// - Returns: An empty resume response; the bridge advertises no resume-time
+    ///   config options or modes.
+    /// - Throws: Method-not-found (`-32601`) when the provider has no restore
+    ///   hook, or any error the hook throws.
+    public func resumeSession(_ params: ResumeSessionRequest) async throws -> ResumeSessionResponse {
+        try await restore(params.sessionId, forHandler: "resumeSession")
+        return ResumeSessionResponse()
+    }
+
+    /// Loads a stored session — the legacy predecessor of
+    /// ``resumeSession(_:)``, forwarded to the same restore hook.
+    ///
+    /// - Parameter params: The load-session request naming the session.
+    /// - Returns: An empty load response; the bridge advertises no load-time
+    ///   config options or modes.
+    /// - Throws: Method-not-found (`-32601`) when the provider has no restore
+    ///   hook, or any error the hook throws.
+    public func loadSession(_ params: LoadSessionRequest) async throws -> LoadSessionResponse {
+        try await restore(params.sessionId, forHandler: "loadSession")
+        return LoadSessionResponse()
+    }
+
+    /// Deletes a stored session through the provider and drops any live copy, so
+    /// a deleted session is no longer promptable.
+    ///
+    /// - Parameter params: The delete-session request naming the session.
+    /// - Throws: Method-not-found (`-32601`) when the provider has no delete
+    ///   hook, or any error the hook throws.
+    public func deleteSession(_ params: DeleteSessionRequest) async throws {
+        guard let deleteSession = provider.deleteSession else {
+            throw Self.unsupported("deleteSession")
+        }
+        try await deleteSession(params.sessionId)
+        sessions[params.sessionId] = nil
+    }
+
+    /// Closes a session by dropping its live copy from the bridge's map.
+    ///
+    /// Close needs no provider hook — it is purely local — so it is supported
+    /// whenever the agent manages a session store (see ``initialize(_:)``).
+    /// Dropping an unknown session is a no-op.
+    ///
+    /// - Parameter params: The close-session request naming the session.
+    /// - Throws: Method-not-found (`-32601`) when the agent manages no store.
+    public func closeSession(_ params: CloseSessionRequest) async throws {
+        guard managesSessionStore else {
+            throw Self.unsupported("closeSession")
+        }
+        sessions[params.sessionId] = nil
+    }
+
+    /// Restores a stored session through ``SessionProvider/restoreSession`` and
+    /// tracks it under `sessionId`, so a prompt on it runs the identical turn
+    /// path a freshly created session does. Backs both ``resumeSession(_:)`` and
+    /// ``loadSession(_:)``.
+    ///
+    /// - Parameters:
+    ///   - sessionId: The session to restore and track.
+    ///   - handler: The calling method's handler name, for the not-found error.
+    /// - Throws: Method-not-found (`-32601`) when the provider has no restore
+    ///   hook, or any error the hook throws.
+    private func restore(_ sessionId: SessionId, forHandler handler: String) async throws {
+        guard let restoreSession = provider.restoreSession else {
+            throw Self.unsupported(handler)
+        }
+        let session = try await restoreSession(sessionId)
+        sessions[sessionId] = SessionState(session: session)
+    }
+
+    /// The method-not-found error for a session-management method the provider
+    /// does not back, matching the gate the ``Agent`` protocol default applies.
+    ///
+    /// - Parameter handler: The unsupported method's handler name.
+    /// - Returns: A `-32601` error naming the method's wire form.
+    private static func unsupported(_ handler: String) -> RequestError {
+        RoleRouting.methodNotFound(handler: handler, on: .agent)
     }
 
     // MARK: - Turn serialization
