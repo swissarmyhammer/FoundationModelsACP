@@ -44,6 +44,12 @@ public protocol ACPTransport: Sendable {
 
     /// Writes one outgoing chunk to the peer.
     ///
+    /// Each call must be atomic — the chunk reaches the wire as one
+    /// indivisible unit, never interleaved with another call's bytes — and
+    /// implementations must tolerate concurrent calls: `Connection` issues
+    /// writes from actor-isolated methods, but actor reentrancy allows two
+    /// writes to overlap across the suspension.
+    ///
     /// - Parameter data: The bytes to send, already framed by the caller.
     /// - Throws: A transport-specific error if the peer is gone.
     func write(_ data: Data) async throws
