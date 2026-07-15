@@ -1,8 +1,17 @@
 ---
+comments:
+- actor: wballard
+  id: 01kxhkf6dajfnene9rfnptzas3
+  text: 'Picked up by driver loop. Plan: TDD the four core types (JSONValue, ProtocolVersion, AbsolutePath, LineNumber) in Sources/FoundationModelsACP/Core/ with tests JSONValueTests.swift, ProtocolVersionTests.swift, WireInvariantTests.swift; then test → commit → review.'
+  timestamp: 2026-07-15T00:40:16.042668+00:00
+- actor: wballard
+  id: 01kxhkvc6s1wha9k936ph8789f
+  text: 'Implementation landed (TDD red→green). New files: Sources/FoundationModelsACP/Core/{JSONValue,ProtocolVersion,AbsolutePath,LineNumber}.swift and Tests/FoundationModelsACPTests/{JSONValueTests,ProtocolVersionTests,WireInvariantTests}.swift (Swift Testing). swift test: 23/23 pass; swift build: zero warnings. really-done adversarial double-check: PASS. Notes from double-check (non-blocking, by design): ProtocolVersion accepts bare number 1.0 (criteria only require rejecting string forms); JSONValue .number(Double) loses precision above 2^53 — intrinsic to the task-mandated Double case.'
+  timestamp: 2026-07-15T00:46:55.193908+00:00
 depends_on:
 - 01KXHB6V536ZBBFC24M9WQXWMM
-position_column: todo
-position_ordinal: '8180'
+position_column: doing
+position_ordinal: '80'
 title: 'Hand-written core types: JSONValue, ProtocolVersion, AbsolutePath'
 ---
 ## What

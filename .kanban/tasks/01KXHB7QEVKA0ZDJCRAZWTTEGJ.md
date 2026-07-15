@@ -20,10 +20,18 @@ comments:
   id: 01kxhk65hs39sq29a70b4q0hk6
   text: 'Fixed both review findings: expectRoutingTables doc now uses a plural - Parameters: block covering manifest and name, plus a - Throws: section. Checked the rest of the file for the same defect class — loadJSONObject already documents its single param/returns/throws exactly; @Test funcs have no docs (rule-compliant). swift test 5/5 exit 0; double-check verdict PASS. Checkboxes flipped to [x].'
   timestamp: 2026-07-15T00:35:20.249703+00:00
+- actor: wballard
+  id: 01kxhk77pxa7wwwtk0n2vn1trx
+  text: 'Checkpoint committed locally: dc05a1f "docs(tests): complete expectRoutingTables doc comment". Suite green (5/5, exit 0, zero warnings). Running review pass 2 on HEAD~1..HEAD.'
+  timestamp: 2026-07-15T00:35:55.229608+00:00
+- actor: wballard
+  id: 01kxhkcxda3134aq0sfag8ncvp
+  text: 'Review pass 2 on HEAD~1..HEAD: clean (0 findings, 14 rules attempted, 0 failed) and all prior findings checked. Task moved to done. Vendored release: schema-v1.19.0 (agentclientprotocol/agent-client-protocol), digests verified byte-identical. Commits: 74c057f (artifacts + README + tests), dc05a1f (doc-comment fix). Local commits only — nothing pushed.'
+  timestamp: 2026-07-15T00:39:01.290305+00:00
 depends_on:
 - 01KXHB6V536ZBBFC24M9WQXWMM
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8180'
 title: Vendor ACP schema v1.19.x artifacts
 ---
 ## What
