@@ -1,0 +1,3 @@
+{"id":"req-init","jsonrpc":"2.0","method":"initialize","params":{"clientCapabilities":{"fs":{"readTextFile":true,"writeTextFile":false},"terminal":false},"protocolVersion":1}}
+{"id":"req-new","jsonrpc":"2.0","method":"session/new","params":{"cwd":"/workspace","mcpServers":[]}}
+{"id":"req-prompt","jsonrpc":"2.0","method":"session/prompt","params":{"prompt":[{"text":"hello","type":"text"}],"sessionId":"golden-session"}}

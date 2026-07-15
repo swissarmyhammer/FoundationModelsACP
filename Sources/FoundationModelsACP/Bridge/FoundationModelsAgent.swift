@@ -76,6 +76,17 @@ public actor FoundationModelsAgent: Agent {
     /// tool cannot reach an un-advertised capability before negotiation.
     private var clientCapabilities = ClientCapabilities()
 
+    /// Scripted turn generators queued per session, consumed FIFO by `prompt`
+    /// in place of the live model. This is a wire-test seam only: it lets an
+    /// end-to-end test drive a full `session/prompt` round trip deterministically
+    /// with no model behind it (spec §8), reusing the exact production turn path.
+    /// It introduces no engine protocol and no second execution path (spec §7.1):
+    /// the queue is internal, never populated in production, and an empty queue
+    /// leaves `prompt` driving the real ``LanguageModelSession`` unchanged. It is
+    /// a `Mutex` so a test can enqueue synchronously, before the read loop
+    /// dispatches the first prompt.
+    private let scriptedTurns = Mutex<[SessionId: [TurnGenerator]]>([:])
+
     /// Creates a bridge agent from a connection and a session provider.
     ///
     /// - Parameters:
@@ -165,9 +176,13 @@ public actor FoundationModelsAgent: Agent {
             capabilities: Self.promptCapabilities
         )
         let sessionId = params.sessionId
+        let scriptedTurn = takeScriptedTurn(for: sessionId)
         return try await serializeTurn(for: sessionId) {
             try await self.runTurn(for: sessionId) { deliver in
-                try await self.streamTurn(for: sessionId, prompt: renderedPrompt, deliver: deliver)
+                if let scriptedTurn {
+                    return try await scriptedTurn(deliver)
+                }
+                return try await self.streamTurn(for: sessionId, prompt: renderedPrompt, deliver: deliver)
             }
         }
     }
@@ -294,6 +309,40 @@ public actor FoundationModelsAgent: Agent {
     /// - Returns: A `-32601` error naming the method's wire form.
     private static func unsupported(_ handler: String) -> RequestError {
         RoleRouting.methodNotFound(handler: handler, on: .agent)
+    }
+
+    // MARK: - Scripted turns (wire-test seam)
+
+    /// Queues a scripted turn generator to run in place of the live model on a
+    /// session's next `prompt`, for deterministic end-to-end wire tests.
+    ///
+    /// Enqueued turns are consumed FIFO, one per prompt; once the queue empties,
+    /// the session's prompts resume driving the real ``LanguageModelSession``.
+    /// It is `nonisolated` so a test can enqueue from the connection factory —
+    /// before the read loop dispatches the first prompt — closing any race.
+    ///
+    /// - Parameters:
+    ///   - sessionId: The session whose next prompt runs the generator.
+    ///   - generator: The scripted turn generator, delivering settled transcript
+    ///     entries and returning the turn's final transcript.
+    nonisolated func enqueueScriptedTurn(
+        for sessionId: SessionId,
+        _ generator: @escaping TurnGenerator
+    ) {
+        scriptedTurns.withLock { $0[sessionId, default: []].append(generator) }
+    }
+
+    /// Removes and returns a session's next queued scripted turn, if any.
+    ///
+    /// - Parameter sessionId: The session whose scripted turn to take.
+    /// - Returns: The next queued generator, or `nil` when the session has none.
+    private func takeScriptedTurn(for sessionId: SessionId) -> TurnGenerator? {
+        scriptedTurns.withLock { queues in
+            guard var queue = queues[sessionId], !queue.isEmpty else { return nil }
+            let next = queue.removeFirst()
+            queues[sessionId] = queue.isEmpty ? nil : queue
+            return next
+        }
     }
 
     // MARK: - Turn serialization
