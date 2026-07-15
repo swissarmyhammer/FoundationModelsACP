@@ -33,11 +33,18 @@ comments:
 
     VERIFICATION: swift build clean; two consecutive generator runs → run 1 stamps (only .schema-hash new; all .generated.swift byte-identical), run 2 is a no-op. swift test: 108 ACPGenerateTests + 70 FoundationModelsACPTests = 178, zero warnings, zero failures. Left in doing for review.
   timestamp: 2026-07-15T15:20:47.414511+00:00
+- actor: wballard
+  id: 01kxk6fbxs8jd117d0nynxwnj0
+  text: |-
+    Converged to done in 2 review passes. Pass 1: 1 finding (plugin logged-and-returned on non-zero acp-generate exit instead of throwing under its `async throws` signature) — fixed at root in commit d533b17 (throws GenerateACPError, which also ensures a failed regeneration fails the CI diff-gate command). Pass 2 (re-review of HEAD~1..HEAD): CLEAN, 0 findings.
+
+    Final: task in done. 2 local commits (c82ca85 feature, d533b17 review fix), local only, nothing pushed. swift test 178 green (108 ACPGenerateTests incl. 11 new + 70 FoundationModelsACPTests), zero warnings. `swift package generate-acp` verified: run 1 stamps + regenerates, run 2 is a no-op ("v1: up to date … nothing regenerated"); generated .swift files byte-identical across runs; only new artifact is Generated/.schema-hash. Command plugin listed and runnable via `swift package --allow-writing-to-package-directory generate-acp`. CI workflow builds/tests/regenerates/diff-gates.
+  timestamp: 2026-07-15T15:31:39.065517+00:00
 depends_on:
 - 01KXHB8QAXW73Z00S3HEE3F2AZ
 - 01KXHB95AAD18C1CN4QTT9QWXJ
-position_column: review
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8980'
 title: SwiftPM command plugin, hash stamp, and CI diff gate for codegen
 ---
 ## What
@@ -49,16 +56,24 @@ Wire the generator into the build workflow (spec §6):
 - **CI workflow** (`.github/workflows/ci.yml`): build, `swift test`, run `swift package generate-acp`, then `git diff --exit-code` — fail on any diff so committed code always matches the vendored schema.
 
 ## Acceptance Criteria
-- [ ] `swift package generate-acp` regenerates `Sources/FoundationModelsACP/Generated/` from `Schema/`
-- [ ] Running it twice in a row: second run is a no-op (verifiable via unchanged mtimes/log output)
-- [ ] Generator input paths and version label are configuration (a schema-set descriptor), not constants — adding a hypothetical second set requires no generator code change
-- [ ] CI fails when Generated/ is out of sync with Schema/, passes when in sync
+- [x] `swift package generate-acp` regenerates `Sources/FoundationModelsACP/Generated/` from `Schema/`
+- [x] Running it twice in a row: second run is a no-op (verifiable via unchanged mtimes/log output)
+- [x] Generator input paths and version label are configuration (a schema-set descriptor), not constants — adding a hypothetical second set requires no generator code change
+- [x] CI fails when Generated/ is out of sync with Schema/, passes when in sync
 
 ## Tests
-- [ ] `Tests/ACPGenerateTests/HashStampTests.swift` — same schema hash → generator exits without writing; changed hash → regenerates
-- [ ] `Tests/ACPGenerateTests/SchemaSetTests.swift` — generator runs against a second toy schema-set descriptor, emitting into its own namespace
-- [ ] CI job itself is the diff-gate test: `swift package generate-acp && git diff --exit-code` step in ci.yml
-- [ ] Run `swift test` — exits 0
+- [x] `Tests/ACPGenerateTests/HashStampTests.swift` — same schema hash → generator exits without writing; changed hash → regenerates
+- [x] `Tests/ACPGenerateTests/SchemaSetTests.swift` — generator runs against a second toy schema-set descriptor, emitting into its own namespace
+- [x] CI job itself is the diff-gate test: `swift package generate-acp && git diff --exit-code` step in ci.yml
+- [x] Run `swift test` — exits 0
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-07-15 10:21)
+
+- [x] `Plugins/GenerateACP/plugin.swift:28` — performCommand is `async throws` but logged the error and returned on a non-zero tool exit instead of throwing. Fixed in commit d533b17: throws `GenerateACPError` so a failed regeneration fails `swift package generate-acp` (and the CI diff gate that runs it).
+
+## Review Findings (2026-07-15 10:28)
+
+Re-review of HEAD~1..HEAD (the plugin-throw fix): CLEAN — 0 findings, 14 rules attempted, 0 failed. Converged.
