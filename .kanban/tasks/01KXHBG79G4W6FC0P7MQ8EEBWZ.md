@@ -50,8 +50,8 @@ comments:
   timestamp: 2026-07-15T22:04:23.686425+00:00
 depends_on:
 - 01KXHBFRJDWJZ57DG99E2X6RA0
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9480'
 title: Evaluations-framework eval suite over the local SystemLanguageModel
 ---
 ## What
@@ -63,18 +63,20 @@ Add the behavioral-quality layer (spec §8): point WWDC 2026's **Evaluations fra
 - Document how to add a new eval case from a captured run.
 
 ## Acceptance Criteria
-- [ ] Eval suite runs against the live local model with zero network/API-key configuration
-- [ ] At least the tool-selection and well-formed-tool-call metrics are scored across a multi-case set with a documented threshold
-- [ ] CI has a distinct eval job; wire tests pass/fail independently of it
+- [x] Eval suite runs against the live local model with zero network/API-key configuration
+- [x] At least the tool-selection and well-formed-tool-call metrics are scored across a multi-case set with a documented threshold
+- [x] CI has a distinct eval job; wire tests pass/fail independently of it
 
 ## Tests
-- [ ] The eval suite itself (`swift test --filter FoundationModelsACPEvals` or the Evaluations framework's runner) — exits 0 at or above threshold on Apple Silicon
-- [ ] A unit test that eval-case loading parses every seeded transcript fixture
-- [ ] Run `swift test` — exits 0
+- [x] The eval suite itself (`RUN_EVALS=1 swift test --filter FoundationModelsACPEvals`) — PASS, 100% select/well-formed/result across both cases (threshold 0.8)
+- [x] A unit test that eval-case loading parses every seeded transcript fixture
+- [x] Run `swift test` — exits 0 (287 tests; the one skip is the gated live eval, by design)
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
 
+DIVERGENCE (recorded): the WWDC 2026 Evaluations framework does not ship on this toolchain (probed via `import Evaluations`/variants + SDK framework/module scan — all absent). Per the card, not faked: the eval layer is a hand-rolled scoring harness over the live on-device SystemLanguageModel driven through the real FoundationModelsAgent bridge. See task thread for the full probe.
+
 ## Review Findings (2026-07-15 17:04)
 
-- [ ] `Package.swift:74` — Literal "Fixtures" repeated in exclude lists across multiple test targets (also appears on line 62); should be extracted to a named constant so changes are made in one place. Define `let testFixturesExclude = ["Fixtures"]` at package level and reference it in both test targets' exclude properties.
+- [x] `Package.swift:74` — Literal "Fixtures" repeated in exclude lists across multiple test targets (also appears on line 62); should be extracted to a named constant so changes are made in one place. Define `let testFixturesExclude = ["Fixtures"]` at package level and reference it in both test targets' exclude properties. RESOLVED in d3b3990 (extracted `fixturesExclude`) + 1d5de2b (corrected the accompanying comment). Re-review of the delta is clean (0 findings).
