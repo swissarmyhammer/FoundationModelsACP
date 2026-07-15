@@ -231,6 +231,158 @@ enum Emitter {
         return lines
     }
 
+    // MARK: - Unions
+
+    /// Renders a string enum with hand-rolled `Codable`: known snake_case
+    /// wire strings map to camelCase cases, anything else decodes to
+    /// `unknown(String)`, and `.unknown` re-encodes its captured string.
+    ///
+    /// - Parameter model: The enum's emission model.
+    /// - Returns: The rendered enum declaration.
+    static func stringEnumDeclaration(_ model: StringEnumModel) -> String {
+        var lines = docLines(model.documentation, indent: "")
+        lines.append("public enum \(model.name): Codable, Hashable, Sendable {")
+        for enumCase in model.cases {
+            lines.append(contentsOf: docLines(enumCase.documentation, indent: "    "))
+            lines.append("    case \(enumCase.swiftName)")
+            lines.append("")
+        }
+        lines.append(contentsOf: [
+            "    /// An unrecognized wire value, captured verbatim so a newer peer's",
+            "    /// value decodes without error and re-encodes unchanged.",
+            "    case unknown(String)",
+            "",
+            "    /// The string as it crosses the wire.",
+            "    public var wireValue: String {",
+            "        switch self {",
+        ])
+        for enumCase in model.cases {
+            lines.append("        case .\(enumCase.swiftName): \"\(enumCase.wireValue)\"")
+        }
+        lines.append(contentsOf: [
+            "        case .unknown(let value): value",
+            "        }",
+            "    }",
+            "",
+            "    /// Creates the case matching a wire string, routing unrecognized",
+            "    /// values to `.unknown`.",
+            "    ///",
+            "    /// - Parameter wireValue: The string as it crosses the wire.",
+            "    public init(wireValue: String) {",
+            "        switch wireValue {",
+        ])
+        for enumCase in model.cases {
+            lines.append("        case \"\(enumCase.wireValue)\": self = .\(enumCase.swiftName)")
+        }
+        lines.append(contentsOf: [
+            "        default: self = .unknown(wireValue)",
+            "        }",
+            "    }",
+            "",
+            "    /// Decodes the wire string, never failing on unrecognized values.",
+            "    ///",
+            "    /// - Parameter decoder: The decoder positioned at the string.",
+            "    /// - Throws: `DecodingError` when the wire value is not a string.",
+            "    public init(from decoder: any Decoder) throws {",
+            "        self.init(wireValue: try decoder.singleValueContainer().decode(String.self))",
+            "    }",
+            "",
+            "    /// Encodes the wire string; `.unknown` re-emits its captured string.",
+            "    ///",
+            "    /// - Parameter encoder: The encoder to write the string into.",
+            "    /// - Throws: Rethrows any error from the underlying encoder.",
+            "    public func encode(to encoder: any Encoder) throws {",
+            "        var container = encoder.singleValueContainer()",
+            "        try container.encode(wireValue)",
+            "    }",
+            "}",
+        ])
+        return lines.joined(separator: "\n")
+    }
+
+    /// Renders a tagged union as an enum with associated payload values and
+    /// hand-rolled `Codable` keyed on the discriminator: the payload's fields
+    /// sit flattened beside the discriminator (serde's internally-tagged
+    /// representation), and unrecognized discriminators decode to
+    /// `unknown(String)`.
+    ///
+    /// - Parameter model: The union's emission model.
+    /// - Returns: The rendered enum declaration.
+    static func taggedUnionDeclaration(_ model: TaggedUnionModel) -> String {
+        var lines = docLines(model.documentation, indent: "")
+        lines.append("public enum \(model.name): Codable, Hashable, Sendable {")
+        for unionCase in model.cases {
+            lines.append(contentsOf: docLines(unionCase.documentation, indent: "    "))
+            if let payload = unionCase.payloadType {
+                lines.append("    case \(unionCase.swiftName)(\(payload))")
+            } else {
+                lines.append("    case \(unionCase.swiftName)")
+            }
+            lines.append("")
+        }
+        lines.append(contentsOf: [
+            "    /// An unrecognized discriminator value, captured so decoding never",
+            "    /// fails. Re-encoding emits only the discriminator; an unrecognized",
+            "    /// variant's payload fields are not preserved.",
+            "    case unknown(String)",
+            "",
+            "    private enum CodingKeys: String, CodingKey {",
+            "        case \(model.discriminator)",
+            "    }",
+            "",
+            "    /// Decodes by the `\(model.discriminator)` discriminator, routing",
+            "    /// unrecognized values to `.unknown`.",
+            "    ///",
+            "    /// - Parameter decoder: The decoder positioned at the object.",
+            "    /// - Throws: `DecodingError` when the discriminator is missing or a",
+            "    ///   known variant's payload is malformed.",
+            "    public init(from decoder: any Decoder) throws {",
+            "        let container = try decoder.container(keyedBy: CodingKeys.self)",
+            "        switch try container.decode(String.self, forKey: .\(model.discriminator)) {",
+        ])
+        for unionCase in model.cases {
+            lines.append("        case \"\(unionCase.tag)\":")
+            if let payload = unionCase.payloadType {
+                lines.append("            self = .\(unionCase.swiftName)(try \(payload)(from: decoder))")
+            } else {
+                lines.append("            self = .\(unionCase.swiftName)")
+            }
+        }
+        lines.append(contentsOf: [
+            "        case let other:",
+            "            self = .unknown(other)",
+            "        }",
+            "    }",
+            "",
+            "    /// Encodes the `\(model.discriminator)` discriminator, flattening the",
+            "    /// payload's fields into the same object.",
+            "    ///",
+            "    /// - Parameter encoder: The encoder to write the object into.",
+            "    /// - Throws: Rethrows any error from the underlying encoder.",
+            "    public func encode(to encoder: any Encoder) throws {",
+            "        var container = encoder.container(keyedBy: CodingKeys.self)",
+            "        switch self {",
+        ])
+        for unionCase in model.cases {
+            if unionCase.payloadType != nil {
+                lines.append("        case .\(unionCase.swiftName)(let payload):")
+                lines.append("            try container.encode(\"\(unionCase.tag)\", forKey: .\(model.discriminator))")
+                lines.append("            try payload.encode(to: encoder)")
+            } else {
+                lines.append("        case .\(unionCase.swiftName):")
+                lines.append("            try container.encode(\"\(unionCase.tag)\", forKey: .\(model.discriminator))")
+            }
+        }
+        lines.append(contentsOf: [
+            "        case .unknown(let discriminator):",
+            "            try container.encode(discriminator, forKey: .\(model.discriminator))",
+            "        }",
+            "    }",
+            "}",
+        ])
+        return lines.joined(separator: "\n")
+    }
+
     // MARK: - Documentation
 
     /// Renders a schema description as doc-comment lines.

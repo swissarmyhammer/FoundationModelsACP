@@ -59,6 +59,7 @@ public struct SchemaGenerator: Sendable {
 
         var identifiers: [String] = []
         var structModels: [StructModel] = []
+        var unions: [String] = []
         var placeholders: [String] = []
 
         for (name, fragment) in definitions.sorted(by: { $0.key < $1.key }) {
@@ -70,11 +71,19 @@ public struct SchemaGenerator: Sendable {
                 identifiers.append(
                     Emitter.identifierNewtype(name: emittedName(name), documentation: documentation)
                 )
+            case .stringEnum:
+                unions.append(
+                    Emitter.stringEnumDeclaration(try stringEnumModel(name: name, fragment: fragment))
+                )
+            case .taggedUnion:
+                unions.append(
+                    Emitter.taggedUnionDeclaration(try taggedUnionModel(name: name, fragment: fragment))
+                )
             case .deferredUnion(let keyword):
                 placeholders.append(
                     Emitter.placeholder(
                         name: emittedName(name),
-                        reason: "Placeholder seam: schema `\(keyword)` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.",
+                        reason: "Placeholder seam: schema `\(keyword)` union, decoded as raw JSON until a later generator stage replaces it.",
                         documentation: documentation
                     )
                 )
@@ -103,6 +112,10 @@ public struct SchemaGenerator: Sendable {
                 contents: Emitter.file(declarations: structModels.map(Emitter.structDeclaration))
             ),
             GeneratedFile(
+                name: "Unions.generated.swift",
+                contents: Emitter.file(declarations: unions)
+            ),
+            GeneratedFile(
                 name: "Unresolved.generated.swift",
                 contents: Emitter.file(declarations: placeholders)
             ),
@@ -126,7 +139,13 @@ public struct SchemaGenerator: Sendable {
         guard let members = fragment.objectValue else {
             throw GeneratorError.unsupportedShape(context: name, detail: "definition is not a JSON object")
         }
-        for keyword in ["oneOf", "anyOf", "enum"] where members[keyword] != nil {
+        if members["oneOf"] != nil {
+            guard let variants = members["oneOf"]?.arrayValue else {
+                throw GeneratorError.unsupportedShape(context: name, detail: "oneOf is not an array")
+            }
+            return try classifyOneOf(name: name, variants: variants)
+        }
+        for keyword in ["anyOf", "enum"] where members[keyword] != nil {
             return .deferredUnion(keyword: keyword)
         }
         switch members["type"]?.stringValue {
@@ -150,6 +169,191 @@ public struct SchemaGenerator: Sendable {
     /// - Returns: The renamed Swift type name, or the name unchanged.
     private func emittedName(_ name: String) -> String {
         config.typeRenames[name] ?? name
+    }
+
+    // MARK: - Union models
+
+    /// Distinguishes the two `oneOf` families this stage emits.
+    ///
+    /// - Parameters:
+    ///   - name: The definition's schema name.
+    ///   - variants: The `oneOf` entries.
+    /// - Returns: `.stringEnum` when every variant is a string const,
+    ///   `.taggedUnion` when every variant is a discriminated object.
+    /// - Throws: `GeneratorError.unsupportedShape` for an empty or
+    ///   mixed-shape `oneOf`, so unknown constructs fail loudly.
+    private func classifyOneOf(name: String, variants: [JSONValue]) throws -> DefinitionKind {
+        guard !variants.isEmpty else {
+            throw GeneratorError.unsupportedShape(context: name, detail: "empty oneOf")
+        }
+        let types = variants.map { $0["type"]?.stringValue }
+        if types.allSatisfy({ $0 == "string" }) {
+            return .stringEnum
+        }
+        if types.allSatisfy({ $0 == "object" }) {
+            return .taggedUnion
+        }
+        throw GeneratorError.unsupportedShape(
+            context: name,
+            detail: "oneOf mixes variant shapes; expected all string consts or all discriminated objects"
+        )
+    }
+
+    /// Builds the emission model for a string-enum definition.
+    ///
+    /// - Parameters:
+    ///   - name: The definition's schema name.
+    ///   - fragment: The definition's schema fragment.
+    /// - Returns: The string-enum model with cases in schema order.
+    /// - Throws: `GeneratorError.unsupportedShape` when a variant lacks a
+    ///   const value or the case names collide.
+    private func stringEnumModel(name: String, fragment: JSONValue) throws -> StringEnumModel {
+        let variants = fragment["oneOf"]?.arrayValue ?? []
+        let cases = try variants.enumerated().map { index, variant in
+            let context = "\(name) variant \(index)"
+            guard let wireValue = variant["const"]?.stringValue else {
+                throw GeneratorError.unsupportedShape(context: context, detail: "string variant without a const value")
+            }
+            return EnumCaseModel(
+                wireValue: wireValue,
+                swiftName: try swiftCaseName(fromWire: wireValue, context: context),
+                documentation: variant["description"]?.stringValue
+            )
+        }
+        try validateCaseNames(cases.map(\.swiftName), context: name)
+        return StringEnumModel(
+            name: emittedName(name),
+            documentation: fragment["description"]?.stringValue,
+            cases: cases
+        )
+    }
+
+    /// Builds the emission model for a tagged-union definition.
+    ///
+    /// Every variant must be the serde internally-tagged shape: exactly one
+    /// inline property (the shared discriminator, with a const tag), that
+    /// property alone in `required`, and optionally a single-`$ref` `allOf`
+    /// naming the payload flattened beside the discriminator.
+    ///
+    /// - Parameters:
+    ///   - name: The definition's schema name.
+    ///   - fragment: The definition's schema fragment.
+    /// - Returns: The tagged-union model with cases in schema order.
+    /// - Throws: `GeneratorError.unsupportedShape` when a variant deviates
+    ///   from the internally-tagged shape or the case names collide.
+    private func taggedUnionModel(name: String, fragment: JSONValue) throws -> TaggedUnionModel {
+        let variants = fragment["oneOf"]?.arrayValue ?? []
+        var discriminator: String?
+        let cases = try variants.enumerated().map { index, variant in
+            let context = "\(name) variant \(index)"
+            guard let properties = variant["properties"]?.objectValue, properties.count == 1,
+                let (key, keyFragment) = properties.first
+            else {
+                throw GeneratorError.unsupportedShape(
+                    context: context,
+                    detail: "expected exactly one inline property (the discriminator)"
+                )
+            }
+            guard let tag = keyFragment["const"]?.stringValue else {
+                throw GeneratorError.unsupportedShape(context: context, detail: "discriminator \(key) has no const value")
+            }
+            let required = (variant["required"]?.arrayValue ?? []).compactMap(\.stringValue)
+            guard required == [key] else {
+                throw GeneratorError.unsupportedShape(context: context, detail: "expected required to be exactly [\(key)]")
+            }
+            if let established = discriminator, established != key {
+                throw GeneratorError.unsupportedShape(
+                    context: context,
+                    detail: "variants disagree on the discriminator: \(established) vs \(key)"
+                )
+            }
+            discriminator = key
+            var payloadType: String?
+            if let allOf = variant["allOf"]?.arrayValue {
+                guard allOf.count == 1, let reference = allOf[0]["$ref"]?.stringValue else {
+                    throw GeneratorError.unsupportedShape(context: context, detail: "expected allOf to be a single payload $ref")
+                }
+                payloadType = try referencedTypeName(reference, context: context)
+            }
+            return UnionCaseModel(
+                tag: tag,
+                swiftName: try swiftCaseName(fromWire: tag, context: context),
+                payloadType: payloadType,
+                documentation: variant["description"]?.stringValue
+            )
+        }
+        guard let discriminator else {
+            throw GeneratorError.unsupportedShape(context: name, detail: "empty oneOf")
+        }
+        try validateCaseNames(cases.map(\.swiftName), context: name)
+        // The discriminator becomes the CodingKeys case, so it must itself
+        // be a valid Swift identifier.
+        _ = try swiftCaseName(fromWire: discriminator, context: "\(name) discriminator")
+        return TaggedUnionModel(
+            name: emittedName(name),
+            documentation: fragment["description"]?.stringValue,
+            discriminator: discriminator,
+            cases: cases
+        )
+    }
+
+    /// Swift keywords that cannot appear as bare `case` names; a wire value
+    /// mapping onto one would emit uncompilable source, so generation fails
+    /// loudly instead.
+    private static let swiftKeywords: Set<String> = [
+        "as", "associatedtype", "any", "break", "case", "catch", "class",
+        "continue", "default", "defer", "deinit", "do", "else", "enum",
+        "extension", "fallthrough", "false", "fileprivate", "for", "func",
+        "guard", "if", "import", "in", "init", "inout", "internal", "is",
+        "let", "nil", "operator", "precedencegroup", "private", "protocol",
+        "public", "repeat", "rethrows", "return", "self", "Self", "static",
+        "struct", "subscript", "super", "switch", "throw", "throws", "true",
+        "try", "typealias", "var", "where", "while",
+    ]
+
+    /// Maps a snake_case wire value to a camelCase Swift case name.
+    ///
+    /// - Parameters:
+    ///   - wireValue: The wire string (e.g. `switch_mode`).
+    ///   - context: `Definition variant` for error messages.
+    /// - Returns: The camelCase Swift identifier (e.g. `switchMode`).
+    /// - Throws: `GeneratorError.unsupportedShape` when the wire value does
+    ///   not map to a plain, non-keyword Swift identifier.
+    private func swiftCaseName(fromWire wireValue: String, context: String) throws -> String {
+        let parts = wireValue.split(separator: "_")
+        let name = parts.enumerated()
+            .map { index, part in
+                index == 0 ? String(part) : part.prefix(1).uppercased() + part.dropFirst()
+            }
+            .joined()
+        guard name.first?.isLetter == true, name.allSatisfy({ $0.isLetter || $0.isNumber }),
+            !Self.swiftKeywords.contains(name)
+        else {
+            throw GeneratorError.unsupportedShape(
+                context: context,
+                detail: "wire value \"\(wireValue)\" does not map to a plain Swift identifier"
+            )
+        }
+        return name
+    }
+
+    /// Verifies enum case names are unique and none collides with the
+    /// generated `unknown` fallback case.
+    ///
+    /// - Parameters:
+    ///   - names: The Swift case names in schema order.
+    ///   - context: The definition name for error messages.
+    /// - Throws: `GeneratorError.unsupportedShape` on any collision.
+    private func validateCaseNames(_ names: [String], context: String) throws {
+        var seen = Set<String>()
+        for name in names {
+            guard name != "unknown" else {
+                throw GeneratorError.unsupportedShape(context: context, detail: "case name collides with the unknown fallback")
+            }
+            guard seen.insert(name).inserted else {
+                throw GeneratorError.unsupportedShape(context: context, detail: "duplicate case name \(name)")
+            }
+        }
     }
 
     // MARK: - Struct models

@@ -3,7 +3,7 @@
 
 /// A JSON-RPC response object.
 ///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
+/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
 public typealias AgentResponse = JSONValue
 
 /// Describes an available authentication method.
@@ -11,40 +11,22 @@ public typealias AgentResponse = JSONValue
 /// The `type` field acts as the discriminator in the serialized JSON form.
 /// When no `type` is present, the method is treated as `agent`.
 ///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
+/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
 public typealias AuthMethod = JSONValue
 
 /// The input specification for a command.
 ///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
+/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
 public typealias AvailableCommandInput = JSONValue
 
 /// A JSON-RPC response object.
 ///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
+/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
 public typealias ClientResponse = JSONValue
-
-/// Content blocks represent displayable information in the Agent Client Protocol.
-///
-/// They provide a structured way to handle various types of user-facing content—whether
-/// it's text from language models, images for analysis, or embedded resources for context.
-///
-/// Content blocks appear in:
-/// - User prompts sent via `session/prompt`
-/// - Language model output streamed through `session/update` notifications
-/// - Progress updates and results from tool calls
-///
-/// This structure is compatible with the Model Context Protocol (MCP), enabling
-/// agents to seamlessly forward content from MCP tool outputs without transformation.
-///
-/// See protocol docs: [Content](https://agentclientprotocol.com/protocol/content)
-///
-/// Placeholder seam: schema `oneOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
-public typealias ContentBlock = JSONValue
 
 /// Resource content that can be embedded in a message.
 ///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
+/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
 public typealias EmbeddedResourceResource = JSONValue
 
 /// Predefined error codes for common JSON-RPC and ACP-specific errors.
@@ -52,7 +34,7 @@ public typealias EmbeddedResourceResource = JSONValue
 /// These codes follow the JSON-RPC 2.0 specification for standard errors
 /// and use the reserved range (-32000 to -32099) for protocol-specific errors.
 ///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
+/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
 public typealias ErrorCode = JSONValue
 
 /// Allows the Agent to send an arbitrary notification that is not part of the ACP spec.
@@ -89,32 +71,8 @@ public typealias ExtResponse = JSONValue
 ///
 /// See protocol docs: [MCP Servers](https://agentclientprotocol.com/protocol/session-setup#mcp-servers)
 ///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
+/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
 public typealias McpServer = JSONValue
-
-/// The type of permission option being presented to the user.
-///
-/// Helps clients choose appropriate icons and UI treatment.
-///
-/// Placeholder seam: schema `oneOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
-public typealias PermissionOptionKind = JSONValue
-
-/// Priority levels for plan entries.
-///
-/// Used to indicate the relative importance or urgency of different
-/// tasks in the execution plan.
-/// See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/agent-plan#plan-entries)
-///
-/// Placeholder seam: schema `oneOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
-public typealias PlanEntryPriority = JSONValue
-
-/// Status of a plan entry in the execution flow.
-///
-/// Tracks the lifecycle of each task from planning through completion.
-/// See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/agent-plan#plan-entries)
-///
-/// Placeholder seam: schema `oneOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
-public typealias PlanEntryStatus = JSONValue
 
 /// JSON RPC Request Id
 ///
@@ -126,23 +84,8 @@ public typealias PlanEntryStatus = JSONValue
 ///
 /// \[2\] Fractional parts may be problematic, since many decimal fractions cannot be represented exactly as binary fractions.
 ///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
+/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
 public typealias RequestID = JSONValue
-
-/// The outcome of a permission request.
-///
-/// Placeholder seam: schema `oneOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
-public typealias RequestPermissionOutcome = JSONValue
-
-/// The sender or recipient of messages and data in a conversation.
-///
-/// Placeholder seam: schema `oneOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
-public typealias Role = JSONValue
-
-/// A session configuration option selector and its current state.
-///
-/// Placeholder seam: schema `oneOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
-public typealias SessionConfigOption = JSONValue
 
 /// Semantic category for a session configuration option.
 ///
@@ -154,60 +97,15 @@ public typealias SessionConfigOption = JSONValue
 /// Category names beginning with `_` are free for custom use, like other ACP extension methods.
 /// Category names that do not begin with `_` are reserved for the ACP spec.
 ///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
+/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
 public typealias SessionConfigOptionCategory = JSONValue
 
 /// Possible values for a session configuration option.
 ///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
+/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
 public typealias SessionConfigSelectOptions = JSONValue
-
-/// Different types of updates that can be sent during session processing.
-///
-/// These updates provide real-time feedback about the agent's progress.
-///
-/// See protocol docs: [Agent Reports Output](https://agentclientprotocol.com/protocol/prompt-turn#3-agent-reports-output)
-///
-/// Placeholder seam: schema `oneOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
-public typealias SessionUpdate = JSONValue
 
 /// Request parameters for setting a session configuration option.
 ///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
+/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
 public typealias SetSessionConfigOptionRequest = JSONValue
-
-/// Reasons why an agent stops processing a prompt turn.
-///
-/// See protocol docs: [Stop Reasons](https://agentclientprotocol.com/protocol/prompt-turn#stop-reasons)
-///
-/// Placeholder seam: schema `oneOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
-public typealias StopReason = JSONValue
-
-/// Content produced by a tool call.
-///
-/// Tool calls can produce different types of content including
-/// standard content blocks (text, images) or file diffs.
-///
-/// See protocol docs: [Content](https://agentclientprotocol.com/protocol/tool-calls#content)
-///
-/// Placeholder seam: schema `oneOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
-public typealias ToolCallContent = JSONValue
-
-/// Execution status of a tool call.
-///
-/// Tool calls progress through different statuses during their lifecycle.
-///
-/// See protocol docs: [Status](https://agentclientprotocol.com/protocol/tool-calls#status)
-///
-/// Placeholder seam: schema `oneOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
-public typealias ToolCallStatus = JSONValue
-
-/// Categories of tools that can be invoked.
-///
-/// Tool kinds help clients choose appropriate icons and optimize how they
-/// display tool execution progress.
-///
-/// See protocol docs: [Creating](https://agentclientprotocol.com/protocol/tool-calls#creating)
-///
-/// Placeholder seam: schema `oneOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
-public typealias ToolKind = JSONValue
