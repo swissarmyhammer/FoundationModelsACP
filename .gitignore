@@ -4,11 +4,13 @@
 # Swift / SwiftPM
 .build/
 .swiftpm/
+DerivedData/
 Package.resolved
 *.xcodeproj
 *.xcworkspace
 
 # Local tooling
+.ralph/
 .sah/
 .shell/
 .code-context/
