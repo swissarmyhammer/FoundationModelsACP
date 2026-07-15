@@ -74,3 +74,7 @@ Add the behavioral-quality layer (spec §8): point WWDC 2026's **Evaluations fra
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-07-15 17:04)
+
+- [ ] `Package.swift:74` — Literal "Fixtures" repeated in exclude lists across multiple test targets (also appears on line 62); should be extracted to a named constant so changes are made in one place. Define `let testFixturesExclude = ["Fixtures"]` at package level and reference it in both test targets' exclude properties.

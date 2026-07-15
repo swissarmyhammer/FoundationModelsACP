@@ -1,6 +1,10 @@
 // swift-tools-version: 6.4
 import PackageDescription
 
+// ndJSON transcript fixtures are loaded via #filePath, not as bundle
+// resources, so every test target excludes its `Fixtures` directory.
+let fixturesExclude = ["Fixtures"]
+
 let package = Package(
     name: "FoundationModelsACP",
     platforms: [
@@ -58,8 +62,7 @@ let package = Package(
             name: "FoundationModelsACPTests",
             dependencies: ["FoundationModelsACP", "acp-test-agent"],
             path: "Tests/FoundationModelsACPTests",
-            // Replay fixtures are loaded via #filePath, not as bundle resources.
-            exclude: ["Fixtures"]
+            exclude: fixturesExclude
         ),
         .testTarget(
             name: "ACPGenerateTests",
@@ -70,8 +73,7 @@ let package = Package(
             name: "FoundationModelsACPEvals",
             dependencies: ["FoundationModelsACP"],
             path: "Tests/FoundationModelsACPEvals",
-            // Seed transcripts are loaded via #filePath, not as bundle resources.
-            exclude: ["Fixtures"]
+            exclude: fixturesExclude
         ),
     ]
 )
