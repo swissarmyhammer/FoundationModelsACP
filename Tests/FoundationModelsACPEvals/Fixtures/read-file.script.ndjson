@@ -1,0 +1,3 @@
+{"id":"init","jsonrpc":"2.0","method":"initialize","params":{"clientCapabilities":{"fs":{"readTextFile":true,"writeTextFile":false},"terminal":false},"protocolVersion":1}}
+{"id":"new","jsonrpc":"2.0","method":"session/new","params":{"cwd":"/workspace","mcpServers":[]}}
+{"id":"prompt","jsonrpc":"2.0","method":"session/prompt","params":{"prompt":[{"text":"Read the file at /tmp/notes.txt using the reader tool and tell me what it contains.","type":"text"}],"sessionId":"eval-read-file"}}

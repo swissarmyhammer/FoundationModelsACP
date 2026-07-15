@@ -1,8 +1,57 @@
 ---
+comments:
+- actor: wballard
+  id: 01kxkvxhsmyep94skbsq6jrn7n
+  text: |-
+    Picked up. EVALUATIONS FRAMEWORK PROBE (macOS 27 beta SDK, MacOSX27.0.sdk, arm64-apple-macosx27, Xcode-beta) — NOT AVAILABLE. What I tried:
+    - `import Evaluations` / `import Evaluation` / `import ModelEvaluation` / `import FoundationModelsEvaluation` via `xcrun swiftc -sdk <sdk> -target arm64-apple-macosx27 -typecheck` → all "error: no such module 'X'".
+    - Framework dir scan: `ls $SDK/System/Library/Frameworks | grep -iE 'eval|assess|benchmark|scor|metric'` → only AutomaticAssessmentConfiguration.framework + MetricKit.framework (unrelated).
+    - No *.swiftmodule matching eval/assess/benchmark; no module.modulemap mentioning "eval"; no *.swiftinterface declaring EvaluationSuite/EvaluationCase/etc.
+    - FoundationModels itself imports fine (binary module, no swiftinterface) but exposes no evaluation submodule/symbols.
+
+    CONCLUSION: the WWDC 2026 Evaluations framework simply does not ship in this beta. Per the task's explicit instruction, I will NOT fake it. Falling back to the spec's intent using only what IS available: a hand-rolled scoring harness over the live on-device SystemLanguageModel via FoundationModelsAgent. Divergence (framework unavailable → hand-rolled scoring harness) will be documented in code and here. The eval LAYER is the deliverable; the specific framework is the means.
+
+    Plan: Tests/FoundationModelsACPEvals/ test target driving prompt cases through the live model via the bridge, scoring tool-selection + well-formed-tool-call (+ structured-result) metrics statistically with a documented threshold, seeded from the captured golden transcripts; gated behind availability + an opt-in env flag so eval variance never blocks the deterministic wire suite; distinct CI job.
+  timestamp: 2026-07-15T21:46:23.924940+00:00
+- actor: wballard
+  id: 01kxkw5nx5g7v00jptqr0jqsw1
+  text: |-
+    LIVE MODEL PROBE (standalone swiftc against MacOSX27.0.sdk, arm64-apple-macosx27):
+    - SystemLanguageModel.default.availability == .available on this machine.
+    - A directive prompt ("Use the getWeather tool to look up the weather in Paris.") against a LanguageModelSession(tools:[getWeather]) reliably emits a well-formed tool_call: name=getWeather, args={"city":"Paris"}, every snapshot. Turn latency ~3.6s. On-device tool selection for directive prompts is highly reliable in this beta.
+
+    DESIGN LOCKED (hand-rolled scoring harness; framework unavailable):
+    - New test target FoundationModelsACPEvals (Tests/FoundationModelsACPEvals/), depends on FoundationModelsACP.
+    - EvalCase + loader parses a golden-format ndjson transcript PAIR (client->agent script + agent->client stream) into { name, prompt blocks, expectedTool(name, argKeys)? }: prompt from the session/prompt request, expected tool from the first tool_call session/update (title + rawInput keys). Proves "one transcript is both fixture and eval case" and seeds the set from captured goldens (incl. the wire golden at Tests/FoundationModelsACPTests/Fixtures/).
+    - EvalTools: FoundationModels Tool impls the harness registers (getWeather{city}; reader{path} reading via ClientEnvironment.current so the live reverse fs/read is exercised too).
+    - Harness drives each case serially through the REAL FoundationModelsAgent over InMemoryTransport with a live-model-backed session (initialize .readOnly + session/new + session/prompt), collects the session/update stream, scores tool-selection + well-formed-tool-call (+ structured-result). N samples/case, aggregate pass rate.
+    - Metrics: tool-selection = fraction of samples emitting a tool_call whose title==expected; well-formed = fraction with non-empty toolCallId AND rawInput a JSON object containing the expected arg keys; structured-result = fraction with a completed tool_call_update. THRESHOLD 0.8 (documented; probe showed ~100%, 0.8 leaves beta headroom). samples=5/case.
+    - Gating/CI isolation: live scoring runs only when availability==.available AND RUN_EVALS=1; otherwise skipped with a clear reason, so plain `swift test` (wire suite) never drives the model and never flakes. The loader-parses-every-fixture unit test is deterministic and always runs. CI gets a distinct eval job (Apple Silicon) that sets RUN_EVALS=1; the wire job does not.
+    - Concurrency: cases serial, one session per case, one turn at a time -> no SIGTRAP.
+
+    Proceeding to implement via /tdd.
+  timestamp: 2026-07-15T21:50:50.277224+00:00
+- actor: wballard
+  id: 01kxkwyg8686b8ah16fps2cwjt
+  text: |-
+    Implementation landed (green). New test target Tests/FoundationModelsACPEvals/ (added to Package.swift, Fixtures excluded — #filePath-loaded):
+    - EvalTranscript.swift: EvalCase + ToolExpectation + loader parsing a golden-format ndjson PAIR (prompt from session/prompt request; expected tool name+arg-keys from first tool_call session/update) + JSONValue nav helpers.
+    - EvalTools.swift: FoundationModels Tools registered on every session — getWeather{city} (fixed string) and reader{path} (reads via ClientEnvironment.current, defensive). EvalToolRegistry.all/knownToolNames.
+    - EvalHarness.swift: drives each case through the REAL FoundationModelsAgent over InMemoryTransport with a live-model-backed session; EvalRecordingClient records session/update + serves fs/read + grants permission; 120s per-turn timeout so a wedged turn fails rather than hangs.
+    - EvalScore.swift: SampleOutcome (tool-selected / well-formed / structured-result) + CaseScore + EvalReport(meetsThreshold, summary). EvalPolicy.samplesPerCase=5, passThreshold=0.8 (documented rationale in-code). Gated metrics = selection + well-formed; structured-result reported not gated.
+    - EvalFixtures.swift: discovers <name>.script/.agent.ndjson pairs; also seeds the wire golden (Tests/FoundationModelsACPTests/Fixtures/golden-session-*).
+    - EvalSuiteTests.swift @Suite("FoundationModelsACPEvals"): (1) loader parses EVERY seeded fixture [always runs]; (2) every live-scored fixture declares a known directive tool [always runs]; (3) live scoring meets threshold [.enabled(if: RUN_EVALS && model available), else skipped with reason].
+    - Fixtures/: weather-paris + read-file pairs (directive prompts) + README documenting the add-a-case-from-a-captured-run procedure.
+    - CI: added a distinct `evals` job (runs-on [self-hosted, macOS, ARM64], RUN_EVALS=1, `swift test --filter FoundationModelsACPEvals`), separate from the wire `build-test-codegen` job whose plain `swift test` self-skips live scoring.
+
+    VERIFICATION: swift build --build-tests 0 warnings/0 errors. Plain `swift test` = 176 FoundationModelsACPTests + 108 ACPGenerateTests + 3 FoundationModelsACPEvals = 287 pass, 0 failures; the ONE skip is the gated live eval (by design — CI isolation). Live run `RUN_EVALS=1 swift test --filter FoundationModelsACPEvals` = PASS, overall select 100% / well-formed 100% / result 100% across both cases (10 live turns, ~44s). No SIGTRAP (cases serial, one session/turn at a time).
+
+    DISCOVERY (resolves the bridge/e2e open question): with a LIVE model, the reader case's turn produced a completed tool_call_update (structured-result 100%), i.e. the FM runtime invoked the tool INSIDE runTurn's structured-concurrency tree where ClientEnvironment.$current is bound — so the ambient injection reaches the live FM tool call (the reader tool read through the client over reverse fs/read_text_file). The e2e thread could only confirm this for scripted turns; the live eval now confirms it end-to-end. Checkpoint + review next.
+  timestamp: 2026-07-15T22:04:23.686425+00:00
 depends_on:
 - 01KXHBFRJDWJZ57DG99E2X6RA0
-position_column: todo
-position_ordinal: '9480'
+position_column: doing
+position_ordinal: '80'
 title: Evaluations-framework eval suite over the local SystemLanguageModel
 ---
 ## What

@@ -22,12 +22,30 @@ comments:
 
     FIXTURE CAPTURE PROCEDURE documented in Tests/FoundationModelsACPTests/Fixtures/README.md: `RECORD_GOLDEN=1 swift test --filter GoldenReplayTests` rewrites both fixtures from the live run; without it the test asserts the committed bytes. Fixtures use STRING JSON-RPC ids to avoid Double formatting drift and are excluded from the target (loaded via #filePath). Checkpoint + review next.
   timestamp: 2026-07-15T21:38:45.731631+00:00
+- actor: wballard
+  id: 01kxkvs0fshmhv23467qwfszgy
+  text: |-
+    RESOLVED → done. Converged in a single implement→test→commit→review pass; not forced.
+
+    Review (sha HEAD~1..HEAD, the checkpoint delta b45ef9d): CLEAN — 0 findings, 14 validators attempted, 0 failed, 0 confirmed/refuted.
+
+    Local commit only (nothing pushed): b45ef9d "test(e2e): back-to-back roles + golden transcript replay".
+
+    Verification: swift build --build-tests 0 warnings/0 errors; swift test = 176 FoundationModelsACPTests + 108 ACPGenerateTests = 284 pass, 0 failures, 0 skipped. The 100x back-to-back loop is deterministic (0.22s), no SIGTRAP (no live model, no concurrent real turns on one session).
+
+    All acceptance criteria met:
+    - Back-to-back exercises both directions concurrently (reverse fs/read + request_permission during an open session/prompt) and passes deterministically over 100 repeated runs.
+    - Golden replay matches the committed agent→client fixture byte-for-byte and fails loudly with a first-differing-line diff on drift.
+    - Adversarial: garbage line skipped, interleaved concurrent requests correlate by id, cancel mid-turn yields cancelled, straggler after the response accepted.
+
+    For downstream (evals ^q8eebwz, README ^0td21b4): golden fixtures live in Tests/FoundationModelsACPTests/Fixtures/ (string JSON-RPC ids, #filePath-loaded, excluded from the target). New fixtures are a one-liner: RECORD_GOLDEN=1 swift test --filter GoldenReplayTests (documented in Fixtures/README.md). A captured golden-session-script.ndjson doubles as an eval seed (feed the same client→agent script to the live local model and score the agent→client result). ClientEnvironment.current ambient injection is confirmed end-to-end within runTurn's structured-concurrency tree; whether the live FM runtime invokes Tool.call inside that tree stays unverifiable without a live model.
+  timestamp: 2026-07-15T21:43:55.129555+00:00
 depends_on:
 - 01KXHBEC0KP7222Z5M20GXPJD4
 - 01KXHBAS76FYGF2AFEEN8K8GQJ
 - 01KXHBERPC2RPCY6TQFVFMSTVY
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9380'
 title: 'End-to-end wire tests: back-to-back roles + golden transcript replay'
 ---
 ## What

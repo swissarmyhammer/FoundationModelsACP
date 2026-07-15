@@ -23,6 +23,9 @@ jobs:
       - name: Build
         run: swift build
 
+      # Deterministic wire suite. The live-model eval scoring self-skips without
+      # RUN_EVALS, so this job never drives the model and eval variance can
+      # never fail it.
       - name: Test
         run: swift test
 
@@ -34,3 +37,23 @@ jobs:
 
       - name: Codegen diff gate
         run: git diff --exit-code
+
+  # Distinct behavioral-eval job (spec §8). It drives the live on-device
+  # SystemLanguageModel via the bridge and scores tool-selection / well-formed
+  # -call rates against a threshold. It runs on Apple Silicon with the model
+  # present, is separate from the wire job above, and its pass/fail is
+  # independent — eval flake never blocks the deterministic suite.
+  evals:
+    name: Behavioral evals (live on-device model)
+    runs-on: [self-hosted, macOS, ARM64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Run eval suite
+        env:
+          RUN_EVALS: "1"
+        run: swift test --filter FoundationModelsACPEvals

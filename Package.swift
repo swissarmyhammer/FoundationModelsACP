@@ -66,5 +66,12 @@ let package = Package(
             dependencies: ["ACPGenerateCore", "FoundationModelsACP"],
             path: "Tests/ACPGenerateTests"
         ),
+        .testTarget(
+            name: "FoundationModelsACPEvals",
+            dependencies: ["FoundationModelsACP"],
+            path: "Tests/FoundationModelsACPEvals",
+            // Seed transcripts are loaded via #filePath, not as bundle resources.
+            exclude: ["Fixtures"]
+        ),
     ]
 )
