@@ -233,6 +233,20 @@ enum Emitter {
 
     // MARK: - Unions
 
+    /// Renders schema-derived text as a double-quoted Swift string literal,
+    /// escaping backslashes and quotes so no wire value can break out of the
+    /// generated source. `swiftCaseName` already rejects such values at the
+    /// generator boundary; the emitter stays safe on its own terms.
+    ///
+    /// - Parameter text: The schema-derived text (wire value or tag).
+    /// - Returns: The quoted, escaped Swift string literal.
+    private static func stringLiteral(_ text: String) -> String {
+        let escaped = text
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+
     /// Renders a string enum with hand-rolled `Codable`: known snake_case
     /// wire strings map to camelCase cases, anything else decodes to
     /// `unknown(String)`, and `.unknown` re-encodes its captured string.
@@ -257,7 +271,7 @@ enum Emitter {
             "        switch self {",
         ])
         for enumCase in model.cases {
-            lines.append("        case .\(enumCase.swiftName): \"\(enumCase.wireValue)\"")
+            lines.append("        case .\(enumCase.swiftName): \(stringLiteral(enumCase.wireValue))")
         }
         lines.append(contentsOf: [
             "        case .unknown(let value): value",
@@ -272,7 +286,7 @@ enum Emitter {
             "        switch wireValue {",
         ])
         for enumCase in model.cases {
-            lines.append("        case \"\(enumCase.wireValue)\": self = .\(enumCase.swiftName)")
+            lines.append("        case \(stringLiteral(enumCase.wireValue)): self = .\(enumCase.swiftName)")
         }
         lines.append(contentsOf: [
             "        default: self = .unknown(wireValue)",
@@ -341,7 +355,7 @@ enum Emitter {
             "        switch try container.decode(String.self, forKey: .\(model.discriminator)) {",
         ])
         for unionCase in model.cases {
-            lines.append("        case \"\(unionCase.tag)\":")
+            lines.append("        case \(stringLiteral(unionCase.tag)):")
             if let payload = unionCase.payloadType {
                 lines.append("            self = .\(unionCase.swiftName)(try \(payload)(from: decoder))")
             } else {
@@ -366,11 +380,11 @@ enum Emitter {
         for unionCase in model.cases {
             if unionCase.payloadType != nil {
                 lines.append("        case .\(unionCase.swiftName)(let payload):")
-                lines.append("            try container.encode(\"\(unionCase.tag)\", forKey: .\(model.discriminator))")
+                lines.append("            try container.encode(\(stringLiteral(unionCase.tag)), forKey: .\(model.discriminator))")
                 lines.append("            try payload.encode(to: encoder)")
             } else {
                 lines.append("        case .\(unionCase.swiftName):")
-                lines.append("            try container.encode(\"\(unionCase.tag)\", forKey: .\(model.discriminator))")
+                lines.append("            try container.encode(\(stringLiteral(unionCase.tag)), forKey: .\(model.discriminator))")
             }
         }
         lines.append(contentsOf: [

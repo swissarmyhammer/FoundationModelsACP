@@ -35,9 +35,19 @@ comments:
 
     VERIFICATION: swift build clean; swift test 140/140 green (70 FoundationModelsACPTests + 70 ACPGenerateTests), zero warnings. Double-check verdict REVISE → all 3 findings fixed (exhaustive enum coverage, stale placeholder doc, keyword hardening); bounded re-check in flight. NOTE for routing/full-surface tasks (^tt9qwxj, ^jx2apm3): union types live in Unions.generated.swift; SessionUpdate.unknown re-encodes only {sessionUpdate: value} — unrecognized-variant payloads are not preserved by design.
   timestamp: 2026-07-15T05:03:37.806535+00:00
+- actor: wballard
+  id: 01kxjsya18x7c4kwdqhwnq8r7d
+  text: |-
+    Review pass 1: 5 findings, all fixed (TDD RED-first for the escaping behavior):
+
+    - Emitter escaping (3 findings): new private Emitter.stringLiteral(_:) escapes backslashes then quotes; ALL five schema-derived interpolation sites now route through it (string-enum wireValue getter + init(wireValue:) matcher, tagged-union decode case, encode discriminator in both payload and payload-less branches — root-cause fix across the file, not just the cited lines). RED-first emitter-level tests quoteBearingTagEscapesInEmittedSource / quoteBearingWireValueEscapesInEmittedSource construct models directly (bypassing swiftCaseName's boundary rejection) and assert the escaped literals. Regenerated output byte-identical — escaping is a no-op for every real schema value.
+    - Test helper duplication (2 findings): vendoredOutput(named:) + vendoredSchemaURL extracted to new Tests/ACPGenerateTests/GenerationTestSupport.swift (internal); duplicates removed from both test files. GeneratorCoreTests' own type-scoped helpers untouched (pre-existing tests).
+
+    swift test 142/142 green (70 + 72), zero warnings; swift run acp-generate leaves Generated/ unchanged. All checklist items flipped; committing checkpoint then re-review.
+  timestamp: 2026-07-15T11:52:37.160797+00:00
 depends_on:
 - 01KXHB88Q1GSGHMPXHNSMKM2XF
-position_column: doing
+position_column: review
 position_ordinal: '80'
 title: 'Codegen: tagged unions and string enums with unknown(String) fallback'
 ---
@@ -49,14 +59,22 @@ Extend `acp-generate` to emit the union shapes (spec §2, §3):
 - On encode, `unknown(value)` re-emits its captured string.
 
 ## Acceptance Criteria
-- [ ] Emitted union enums decode every discriminator variant in the vendored schema and re-encode byte-equivalent JSON (modulo key order)
-- [ ] Decoding an unrecognized string-enum value (e.g. `"telepathy"` as a `ToolKind`) yields `.unknown("telepathy")`, not an error, and re-encodes as `"telepathy"`
-- [ ] Wire strings are snake_case on the wire, camelCase cases in Swift
+- [x] Emitted union enums decode every discriminator variant in the vendored schema and re-encode byte-equivalent JSON (modulo key order)
+- [x] Decoding an unrecognized string-enum value (e.g. `"telepathy"` as a `ToolKind`) yields `.unknown("telepathy")`, not an error, and re-encodes as `"telepathy"`
+- [x] Wire strings are snake_case on the wire, camelCase cases in Swift
 
 ## Tests
-- [ ] `Tests/ACPGenerateTests/TaggedUnionTests.swift` — decode/encode fixtures for each `SessionUpdate` and `ContentBlock` variant
-- [ ] `Tests/ACPGenerateTests/UnknownFallbackTests.swift` — unknown discriminators and unknown string-enum values round-trip via `unknown(String)`
-- [ ] Run `swift test` — exits 0
+- [x] `Tests/ACPGenerateTests/TaggedUnionTests.swift` — decode/encode fixtures for each `SessionUpdate` and `ContentBlock` variant
+- [x] `Tests/ACPGenerateTests/UnknownFallbackTests.swift` — unknown discriminators and unknown string-enum values round-trip via `unknown(String)`
+- [x] Run `swift test` — exits 0
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-07-15 00:06)
+
+- [x] `Sources/ACPGenerateCore/Emitter.swift:238` — Schema-derived wireValue is interpolated into a Swift string literal without escaping. A wireValue like foo"bar would generate invalid switch case: `case "foo"bar": self = .foo`. Escape wireValue before string interpolation using the same escaping logic as above.
+- [x] `Sources/ACPGenerateCore/Emitter.swift:279` — Schema-derived tag (discriminator value) is interpolated into a Swift string literal without escaping quotes or backslashes. A malicious tag could break the generated switch statement. Escape tag before interpolation using proper Swift string escaping for backslashes and quotes.
+- [x] `Sources/ACPGenerateCore/Emitter.swift:300` — Schema-derived tag is interpolated into a Swift string literal without escaping (second occurrence in else branch). Same vulnerability as line 297. Apply same escaping as line 297 - extract tag escaping into a helper variable.
+- [x] `Tests/ACPGenerateTests/TaggedUnionTests.swift:20` — `vendoredOutput(named:)` function is duplicated identically in UnknownFallbackTests.swift; should be extracted to a shared test utility to avoid maintenance burden. Extract `vendoredOutput(named:)` to a shared test helper file (e.g., `Tests/ACPGenerateTests/Helpers.swift`) so both test files call the same function.
+- [x] `Tests/ACPGenerateTests/UnknownFallbackTests.swift:20` — `vendoredOutput(named:)` function is duplicated identically in TaggedUnionTests.swift; should be extracted to a shared test utility to avoid maintenance burden. Extract `vendoredOutput(named:)` to a shared test helper file (e.g., `Tests/ACPGenerateTests/Helpers.swift`) so both test files call the same function.

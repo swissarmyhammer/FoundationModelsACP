@@ -4,26 +4,6 @@ import Testing
 
 @testable import ACPGenerateCore
 
-/// The package-root `Schema/acp-v1.json`, located relative to this file.
-private let vendoredSchemaURL = URL(fileURLWithPath: #filePath)
-    .deletingLastPathComponent()  // UnknownFallbackTests.swift
-    .deletingLastPathComponent()  // ACPGenerateTests
-    .deletingLastPathComponent()  // Tests
-    .appendingPathComponent("Schema")
-    .appendingPathComponent("acp-v1.json")
-
-/// Generates from the vendored schema and returns one file's contents.
-///
-/// - Parameter name: The generated file name to look up.
-/// - Returns: The Swift source text of that file.
-/// - Throws: A test failure when generation fails or the file is missing.
-private func vendoredOutput(named name: String) throws -> String {
-    let data = try Data(contentsOf: vendoredSchemaURL)
-    let files = try SchemaGenerator().generate(schemaJSON: data)
-    let file = files.first { $0.name == name }
-    return try #require(file, "expected generated file \(name)").contents
-}
-
 /// Tests the string-enum generator stage and the `unknown(String)` fallback:
 /// snake_case wire strings map to camelCase Swift cases, and any value a
 /// newer peer sends routes to `unknown(String)` instead of failing decode.
@@ -63,6 +43,21 @@ private func vendoredOutput(named name: String) throws -> String {
         #expect(source.contains("case let other:"))
         #expect(source.contains("self = .unknown(other)"))
         #expect(source.contains("case .unknown(let discriminator):"))
+    }
+
+    @Test func quoteBearingWireValueEscapesInEmittedSource() throws {
+        // `swiftCaseName` rejects such values at the generator boundary, but
+        // the emitter must be safe on its own terms: a quote or backslash in
+        // a wire value may never break out of the generated string literal.
+        let model = StringEnumModel(
+            name: "Weird",
+            documentation: nil,
+            cases: [EnumCaseModel(wireValue: #"a"b\c"#, swiftName: "aBC", documentation: nil)]
+        )
+        let source = Emitter.stringEnumDeclaration(model)
+        #expect(source.contains(#"case .aBC: "a\"b\\c""#))
+        #expect(source.contains(#"case "a\"b\\c": self = .aBC"#))
+        #expect(!source.contains(#"case "a"b\c""#))
     }
 }
 
