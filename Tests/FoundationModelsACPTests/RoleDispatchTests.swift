@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-import FoundationModelsACP
+@testable import FoundationModelsACP
 
 // MARK: - Helpers
 
@@ -114,7 +114,7 @@ func agentSideSetSessionModeDispatchesViaTheRoutingTable() async throws {
     let client = await Connection(transport: clientEnd)
 
     let request = SetSessionModeRequest(modeId: SessionModeId(rawValue: "mode-1"), sessionId: testSessionId)
-    let wire = wireMethod(for: "setSessionMode", on: .agent)
+    let wire = RoleRouting.wire(handler: "setSessionMode", on: .agent)
     _ = try await client.request(method: wire, params: encodedValue(request))
     #expect(recorder.recorded("setSessionMode") == (try encodedValue(request)))
 

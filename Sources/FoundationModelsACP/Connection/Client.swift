@@ -73,33 +73,41 @@ public protocol Client: Sendable {
 /// Default implementations that answer method-not-found for every gated
 /// method, so a conformer implements only what its capabilities advertise.
 extension Client {
+    /// Throws method-not-found for an unsupported gated client method.
+    ///
+    /// - Parameter handler: The handler name of the unsupported method.
+    /// - Throws: `RequestError.methodNotFound` carrying the method's wire name.
+    private func unsupported(_ handler: String) throws -> Never {
+        throw RequestError.methodNotFound(RoleRouting.wire(handler: handler, on: .client))
+    }
+
     public func readTextFile(_ params: ReadTextFileRequest) async throws -> ReadTextFileResponse {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: "readTextFile", on: .client))
+        try unsupported("readTextFile")
     }
 
     public func writeTextFile(_ params: WriteTextFileRequest) async throws {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: "writeTextFile", on: .client))
+        try unsupported("writeTextFile")
     }
 
     public func createTerminal(_ params: CreateTerminalRequest) async throws -> CreateTerminalResponse {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: "createTerminal", on: .client))
+        try unsupported("createTerminal")
     }
 
     public func terminalOutput(_ params: TerminalOutputRequest) async throws -> TerminalOutputResponse {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: "terminalOutput", on: .client))
+        try unsupported("terminalOutput")
     }
 
     public func waitForTerminalExit(
         _ params: WaitForTerminalExitRequest
     ) async throws -> WaitForTerminalExitResponse {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: "waitForTerminalExit", on: .client))
+        try unsupported("waitForTerminalExit")
     }
 
     public func killTerminal(_ params: KillTerminalRequest) async throws {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: "killTerminal", on: .client))
+        try unsupported("killTerminal")
     }
 
     public func releaseTerminal(_ params: ReleaseTerminalRequest) async throws {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: "releaseTerminal", on: .client))
+        try unsupported("releaseTerminal")
     }
 }

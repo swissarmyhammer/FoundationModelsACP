@@ -100,42 +100,50 @@ public protocol Agent: Sendable {
 /// Default implementations that answer method-not-found for every optional
 /// method, so a conformer implements only what its capabilities advertise.
 extension Agent {
+    /// Throws method-not-found for an unsupported optional agent method.
+    ///
+    /// - Parameter handler: The handler name of the unsupported method.
+    /// - Throws: `RequestError.methodNotFound` carrying the method's wire name.
+    private func unsupported(_ handler: String) throws -> Never {
+        throw RequestError.methodNotFound(RoleRouting.wire(handler: handler, on: .agent))
+    }
+
     public func loadSession(_ params: LoadSessionRequest) async throws -> LoadSessionResponse {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: "loadSession", on: .agent))
+        try unsupported("loadSession")
     }
 
     public func authenticate(_ params: AuthenticateRequest) async throws -> AuthenticateResponse {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: "authenticate", on: .agent))
+        try unsupported("authenticate")
     }
 
     public func setSessionConfigOption(
         _ params: SetSessionConfigOptionRequest
     ) async throws -> SetSessionConfigOptionResponse {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: "setSessionConfigOption", on: .agent))
+        try unsupported("setSessionConfigOption")
     }
 
     @available(*, deprecated, message: "Use setSessionConfigOption; session/set_mode is being removed")
     public func setSessionMode(_ params: SetSessionModeRequest) async throws -> SetSessionModeResponse {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: "setSessionMode", on: .agent))
+        try unsupported("setSessionMode")
     }
 
     public func listSessions(_ params: ListSessionsRequest) async throws -> ListSessionsResponse {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: "listSessions", on: .agent))
+        try unsupported("listSessions")
     }
 
     public func resumeSession(_ params: ResumeSessionRequest) async throws -> ResumeSessionResponse {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: "resumeSession", on: .agent))
+        try unsupported("resumeSession")
     }
 
     public func deleteSession(_ params: DeleteSessionRequest) async throws {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: "deleteSession", on: .agent))
+        try unsupported("deleteSession")
     }
 
     public func closeSession(_ params: CloseSessionRequest) async throws {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: "closeSession", on: .agent))
+        try unsupported("closeSession")
     }
 
     public func logout(_ params: LogoutRequest) async throws {
-        throw RequestError.methodNotFound(RoleRouting.wire(handler: "logout", on: .agent))
+        try unsupported("logout")
     }
 }

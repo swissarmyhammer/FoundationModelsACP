@@ -231,17 +231,3 @@ let testSessionId = SessionId(rawValue: "session-1")
 
 /// A canonical terminal id used across role tests.
 let testTerminalId = TerminalId(rawValue: "terminal-1")
-
-/// The wire method name for a handler, read from the public routing table.
-///
-/// Tests resolve wire names through `ACPMethodTable` rather than hand-typing
-/// them, mirroring the production dispatch layer.
-///
-/// - Parameters:
-///   - handler: The Swift handler name.
-///   - side: The serving participant.
-/// - Returns: The wire method name.
-func wireMethod(for handler: String, on side: MethodSide) -> String {
-    let match = ACPMethodTable.methods.first { $0.side == side && $0.handlerName == handler }
-    return match!.wireMethod
-}

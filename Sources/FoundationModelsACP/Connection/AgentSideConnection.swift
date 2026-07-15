@@ -2,22 +2,17 @@ import Foundation
 
 /// The agent side of an ACP connection (spec §4).
 ///
-/// Wraps one full-duplex `Connection`: inbound Client→Agent calls dispatch to
-/// the `Agent` the factory builds, and the connection itself exposes the
-/// outbound Agent→Client calls (`sessionUpdate`, `requestPermission`, the
-/// `fs/*` and `terminal/*` methods) so the agent can drive the client mid-turn.
+/// Delegates its transport wiring to a shared `RoleConnectionCore`: inbound
+/// Client→Agent calls dispatch to the `Agent` the factory builds, and the
+/// connection itself exposes the outbound Agent→Client calls (`sessionUpdate`,
+/// `requestPermission`, the `fs/*` and `terminal/*` methods) so the agent can
+/// drive the client mid-turn.
 public final class AgentSideConnection: Sendable {
-    /// The side this connection serves inbound: the agent-side methods.
-    private static let servedSide: MethodSide = .agent
-
     /// The side this connection calls outbound: the client-side methods.
     private static let peerSide: MethodSide = .client
 
-    /// The agent-side methods this connection serves, keyed by wire name.
-    private static let served = RoleRouting.served(on: servedSide)
-
-    /// The underlying full-duplex JSON-RPC engine.
-    private let connection: Connection
+    /// The shared engine owning the connection and the served agent.
+    private let core: RoleConnectionCore<any Agent>
 
     /// Creates the connection, wires the factory's agent, and starts serving.
     ///
@@ -37,44 +32,28 @@ public final class AgentSideConnection: Sendable {
         requestTimeout: Duration? = nil,
         _ factory: @Sendable (AgentSideConnection) -> any Agent
     ) async {
-        let holder = RoleHolder<any Agent>()
-        connection = await Connection(
-            transport: stream,
+        core = await RoleConnectionCore(
+            stream: stream,
             logger: logger,
             requestTimeout: requestTimeout,
-            requestHandler: { method, params in
-                try await Self.serveRequest(method: method, params: params, agent: holder)
+            servedSide: .agent,
+            dispatchRequest: { handler, params, agent in
+                try await Self.serve(handler, params: params, to: agent)
             },
-            notificationHandler: { method, params in
-                await Self.serveNotification(method: method, params: params, agent: holder)
+            dispatchNotification: { handler, params, agent in
+                await Self.serveNotification(handler, params: params, to: agent)
             }
         )
-        holder.set(factory(self))
+        core.setRole(factory(self))
     }
 
-    // MARK: - Inbound (Client → Agent)
-
-    /// Serves one inbound request by routing it to the held agent.
-    ///
-    /// - Parameters:
-    ///   - method: The wire method name.
-    ///   - params: The raw request parameters.
-    ///   - holder: The cell holding the agent to serve.
-    /// - Returns: The encoded response value.
-    /// - Throws: `RequestError.methodNotFound` for an unrouted method, or any
-    ///   error the agent throws.
-    private static func serveRequest(
-        method: String,
-        params: JSONValue?,
-        agent holder: RoleHolder<any Agent>
-    ) async throws -> JSONValue {
-        guard let info = served[method], info.kind == .request, let agent = holder.role else {
-            throw RequestError.methodNotFound(method)
-        }
-        return try await dispatch(info.handlerName, params: params, to: agent)
-    }
+    // MARK: - Inbound dispatch (Client → Agent)
 
     /// Decodes and dispatches one request to the agent's typed handler.
+    ///
+    /// Each arm binds a wire method to a statically-typed agent call; the wire
+    /// method's parameter type is only known at compile time, so this typed
+    /// binding cannot be replaced by a runtime table over the routing metadata.
     ///
     /// - Parameters:
     ///   - handler: The routing table's handler name for the method.
@@ -83,7 +62,7 @@ public final class AgentSideConnection: Sendable {
     /// - Returns: The encoded response value.
     /// - Throws: `RequestError.methodNotFound` for an unknown handler, or any
     ///   error the agent throws.
-    private static func dispatch(
+    private static func serve(
         _ handler: String,
         params: JSONValue?,
         to agent: any Agent
@@ -121,21 +100,18 @@ public final class AgentSideConnection: Sendable {
         }
     }
 
-    /// Serves one inbound notification by routing it to the held agent.
+    /// Decodes and dispatches one notification to the agent's typed handler.
     ///
     /// - Parameters:
-    ///   - method: The wire method name.
+    ///   - handler: The routing table's handler name for the notification.
     ///   - params: The raw notification parameters.
-    ///   - holder: The cell holding the agent to serve.
+    ///   - agent: The agent to serve.
     private static func serveNotification(
-        method: String,
+        _ handler: String,
         params: JSONValue?,
-        agent holder: RoleHolder<any Agent>
+        to agent: any Agent
     ) async {
-        guard let info = served[method], info.kind == .notification, let agent = holder.role else {
-            return
-        }
-        switch info.handlerName {
+        switch handler {
         case "sessionCancel":
             guard let notification = try? JSONValue.decodeParams(CancelNotification.self, from: params) else {
                 return
@@ -146,6 +122,48 @@ public final class AgentSideConnection: Sendable {
         }
     }
 
+    // MARK: - Outbound helpers (Agent → Client)
+
+    /// Issues an outbound client request and decodes its typed response.
+    ///
+    /// - Parameters:
+    ///   - handler: The Swift handler name of the client method to call.
+    ///   - params: The typed request parameters.
+    ///   - responseType: The expected response model type.
+    /// - Returns: The decoded response.
+    /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
+    ///   disconnect.
+    private func call<Request: Encodable, Response: Decodable>(
+        _ handler: String,
+        _ params: Request,
+        returning responseType: Response.Type
+    ) async throws -> Response {
+        try await RoleDispatch.callResult(
+            core.connection, handler: handler, on: Self.peerSide, params, returning: responseType
+        )
+    }
+
+    /// Issues an outbound client request whose response carries no value.
+    ///
+    /// - Parameters:
+    ///   - handler: The Swift handler name of the client method to call.
+    ///   - params: The typed request parameters.
+    /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
+    ///   disconnect.
+    private func callEmpty<Request: Encodable>(_ handler: String, _ params: Request) async throws {
+        try await RoleDispatch.callEmpty(core.connection, handler: handler, on: Self.peerSide, params)
+    }
+
+    /// Sends an outbound client notification.
+    ///
+    /// - Parameters:
+    ///   - handler: The Swift handler name of the client notification to send.
+    ///   - params: The typed notification parameters.
+    /// - Throws: `ConnectionError.closed` after disconnect.
+    private func notify<Params: Encodable>(_ handler: String, _ params: Params) async throws {
+        try await RoleDispatch.notify(core.connection, handler: handler, on: Self.peerSide, params)
+    }
+
     // MARK: - Outbound (Agent → Client)
 
     /// Sends a streamed session update to the client.
@@ -153,7 +171,7 @@ public final class AgentSideConnection: Sendable {
     /// - Parameter notification: The session-update notification.
     /// - Throws: `ConnectionError.closed` after disconnect.
     public func sessionUpdate(_ notification: SessionNotification) async throws {
-        try await RoleDispatch.notify(connection, handler: "sessionUpdate", on: Self.peerSide, notification)
+        try await notify("sessionUpdate", notification)
     }
 
     /// Requests permission from the client mid-turn.
@@ -165,10 +183,7 @@ public final class AgentSideConnection: Sendable {
     public func requestPermission(
         _ params: RequestPermissionRequest
     ) async throws -> RequestPermissionResponse {
-        try await RoleDispatch.callResult(
-            connection, handler: "requestPermission", on: Self.peerSide,
-            params, returning: RequestPermissionResponse.self
-        )
+        try await call("requestPermission", params, returning: RequestPermissionResponse.self)
     }
 
     /// Reads a text file through the client.
@@ -178,10 +193,7 @@ public final class AgentSideConnection: Sendable {
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
     ///   disconnect.
     public func readTextFile(_ params: ReadTextFileRequest) async throws -> ReadTextFileResponse {
-        try await RoleDispatch.callResult(
-            connection, handler: "readTextFile", on: Self.peerSide,
-            params, returning: ReadTextFileResponse.self
-        )
+        try await call("readTextFile", params, returning: ReadTextFileResponse.self)
     }
 
     /// Writes a text file through the client.
@@ -190,7 +202,7 @@ public final class AgentSideConnection: Sendable {
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
     ///   disconnect.
     public func writeTextFile(_ params: WriteTextFileRequest) async throws {
-        try await RoleDispatch.callEmpty(connection, handler: "writeTextFile", on: Self.peerSide, params)
+        try await callEmpty("writeTextFile", params)
     }
 
     /// Creates a terminal on the client.
@@ -200,10 +212,7 @@ public final class AgentSideConnection: Sendable {
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
     ///   disconnect.
     public func createTerminal(_ params: CreateTerminalRequest) async throws -> CreateTerminalResponse {
-        try await RoleDispatch.callResult(
-            connection, handler: "createTerminal", on: Self.peerSide,
-            params, returning: CreateTerminalResponse.self
-        )
+        try await call("createTerminal", params, returning: CreateTerminalResponse.self)
     }
 
     /// Reads a bounded snapshot of a terminal's output from the client.
@@ -213,10 +222,7 @@ public final class AgentSideConnection: Sendable {
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
     ///   disconnect.
     public func terminalOutput(_ params: TerminalOutputRequest) async throws -> TerminalOutputResponse {
-        try await RoleDispatch.callResult(
-            connection, handler: "terminalOutput", on: Self.peerSide,
-            params, returning: TerminalOutputResponse.self
-        )
+        try await call("terminalOutput", params, returning: TerminalOutputResponse.self)
     }
 
     /// Waits for a terminal's process to exit on the client.
@@ -228,10 +234,7 @@ public final class AgentSideConnection: Sendable {
     public func waitForTerminalExit(
         _ params: WaitForTerminalExitRequest
     ) async throws -> WaitForTerminalExitResponse {
-        try await RoleDispatch.callResult(
-            connection, handler: "waitForTerminalExit", on: Self.peerSide,
-            params, returning: WaitForTerminalExitResponse.self
-        )
+        try await call("waitForTerminalExit", params, returning: WaitForTerminalExitResponse.self)
     }
 
     /// Kills a terminal's process on the client.
@@ -240,7 +243,7 @@ public final class AgentSideConnection: Sendable {
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
     ///   disconnect.
     public func killTerminal(_ params: KillTerminalRequest) async throws {
-        try await RoleDispatch.callEmpty(connection, handler: "killTerminal", on: Self.peerSide, params)
+        try await callEmpty("killTerminal", params)
     }
 
     /// Releases a terminal's resources on the client.
@@ -249,11 +252,11 @@ public final class AgentSideConnection: Sendable {
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
     ///   disconnect.
     public func releaseTerminal(_ params: ReleaseTerminalRequest) async throws {
-        try await RoleDispatch.callEmpty(connection, handler: "releaseTerminal", on: Self.peerSide, params)
+        try await callEmpty("releaseTerminal", params)
     }
 
     /// Shuts the connection down, rejecting every pending request.
     public func close() async {
-        await connection.close()
+        await core.close()
     }
 }
