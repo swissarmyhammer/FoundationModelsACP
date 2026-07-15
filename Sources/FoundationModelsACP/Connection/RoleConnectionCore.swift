@@ -41,6 +41,8 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
     ///   - dispatchRequest: Routes an inbound request to the role's handler.
     ///   - dispatchNotification: Routes an inbound notification to the role's
     ///     handler.
+    ///   - onClose: Invoked once when the connection shuts down; lets the owner
+    ///     finish streams it derives from the connection.
     init(
         stream: any ACPTransport,
         logger: ACPLogger,
@@ -48,7 +50,8 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
         servedSide: MethodSide,
         peerSide: MethodSide,
         dispatchRequest: @escaping RequestDispatch,
-        dispatchNotification: @escaping NotificationDispatch
+        dispatchNotification: @escaping NotificationDispatch,
+        onClose: Connection.CloseHandler? = nil
     ) async {
         self.peerSide = peerSide
         let holder = RoleHolder<Role>()
@@ -68,7 +71,8 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
                     return
                 }
                 await dispatchNotification(info.handlerName, params, role)
-            }
+            },
+            onClose: onClose
         )
         self.holder = holder
     }

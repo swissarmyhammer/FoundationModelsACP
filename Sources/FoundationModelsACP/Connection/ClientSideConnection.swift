@@ -11,6 +11,9 @@ public final class ClientSideConnection: Sendable {
     /// The shared engine owning the connection and the served client.
     private let core: RoleConnectionCore<any Client>
 
+    /// Demultiplexes `session/update` notifications into per-session streams.
+    private let router: SessionUpdateRouter
+
     /// Creates the connection, wires the factory's client, and starts serving.
     ///
     /// The factory receives this connection so the client it builds can capture
@@ -29,6 +32,10 @@ public final class ClientSideConnection: Sendable {
         requestTimeout: Duration? = nil,
         _ factory: @Sendable (ClientSideConnection) -> any Client
     ) async {
+        // The router is captured by the notification dispatcher and by the
+        // connection's close handler rather than `self`, preserving the
+        // initialization-cycle break the core relies on.
+        let router = SessionUpdateRouter()
         core = await RoleConnectionCore(
             stream: stream,
             logger: logger,
@@ -39,10 +46,30 @@ public final class ClientSideConnection: Sendable {
                 try await Self.serve(handler, params: params, to: client)
             },
             dispatchNotification: { handler, params, client in
-                await Self.serveNotification(handler, params: params, to: client)
-            }
+                await Self.serveNotification(handler, params: params, to: client, router: router)
+            },
+            onClose: { router.finishAll() }
         )
+        self.router = router
         core.setRole(factory(self))
+    }
+
+    // MARK: - Session update streams
+
+    /// Returns a stream of `session/update` notifications for one session.
+    ///
+    /// The read loop routes every notification to its session by `sessionId`,
+    /// so interleaved sessions demultiplex to their own streams. A stream's
+    /// lifetime runs from this call until the connection closes, deliberately
+    /// independent of any prompt turn: a `tool_call_update` arriving after the
+    /// prompt response or after a `session/cancel` is still delivered, and the
+    /// stream finishes only when the connection dies. Subscribe before driving
+    /// a turn — updates for a session with no active subscriber are dropped.
+    ///
+    /// - Parameter sessionId: The session whose updates to observe.
+    /// - Returns: A stream of that session's updates.
+    public func updates(for sessionId: SessionId) -> AsyncStream<SessionUpdate> {
+        router.updates(for: sessionId)
     }
 
     // MARK: - Inbound dispatch (Agent → Client)
@@ -97,22 +124,30 @@ public final class ClientSideConnection: Sendable {
         }
     }
 
-    /// Decodes and dispatches one notification to the client's typed handler.
+    /// Decodes and dispatches one notification to the session streams and the
+    /// client's typed handler.
+    ///
+    /// A decoded `session/update` is routed to its session stream first, then
+    /// delivered to the client's own handler, so a host may consume updates
+    /// through either surface.
     ///
     /// - Parameters:
     ///   - handler: The routing table's handler name for the notification.
     ///   - params: The raw notification parameters.
     ///   - client: The client to serve.
+    ///   - router: The per-session update router to fan the notification into.
     private static func serveNotification(
         _ handler: String,
         params: JSONValue?,
-        to client: any Client
+        to client: any Client,
+        router: SessionUpdateRouter
     ) async {
         switch handler {
         case "sessionUpdate":
             guard let notification = try? JSONValue.decodeParams(SessionNotification.self, from: params) else {
                 return
             }
+            router.deliver(notification)
             await client.sessionUpdate(notification)
         default:
             break

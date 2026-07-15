@@ -50,11 +50,18 @@ public actor Connection {
         let timeout: Task<Void, Never>?
     }
 
+    /// Invoked once when the connection shuts down, after every pending
+    /// request is rejected. Upper layers use this disconnect signal to finish
+    /// streams they derive from the connection (e.g. per-session update
+    /// streams).
+    public typealias CloseHandler = @Sendable () -> Void
+
     private let transport: any ACPTransport
     private let logger: ACPLogger
     private let requestTimeout: Duration?
     private let requestHandler: RequestHandler?
     private let notificationHandler: NotificationHandler?
+    private let onClose: CloseHandler?
 
     /// Monotonic id for outbound requests.
     private var nextRequestID = 1
@@ -82,18 +89,22 @@ public actor Connection {
     ///     is answered with `-32601` method-not-found.
     ///   - notificationHandler: Handles inbound notifications; when `nil`,
     ///     notifications are dropped.
+    ///   - onClose: Invoked once when the connection shuts down, after pending
+    ///     requests are rejected; when `nil`, shutdown notifies no one.
     public init(
         transport: any ACPTransport,
         logger: ACPLogger = .disabled,
         requestTimeout: Duration? = nil,
         requestHandler: RequestHandler? = nil,
-        notificationHandler: NotificationHandler? = nil
+        notificationHandler: NotificationHandler? = nil,
+        onClose: CloseHandler? = nil
     ) async {
         self.transport = transport
         self.logger = logger
         self.requestTimeout = requestTimeout
         self.requestHandler = requestHandler
         self.notificationHandler = notificationHandler
+        self.onClose = onClose
         readTask = Task { await self.readLoop() }
     }
 
@@ -388,7 +399,9 @@ public actor Connection {
 
     /// Fails loud: marks the connection closed, rejects every pending
     /// request with `ConnectionError.closed`, cancels in-flight inbound
-    /// handlers, and stops the read loop. Idempotent.
+    /// handlers, stops the read loop, and fires the close handler last so
+    /// upper layers finish derived streams only after callers are unblocked.
+    /// Idempotent.
     private func shutDown() {
         guard !isClosed else { return }
         isClosed = true
@@ -405,5 +418,6 @@ public actor Connection {
         for task in cancelled.values {
             task.cancel()
         }
+        onClose?()
     }
 }
