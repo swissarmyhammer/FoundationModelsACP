@@ -86,7 +86,7 @@ struct TranscriptMapper {
     /// Maps one response or reasoning segment into its update, if any.
     ///
     /// A structured segment in a response that reads as a plan becomes a `plan`
-    /// update; every other structured segment is surfaced as its JSON text.
+    /// update; every other text-bearing segment is surfaced as its text chunk.
     /// Attachment and custom segments have no ACP chunk form and map to nothing.
     ///
     /// - Parameters:
@@ -94,14 +94,26 @@ struct TranscriptMapper {
     ///   - role: Whether the segment belongs to the message or to reasoning.
     /// - Returns: The segment's update, or nil when it has no chunk form.
     private static func update(for segment: Transcript.Segment, role: SegmentRole) -> SessionUpdate? {
+        if role == .message, case .structure(let structure) = segment, let plan = plan(from: structure) {
+            return .plan(plan)
+        }
+        guard let text = segmentText(from: segment) else {
+            return nil
+        }
+        return chunk(text: text, role: role)
+    }
+
+    /// Extracts a segment's text: a text segment's content, or a structured
+    /// segment's JSON. Attachment and custom segments have no text form.
+    ///
+    /// - Parameter segment: The segment to read.
+    /// - Returns: The segment's text, or nil when it has none.
+    private static func segmentText(from segment: Transcript.Segment) -> String? {
         switch segment {
         case .text(let text):
-            return chunk(text: text.content, role: role)
+            return text.content
         case .structure(let structure):
-            if role == .message, let plan = plan(from: structure) {
-                return .plan(plan)
-            }
-            return chunk(text: structure.content.jsonString, role: role)
+            return structure.content.jsonString
         case .attachment, .custom:
             return nil
         @unknown default:
@@ -164,16 +176,10 @@ struct TranscriptMapper {
     /// - Parameter segment: The output segment to map.
     /// - Returns: The content block, or nil for segments with no text form.
     private static func toolContent(from segment: Transcript.Segment) -> ToolCallContent? {
-        switch segment {
-        case .text(let text):
-            return .content(Content(content: .text(TextContent(text: text.content))))
-        case .structure(let structure):
-            return .content(Content(content: .text(TextContent(text: structure.content.jsonString))))
-        case .attachment, .custom:
-            return nil
-        @unknown default:
+        guard let text = segmentText(from: segment) else {
             return nil
         }
+        return .content(Content(content: .text(TextContent(text: text))))
     }
 
     /// Decodes generated content's JSON into a ``JSONValue``, for a tool call's
