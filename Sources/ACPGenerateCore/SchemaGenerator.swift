@@ -69,12 +69,7 @@ public struct SchemaGenerator: Sendable {
                 "unstable routing manifest requires the stable routing manifest"
             )
         }
-        let schema: JSONValue
-        do {
-            schema = try JSONDecoder().decode(JSONValue.self, from: schemaJSON)
-        } catch {
-            throw GeneratorError.invalidSchema("not parseable as JSON: \(error)")
-        }
+        let schema = try decodeJSON(schemaJSON, context: "schema document")
         guard let definitions = schema["$defs"]?.objectValue else {
             throw GeneratorError.invalidSchema("missing top-level $defs object")
         }
@@ -201,6 +196,24 @@ public struct SchemaGenerator: Sendable {
     /// - Returns: The renamed Swift type name, or the name unchanged.
     private func emittedName(_ name: String) -> String {
         config.typeRenames[name] ?? name
+    }
+
+    /// Decodes raw input bytes as a JSON value.
+    ///
+    /// Every generator input (schema document, routing manifests) routes
+    /// through this one decode-and-fail path.
+    ///
+    /// - Parameters:
+    ///   - data: The raw JSON bytes.
+    ///   - context: Which document, for error messages.
+    /// - Returns: The parsed JSON value.
+    /// - Throws: `GeneratorError.invalidSchema` when the bytes are not JSON.
+    private func decodeJSON(_ data: Data, context: String) throws -> JSONValue {
+        do {
+            return try JSONDecoder().decode(JSONValue.self, from: data)
+        } catch {
+            throw GeneratorError.invalidSchema("\(context) is not parseable as JSON: \(error)")
+        }
     }
 
     // MARK: - Union models
@@ -873,6 +886,9 @@ extension SchemaGenerator {
     /// The only manifest layout revision this generator understands.
     private static let supportedManifestVersion = JSONValue.number(1)
 
+    /// The manifest member naming its layout revision.
+    private static let versionKey = "version"
+
     /// The schema annotation naming a routed definition's serving side.
     private static let sideAnnotationKey = "x-side"
 
@@ -947,19 +963,14 @@ extension SchemaGenerator {
     /// - Returns: The parsed manifest.
     /// - Throws: `GeneratorError.invalidSchema` for any shape deviation.
     private func parseRoutingManifest(_ data: Data, context: String) throws -> RoutingManifest {
-        let manifest: JSONValue
-        do {
-            manifest = try JSONDecoder().decode(JSONValue.self, from: data)
-        } catch {
-            throw GeneratorError.invalidSchema("\(context) is not parseable as JSON: \(error)")
-        }
+        let manifest = try decodeJSON(data, context: context)
         guard let members = manifest.objectValue else {
             throw GeneratorError.invalidSchema("\(context) is not a JSON object")
         }
-        guard members["version"] == Self.supportedManifestVersion else {
+        guard members[Self.versionKey] == Self.supportedManifestVersion else {
             throw GeneratorError.invalidSchema("\(context) does not declare supported version 1")
         }
-        let knownKeys = Set(Self.manifestGroups.map(\.key) + ["version"])
+        let knownKeys = Set(Self.manifestGroups.map(\.key) + [Self.versionKey])
         for key in members.keys.sorted() where !knownKeys.contains(key) {
             throw GeneratorError.invalidSchema("\(context) has unknown member \"\(key)\"")
         }
