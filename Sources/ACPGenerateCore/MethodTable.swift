@@ -194,11 +194,7 @@ extension SchemaGenerator {
                     side: side,
                     definitionNames: definitionNames
                 )
-                guard handlerNames.insert(model.handlerName).inserted else {
-                    throw GeneratorError.invalidSchema(
-                        "duplicate handler name \(model.handlerName) on the \(side.rawValue) side"
-                    )
-                }
+                try registerHandlerName(model.handlerName, side: side, in: &handlerNames, label: "handler")
                 models.append(model)
             }
         }
@@ -319,17 +315,38 @@ extension SchemaGenerator {
                     fromWire: routingKey,
                     context: "unstable method \(wireMethod)"
                 )
-                guard handlerNames.insert(handlerName).inserted else {
-                    throw GeneratorError.invalidSchema(
-                        "duplicate unstable handler name \(handlerName) on the \(side.rawValue) side"
-                    )
-                }
+                try registerHandlerName(handlerName, side: side, in: &handlerNames, label: "unstable handler")
                 models.append(
                     UnstableMethodModel(wireMethod: wireMethod, handlerName: handlerName, side: side)
                 )
             }
         }
         return models
+    }
+
+    /// Records a handler name in a side's seen-set, failing on a collision.
+    ///
+    /// Both the stable and unstable builders route through this single
+    /// check, so the uniqueness rule cannot drift between the two tables.
+    ///
+    /// - Parameters:
+    ///   - handlerName: The derived handler name to register.
+    ///   - side: The side the handler serves, for the error message.
+    ///   - seen: The side's already-registered handler names.
+    ///   - label: The table being built (`handler` / `unstable handler`),
+    ///     for the error message.
+    /// - Throws: `GeneratorError.invalidSchema` when the name is taken.
+    private func registerHandlerName(
+        _ handlerName: String,
+        side: MethodSide,
+        in seen: inout Set<String>,
+        label: String
+    ) throws {
+        guard seen.insert(handlerName).inserted else {
+            throw GeneratorError.invalidSchema(
+                "duplicate \(label) name \(handlerName) on the \(side.rawValue) side"
+            )
+        }
     }
 
     /// Lowercases a type name's leading character to form a handler name.

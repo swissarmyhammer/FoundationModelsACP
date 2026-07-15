@@ -38,9 +38,19 @@ comments:
 
     TESTS: RoutingTableTests.swift (emission samples across both sides/kinds incl. session/prompt + session/update, data-driven every-manifest-method-exactly-once, deprecation marker, 8 fail-loud validation cases, checked-in-artifact-matches-fresh-generation sync test, compiled-table runtime acceptance) + UnstableNamespaceTests.swift (namespace-only emission both directions data-driven from the manifest diff, both-sides mcp/message, unsettled docs). Suite now 167/167 green (70 + 97), zero warnings, regeneration byte-idempotent. Double-check verdict: PASS (independently re-derived the 23-method table and 20-entry unstable diff from the vendored files).
   timestamp: 2026-07-15T12:40:35.887077+00:00
+- actor: wballard
+  id: 01kxjxc7arcxzat36cyymgd9e3
+  text: |-
+    Review pass 1: 2 findings (both duplication), both fixed:
+
+    - Handler-name uniqueness check extracted to a single registerHandlerName(_:side:in:label:) helper on SchemaGenerator; both the stable and unstable builders now route through it (labels "handler"/"unstable handler" preserve the exact prior error messages, and the covering fail-loud tests still pass).
+    - defaultExpressionParts' string case now delegates to Emitter.stringLiteral instead of re-implementing the backslash/quote escaping — grep confirms no remaining raw escape site in Sources.
+
+    Verification: swift test 167/167 green (70 + 97), zero warnings; swift run acp-generate leaves Generated/ byte-identical (both fixes are behavior-neutral by construction). Skipped a second double-check spawn with justification: the delta is a mechanical dedup fully covered by the existing suite and idempotence check, and the review engine re-reviews this exact commit next. Checkboxes flipped; committing checkpoint, then re-review.
+  timestamp: 2026-07-15T12:52:38.872778+00:00
 depends_on:
 - 01KXHB88Q1GSGHMPXHNSMKM2XF
-position_column: doing
+position_column: review
 position_ordinal: '80'
 title: 'Codegen: method-routing table from meta.json + Unstable namespace'
 ---
@@ -65,3 +75,8 @@ NOTE (adapted per ^zwttegj discovery): the vendored manifests use `agentMethods`
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-07-15 07:41)
+
+- [x] `Sources/ACPGenerateCore/MethodTable.swift:255` — Handler name uniqueness validation is duplicated in both `stableMethodModels` and `unstableMethodModels` with near-identical logic, differing only in error message text. When validation rules change, both copies must be kept in sync — this creates maintenance drift risk. Extract a helper function `checkHandlerNameUniqueness(_ name: String, side: MethodSide, into set: inout Set<String>, prefix: String = "duplicate handler name") throws` and call it from both sites, eliminating the parallel logic.
+- [x] `Sources/ACPGenerateCore/SchemaGenerator.swift:697` — String escaping logic in `defaultExpressionParts` reimplements the same escaping that already exists in `Emitter.stringLiteral`. Both escape backslashes then quotes identically. This duplication means the escaping logic is now in two places and could diverge if one is updated. Replace the custom escape logic with a call to the shared utility: change line 699 from `return ("\"(escaped)\"", false)` to `return (Emitter.stringLiteral(string), false)`.

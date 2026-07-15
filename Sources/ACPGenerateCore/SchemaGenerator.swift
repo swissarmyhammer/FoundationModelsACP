@@ -676,10 +676,7 @@ public struct SchemaGenerator: Sendable {
             }
             return (String(number), false)
         case .string(let string):
-            let escaped = string
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "\"", with: "\\\"")
-            return ("\"\(escaped)\"", false)
+            return (Emitter.stringLiteral(string), false)
         case .array(let elements):
             guard elements.isEmpty else {
                 throw GeneratorError.unsupportedShape(context: context, detail: "non-empty array default")
