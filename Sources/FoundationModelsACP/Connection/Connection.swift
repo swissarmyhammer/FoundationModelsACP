@@ -34,6 +34,13 @@ public actor Connection {
     public typealias NotificationHandler =
         @Sendable (_ method: String, _ params: JSONValue?) async -> Void
 
+    /// The JSON-RPC version stamped on every outbound envelope and required
+    /// on every inbound one.
+    private static let jsonrpcVersion: JSONValue = .string("2.0")
+
+    /// Prefix applied to every diagnostic this connection logs.
+    private static let logPrefix = "Connection: "
+
     /// One outbound request awaiting its response.
     private struct PendingRequest {
         /// Resumed with the response's `result`, or throwing on error.
@@ -114,7 +121,7 @@ public actor Connection {
         let id: RequestID = .number(Double(nextRequestID))
         nextRequestID += 1
         var envelope: [String: JSONValue] = [
-            "jsonrpc": .string("2.0"),
+            "jsonrpc": Self.jsonrpcVersion,
             "id": id,
             "method": .string(method),
         ]
@@ -136,15 +143,7 @@ public actor Connection {
                     continuation.resume(throwing: ConnectionError.closed)
                     return
                 }
-                let timeoutTask = limit.map { limit in
-                    // Created in actor-isolated context, so the task inherits
-                    // the actor and `fail` is a synchronous same-actor call.
-                    Task {
-                        try? await Task.sleep(for: limit)
-                        guard !Task.isCancelled else { return }
-                        self.fail(id: id, with: ConnectionError.timedOut)
-                    }
-                }
+                let timeoutTask = makeTimeoutTask(for: id, after: limit)
                 pending[id] = PendingRequest(continuation: continuation, timeout: timeoutTask)
                 // Write only after registering, so a response arriving
                 // immediately always finds its continuation.
@@ -165,7 +164,7 @@ public actor Connection {
     public func notify(method: String, params: JSONValue? = nil) async throws {
         guard !isClosed else { throw ConnectionError.closed }
         var envelope: [String: JSONValue] = [
-            "jsonrpc": .string("2.0"),
+            "jsonrpc": Self.jsonrpcVersion,
             "method": .string(method),
         ]
         envelope["params"] = params
@@ -189,7 +188,7 @@ public actor Connection {
                 await dispatch(message)
             }
         } catch {
-            logger.log("Connection: transport stream failed: \(error)")
+            log("transport stream failed: \(error)")
         }
         shutDown()
     }
@@ -200,19 +199,17 @@ public actor Connection {
     /// - Parameter message: The decoded envelope.
     private func dispatch(_ message: JSONValue) async {
         guard case .object(let fields) = message else {
-            logger.log("Connection: dropping non-object message")
+            log("dropping non-object message")
             return
         }
         let id = fields["id"]
         // The version check mirrors the write side, which stamps every
-        // outgoing envelope with `"jsonrpc": "2.0"`.
-        guard fields["jsonrpc", default: .null] == .string("2.0") else {
-            logger.log("Connection: rejecting message without jsonrpc 2.0 version")
+        // outgoing envelope with the version constant.
+        guard fields["jsonrpc", default: .null] == Self.jsonrpcVersion else {
+            log("rejecting message without jsonrpc 2.0 version")
             if fields["method"] != nil {
                 // Request-shaped: JSON-RPC answers malformed requests -32600.
-                if let id {
-                    await respond(id: id, outcome: .failure(.invalidRequest))
-                }
+                await respondInvalidRequest(id: id)
             } else if let id, fields["result"] != nil || fields["error"] != nil {
                 // Response-shaped: never answer a response — the id could
                 // collide with one of the peer's own calls. Fail the awaiting
@@ -233,11 +230,20 @@ public actor Connection {
             resolve(id: id, fields: fields)
             return
         }
-        if let id {
-            await respond(id: id, outcome: .failure(.invalidRequest))
+        if id != nil {
+            await respondInvalidRequest(id: id)
         } else {
-            logger.log("Connection: dropping unclassifiable message")
+            log("dropping unclassifiable message")
         }
+    }
+
+    /// Answers `-32600` invalid request when the envelope carried an id;
+    /// id-less envelopes get no reply, per JSON-RPC.
+    ///
+    /// - Parameter id: The offending envelope's wire id, if any.
+    private func respondInvalidRequest(id: JSONValue?) async {
+        guard let id else { return }
+        await respond(id: id, outcome: .failure(.invalidRequest))
     }
 
     /// Runs one inbound request in its own `Task` so it never blocks the read
@@ -290,7 +296,7 @@ public actor Connection {
     ///   - id: The request's wire id, echoed back verbatim.
     ///   - outcome: The `result` value or the `error` to report.
     private func respond(id: JSONValue, outcome: Result<JSONValue, RequestError>) async {
-        var envelope: [String: JSONValue] = ["jsonrpc": .string("2.0"), "id": id]
+        var envelope: [String: JSONValue] = ["jsonrpc": Self.jsonrpcVersion, "id": id]
         switch outcome {
         case .success(let result):
             envelope["result"] = result
@@ -300,7 +306,7 @@ public actor Connection {
         do {
             try await transport.write(NDJSONCodec.encode(JSONValue.object(envelope)))
         } catch {
-            logger.log("Connection: failed to write response: \(error)")
+            log("failed to write response: \(error)")
         }
     }
 
@@ -312,7 +318,7 @@ public actor Connection {
     ///   - fields: The response envelope's members.
     private func resolve(id: JSONValue, fields: [String: JSONValue]) {
         guard let entry = pending.removeValue(forKey: id) else {
-            logger.log("Connection: dropping response for unknown id \(id)")
+            log("dropping response for unknown id \(id)")
             return
         }
         entry.timeout?.cancel()
@@ -325,6 +331,34 @@ public actor Connection {
     }
 
     // MARK: - Failure paths
+
+    /// Emits one diagnostic with the connection's log prefix.
+    ///
+    /// - Parameter message: The diagnostic text, without prefix.
+    private func log(_ message: String) {
+        logger.log(Self.logPrefix + message)
+    }
+
+    /// Schedules the task that rejects request `id` with
+    /// `ConnectionError.timedOut` after `limit` elapses.
+    ///
+    /// - Parameters:
+    ///   - id: The pending entry to reject when the timeout fires.
+    ///   - limit: The timeout, or `nil` for no timeout (returns `nil`).
+    /// - Returns: The scheduled timeout task, or `nil` when unlimited.
+    private func makeTimeoutTask(
+        for id: RequestID,
+        after limit: Duration?
+    ) -> Task<Void, Never>? {
+        guard let limit else { return nil }
+        // Created in actor-isolated context, so the task inherits the actor
+        // and `fail` is a synchronous same-actor call.
+        return Task {
+            try? await Task.sleep(for: limit)
+            guard !Task.isCancelled else { return }
+            self.fail(id: id, with: ConnectionError.timedOut)
+        }
+    }
 
     /// Writes one outbound request frame; a write failure rejects that
     /// request's pending continuation immediately.
