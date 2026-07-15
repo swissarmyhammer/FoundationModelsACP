@@ -8,6 +8,18 @@ comments:
   id: 01kxhjpm7vnjazfpe9xpdv8jr9
   text: 'Implementation landed (TDD). Vendored release tag schema-v1.19.0 from agentclientprotocol/agent-client-protocol; all three files SHA-256 verified byte-identical against GitHub asset digests (schema.json 92c1dfcd…, meta.json e0bf36f8…, meta.unstable.json 30268982…). Added Schema/README.md (tag/URL, digest table, bump procedure) and SchemaFixtureTests.swift (watched RED with 4 failures first, then GREEN). Discovery: the release meta manifests use agentMethods/clientMethods/protocolMethods routing tables, NOT the x-side/x-method shape the card guessed — tests assert the real shape, session/prompt present in both manifests. Also present upstream but not vendored (out of scope): schema.unstable.json. swift test: 5/5 pass, exit 0. really-done verified, double-check verdict PASS. Leaving in doing for review.'
   timestamp: 2026-07-15T00:26:51.003952+00:00
+- actor: wballard
+  id: 01kxhjr95wg3fx9fejw3msjnqs
+  text: 'Checkpoint committed locally: 74c057f "feat(schema): vendor ACP schema-v1.19.0 artifacts" (9 files, +4897/-7). Test suite green at commit time (swift test 5/5, exit 0, no warnings). Proceeding to review scoped to HEAD~1..HEAD.'
+  timestamp: 2026-07-15T00:27:45.212723+00:00
+- actor: wballard
+  id: 01kxhk1kerggt7rdedtxgnnyw8
+  text: 'Review pass 1 on HEAD~1..HEAD: 2 confirmed findings (both docstring exactness on the new test helper expectRoutingTables — needs plural - Parameters: block and a - Throws: section). Findings appended to card; task stays in review. Returning to implement to fix.'
+  timestamp: 2026-07-15T00:32:50.648591+00:00
+- actor: wballard
+  id: 01kxhk65hs39sq29a70b4q0hk6
+  text: 'Fixed both review findings: expectRoutingTables doc now uses a plural - Parameters: block covering manifest and name, plus a - Throws: section. Checked the rest of the file for the same defect class — loadJSONObject already documents its single param/returns/throws exactly; @Test funcs have no docs (rule-compliant). swift test 5/5 exit 0; double-check verdict PASS. Checkboxes flipped to [x].'
+  timestamp: 2026-07-15T00:35:20.249703+00:00
 depends_on:
 - 01KXHB6V536ZBBFC24M9WQXWMM
 position_column: doing
@@ -32,3 +44,13 @@ Vendor the canonical ACP schema artifacts (spec §6, §7.2) into `Schema/`:
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-07-14 19:28)
+
+- [x] `Tests/FoundationModelsACPTests/SchemaFixtureTests.swift:41` — Function `expectRoutingTables` has two parameters but documentation uses singular `- Parameter` format for only one of them. The rule requires exactness: document all parameters, returns, and throws the signature has, or omit documentation entirely. With two parameters, the plural `- Parameters:` block format is required. Convert to plural `- Parameters:` block format documenting both parameters:
+```
+/// - Parameters:
+///   - manifest: The parsed top-level object of a meta manifest.
+///   - name: The name of the manifest file being tested.
+```.
+- [x] `Tests/FoundationModelsACPTests/SchemaFixtureTests.swift:41` — Function `expectRoutingTables` has `throws` in its signature but documentation is missing `- Throws:` section. Documentation must be exact: include all parameters, return (if non-Void), and throws that the signature has. Add `- Throws:` documentation to complete the API contract, e.g., `/// - Throws: A test failure if a required routing table is missing or structurally invalid.`.

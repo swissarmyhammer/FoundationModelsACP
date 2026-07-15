@@ -37,7 +37,10 @@ import Testing
     /// Asserts a method-routing manifest has the expected routing tables,
     /// including the `session/prompt` agent method.
     ///
-    /// - Parameter manifest: The parsed top-level object of a meta manifest.
+    /// - Parameters:
+    ///   - manifest: The parsed top-level object of a meta manifest.
+    ///   - name: The name of the manifest file being tested, used in failure messages.
+    /// - Throws: A test failure if a required routing table is missing or structurally invalid.
     private func expectRoutingTables(in manifest: [String: Any], from name: String) throws {
         let agentMethods = try #require(
             manifest["agentMethods"] as? [String: String],
