@@ -2,37 +2,37 @@ import Foundation
 import FoundationModels
 
 /// Folds an ACP ``SessionUpdate`` stream into a growing FoundationModels
-/// ``Transcript`` (spec §9, §10), the client-side inverse of ``TranscriptMapper``.
+/// `Transcript` (spec §9, §10), the client-side inverse of `TranscriptMapper`.
 ///
-/// Where ``TranscriptMapper`` projects a transcript into the `session/update`
+/// Where `TranscriptMapper` projects a transcript into the `session/update`
 /// stream an agent emits, this builder replays that stream back into a
 /// transcript, so an ACP client becomes just another producer of the same
-/// ``Transcript`` AgentViewKit renders. Feeding it every update of a turn
+/// `Transcript` AgentViewKit renders. Feeding it every update of a turn
 /// reconstructs, in order, the transcript entries the turn was mapped from.
 ///
 /// The builder is stateful across ``fold(_:)`` calls: consecutive message or
-/// reasoning chunks accumulate into one ``Transcript/Response`` or
-/// ``Transcript/Reasoning`` entry, and each tool call's name is remembered by
+/// reasoning chunks accumulate into one `Transcript.Response` or
+/// `Transcript.Reasoning` entry, and each tool call's name is remembered by
 /// its ``ToolCallId`` so the matching `tool_call_update` recovers the
-/// ``Transcript/ToolOutput`` tool name the update itself does not carry.
+/// `Transcript.ToolOutput` tool name the update itself does not carry.
 ///
-/// Only the updates ``TranscriptMapper`` produces have a transcript form:
+/// Only the updates `TranscriptMapper` produces have a transcript form:
 /// `agent_message_chunk`, `agent_thought_chunk`, `tool_call`,
 /// `tool_call_update`, and `plan`. Other updates (user-message chunks, mode,
 /// usage, and the rest) are session-level signals with no agent-output entry
 /// and are skipped. The stream carries only what the projection preserved, so
 /// fields it drops — a response's asset ids, a reasoning entry's signature and
 /// metadata, and non-text content blocks — are reconstructed empty; on turns
-/// produced by ``TranscriptMapper`` those fields are already empty, so the
+/// produced by `TranscriptMapper` those fields are already empty, so the
 /// round trip is lossless.
 public struct TranscriptBuilder {
     /// Whether an accumulating segment group carries the agent's message or its
     /// reasoning, so consecutive chunks of one kind fold into one entry.
     private enum ChunkRole {
-        /// Visible response text, accumulated into a ``Transcript/Response``.
+        /// Visible response text, accumulated into a `Transcript.Response`.
         case message
 
-        /// Internal reasoning, accumulated into a ``Transcript/Reasoning``.
+        /// Internal reasoning, accumulated into a `Transcript.Reasoning`.
         case thought
     }
 
@@ -57,7 +57,7 @@ public struct TranscriptBuilder {
     }
 
     /// The schema name a plan's structured segment carries, which
-    /// ``TranscriptMapper`` recognizes to re-derive a `plan` update.
+    /// `TranscriptMapper` recognizes to re-derive a `plan` update.
     private static let planSchemaName = "plan"
 
     /// A well-formed empty JSON object, the fallback tool-call input when an
@@ -161,7 +161,7 @@ public struct TranscriptBuilder {
     /// name from the correlated `tool_call` seen earlier.
     ///
     /// - Parameter update: The tool-call update to fold in.
-    /// - Returns: A ``Transcript/ToolOutput`` entry keyed by the update's id.
+    /// - Returns: A `Transcript.ToolOutput` entry keyed by the update's id.
     private func toolOutputEntry(from update: ToolCallUpdate) -> Transcript.Entry {
         let id = update.toolCallId.rawValue
         let toolName = toolNamesByCallId[id] ?? ""
@@ -183,7 +183,7 @@ public struct TranscriptBuilder {
     /// Builds a single-call tool-calls entry from a `tool_call` update.
     ///
     /// - Parameter call: The tool call to fold in.
-    /// - Returns: A ``Transcript/ToolCalls`` entry carrying the one call.
+    /// - Returns: A `Transcript.ToolCalls` entry carrying the one call.
     private static func toolCallsEntry(from call: ToolCall) -> Transcript.Entry {
         let toolCall = Transcript.ToolCall(
             id: call.toolCallId.rawValue,
@@ -194,7 +194,7 @@ public struct TranscriptBuilder {
     }
 
     /// Builds a response entry carrying a plan as a structured segment, the
-    /// inverse of ``TranscriptMapper`` recognizing a plan from a structured
+    /// inverse of `TranscriptMapper` recognizing a plan from a structured
     /// segment.
     ///
     /// - Parameter plan: The plan to fold in.

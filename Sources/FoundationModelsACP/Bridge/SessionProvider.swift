@@ -20,7 +20,7 @@ public typealias SessionSummary = SessionInfo
 /// Where a ``FoundationModelsAgent``'s sessions come from (spec §7.1).
 ///
 /// There is deliberately no engine protocol: the bridge always drives a real
-/// ``LanguageModelSession``, and only the *origin* of sessions varies. A
+/// `LanguageModelSession`, and only the *origin* of sessions varies. A
 /// provider supplies the required ``makeSession`` factory and, optionally,
 /// store hooks whose presence gates the agent's session-management
 /// capabilities.
@@ -34,7 +34,7 @@ public struct SessionProvider: Sendable {
     /// - Parameters:
     ///   - cwd: The session's working directory; always absolute.
     ///   - mcpServers: The MCP servers the session should connect to.
-    /// - Returns: The new session's identity and its live ``LanguageModelSession``.
+    /// - Returns: The new session's identity and its live `LanguageModelSession`.
     /// - Throws: Any error that prevents building the session.
     public var makeSession:
         @Sendable (_ cwd: AbsolutePath, _ mcpServers: [MCPServerConfig]) async throws

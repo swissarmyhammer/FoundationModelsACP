@@ -17,6 +17,12 @@ let package = Package(
             targets: ["FoundationModelsACP"]
         )
     ],
+    dependencies: [
+        // Plugin-only dependency: powers `swift package generate-documentation`
+        // (the CI DocC build gate). It is a build-time command plugin, not
+        // linked into the library product.
+        .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.0.0")
+    ],
     targets: [
         .target(
             name: "FoundationModelsACP",

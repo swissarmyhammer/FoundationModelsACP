@@ -1,7 +1,7 @@
 import Foundation
 import FoundationModels
 
-/// The client's environment, handed to a FoundationModels ``Tool`` so its work
+/// The client's environment, handed to a FoundationModels `Tool` so its work
 /// reaches the *client's* filesystem, terminals, and consent (spec §7).
 ///
 /// A FoundationModels tool runs in-process, but when its work needs the client's

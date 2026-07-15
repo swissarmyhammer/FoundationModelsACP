@@ -2,21 +2,21 @@ import Foundation
 import FoundationModels
 import Synchronization
 
-/// An ACP ``Agent`` that bridges a FoundationModels ``LanguageModelSession`` to
+/// An ACP ``Agent`` that bridges a FoundationModels `LanguageModelSession` to
 /// the Agent Client Protocol (spec §7).
 ///
 /// The agent is an `actor`, so overlapping `session/prompt` requests to one
-/// session serialize naturally: a ``LanguageModelSession`` runs one turn at a
+/// session serialize naturally: a `LanguageModelSession` runs one turn at a
 /// time, and each pending request resolves at its own turn's end. Where sessions
 /// come from is supplied by a ``SessionProvider``; there is deliberately no
 /// engine protocol — the bridge always drives a real session.
 ///
 /// A `session/prompt` drives `streamResponse(to:)`; the request stays open for
 /// the whole turn while the bridge fires `session/update` notifications off the
-/// growing `Transcript` (via ``TranscriptMapper``). The turn answers with the
+/// growing `Transcript` (via `TranscriptMapper`). The turn answers with the
 /// derived ``StopReason``, a `session/cancel` cancels the running generation,
 /// and ``SessionProvider/onTurnEnded`` sees the final transcript. The mapping is
-/// driven through a ``TurnGenerator`` seam so tests script transcript entries
+/// driven through a `TurnGenerator` seam so tests script transcript entries
 /// deterministically without a live model (two concurrent turns on one session
 /// trap the process).
 public actor FoundationModelsAgent: Agent {
@@ -120,7 +120,7 @@ public actor FoundationModelsAgent: Agent {
     /// presence; `close` is advertised whenever the provider manages a store
     /// (it needs no hook — it just drops the live session); and `loadSession`
     /// tracks the same restore hook `resume` forwards to. Prompt capabilities
-    /// advertise the content the bridge renders (``promptCapabilities``), which
+    /// advertise the content the bridge renders (`promptCapabilities`), which
     /// `prompt` then enforces.
     ///
     /// - Parameter params: The client's initialization request.

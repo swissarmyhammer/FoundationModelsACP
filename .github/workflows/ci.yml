@@ -29,6 +29,15 @@ jobs:
       - name: Test
         run: swift test
 
+      # DocC build gate. Documents the public API and fails on any doc-comment
+      # warning (broken symbol link, param mismatch), so the primary entry
+      # points always build clean. swift-docc-plugin is a plugin-only dependency.
+      - name: Documentation build (DocC)
+        run: >
+          swift package --allow-writing-to-directory "$RUNNER_TEMP/docs"
+          generate-documentation --target FoundationModelsACP
+          --warnings-as-errors --output-path "$RUNNER_TEMP/docs"
+
       # Regenerate from the vendored schema and fail if the checked-in output
       # drifts. The command plugin writes into the package directory, so CI
       # must grant the write permission non-interactively.

@@ -48,6 +48,32 @@ comments:
 
     DISCOVERY (resolves the bridge/e2e open question): with a LIVE model, the reader case's turn produced a completed tool_call_update (structured-result 100%), i.e. the FM runtime invoked the tool INSIDE runTurn's structured-concurrency tree where ClientEnvironment.$current is bound — so the ambient injection reaches the live FM tool call (the reader tool read through the client over reverse fs/read_text_file). The e2e thread could only confirm this for scripted turns; the live eval now confirms it end-to-end. Checkpoint + review next.
   timestamp: 2026-07-15T22:04:23.686425+00:00
+- actor: wballard
+  id: 01kxkxjnx0pqwxsqk76mqb380f
+  text: |-
+    RESOLVED → done. Converged in one review pass (finding fixed at root + a follow-on comment-accuracy finding, both cleared; re-review clean, 0 findings). Not forced.
+
+    Local commits only (nothing pushed):
+    - 89b54c7 test(evals): behavioral eval suite over the live SystemLanguageModel
+    - d3b3990 refactor(evals): extract shared fixturesExclude in Package.swift (review finding 1)
+    - 1d5de2b docs(evals): correct the Fixtures-exclude comment (review finding 2)
+    - c93f488 chore(kanban): mark task done
+
+    Review trail (sha HEAD~1..HEAD each pass): pass 1 = 1 finding (Package.swift "Fixtures" literal duplicated across two test targets) → extracted `fixturesExclude`; pass 2 = 1 finding (my new comment over-claimed "every test target") → scoped the comment (ACPGenerateTests has no Fixtures dir); pass 3 = CLEAN (0 findings, 14 validators attempted, 0 failed).
+
+    FINAL VERIFICATION:
+    - swift build --build-tests: 0 warnings / 0 errors.
+    - Plain `swift test`: 176 FoundationModelsACPTests + 108 ACPGenerateTests + 3 FoundationModelsACPEvals = 287 pass, 0 failures. The single skip is the gated live eval (by design — CI isolation), reported with a clear reason.
+    - `RUN_EVALS=1 swift test --filter FoundationModelsACPEvals`: PASS. OVERALL select 100% / well-formed 100% / result 100% across weather-paris + read-file (5 samples each = 10 live turns, ~44s), threshold 0.8.
+
+    EVALUATIONS FRAMEWORK: NOT available on this toolchain (documented divergence). Delivered the eval LAYER as a hand-rolled scoring harness over the live on-device SystemLanguageModel via the real bridge, per the card's fallback clause.
+
+    METRICS + THRESHOLD: tool-selection (a tool_call named the expected tool) and well-formed-tool-call (non-empty toolCallId + rawInput object carrying the expected arg keys) are the gated metrics; structured-result (completed tool_call_update) is reported. Pass threshold 0.8 on the aggregate of the two gated metrics across all samples; 5 samples/case. Rationale in EvalScore.swift + Fixtures/README.md.
+
+    CI ISOLATION: two independent jobs in .github/workflows/ci.yml — `build-test-codegen` (macos-15, plain `swift test`, live scoring self-skips → eval variance can never fail it) and `evals` (self-hosted macOS ARM64, RUN_EVALS=1, `swift test --filter FoundationModelsACPEvals`). Distinct job statuses → wire tests pass/fail independently.
+
+    For README (^0td21b4): eval suite lives in Tests/FoundationModelsACPEvals/; new cases are added as golden-format <name>.script/.agent.ndjson pairs in its Fixtures/ (+ a tool in EvalToolRegistry if new) — full procedure in Tests/FoundationModelsACPEvals/Fixtures/README.md. The wire golden doubles as a seeded eval case (loader-parsed).
+  timestamp: 2026-07-15T22:15:24.832118+00:00
 depends_on:
 - 01KXHBFRJDWJZ57DG99E2X6RA0
 position_column: done
