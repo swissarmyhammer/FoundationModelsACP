@@ -33,6 +33,22 @@ let package = Package(
             dependencies: ["ACPGenerateCore"],
             path: "Sources/acp-generate"
         ),
+        .plugin(
+            name: "GenerateACP",
+            capability: .command(
+                intent: .custom(
+                    verb: "generate-acp",
+                    description: "Regenerate ACP Swift types from the vendored JSON schema."
+                ),
+                permissions: [
+                    .writeToPackageDirectory(
+                        reason: "Writes generated Swift sources into Sources/FoundationModelsACP/Generated."
+                    )
+                ]
+            ),
+            dependencies: ["acp-generate"],
+            path: "Plugins/GenerateACP"
+        ),
         .testTarget(
             name: "FoundationModelsACPTests",
             dependencies: ["FoundationModelsACP"],

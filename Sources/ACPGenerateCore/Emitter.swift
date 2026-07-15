@@ -10,12 +10,34 @@ enum Emitter {
         // DO NOT EDIT. Regenerate with: swift run acp-generate
         """
 
+    /// The indentation prefix for one nesting level.
+    private static let indentUnit = "    "
+
     /// Assembles a generated file from rendered declarations.
     ///
-    /// - Parameter declarations: Rendered type declarations, already sorted.
+    /// - Parameters:
+    ///   - declarations: Rendered type declarations, already sorted.
+    ///   - namespace: An enclosing namespace enum to nest the declarations in,
+    ///     or `nil` to emit them at the top level.
     /// - Returns: The complete file text, header included.
-    static func file(declarations: [String]) -> String {
-        ([header] + declarations).joined(separator: "\n\n") + "\n"
+    static func file(declarations: [String], namespace: String? = nil) -> String {
+        guard let namespace else {
+            return ([header] + declarations).joined(separator: "\n\n") + "\n"
+        }
+        let nested = declarations.map(indented(declaration:)).joined(separator: "\n\n")
+        let wrapped = "public enum \(namespace) {\n\(nested)\n}"
+        return ([header, wrapped]).joined(separator: "\n\n") + "\n"
+    }
+
+    /// Indents every non-empty line of a declaration by one nesting level.
+    ///
+    /// - Parameter declaration: The rendered declaration text.
+    /// - Returns: The declaration with each non-empty line prefixed.
+    private static func indented(declaration: String) -> String {
+        declaration
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.isEmpty ? "" : "\(indentUnit)\($0)" }
+            .joined(separator: "\n")
     }
 
     /// Renders schema-derived text as an escaped Swift string literal.

@@ -54,6 +54,9 @@ public struct SchemaGenerator: Sendable {
     ///     (`meta.unstable.json`); when present, methods it routes beyond
     ///     the stable manifest are emitted into the `Unstable` namespace.
     ///     Requires `metaJSON`.
+    ///   - namespace: An enclosing namespace enum to nest every emitted type
+    ///     in, and a prefix on every generated file name; `nil` emits the
+    ///     types at the top level (the layout for the primary schema set).
     /// - Returns: The generated Swift files.
     /// - Throws: `GeneratorError` when an input cannot be parsed, the schema
     ///   contains a shape the generator does not understand, or the routing
@@ -62,7 +65,8 @@ public struct SchemaGenerator: Sendable {
     public func generate(
         schemaJSON: Data,
         metaJSON: Data? = nil,
-        unstableMetaJSON: Data? = nil
+        unstableMetaJSON: Data? = nil,
+        namespace: String? = nil
     ) throws -> [GeneratedFile] {
         guard metaJSON != nil || unstableMetaJSON == nil else {
             throw GeneratorError.invalidSchema(
@@ -122,19 +126,19 @@ public struct SchemaGenerator: Sendable {
         var files = [
             GeneratedFile(
                 name: "Identifiers.generated.swift",
-                contents: Emitter.file(declarations: identifiers)
+                contents: Emitter.file(declarations: identifiers, namespace: namespace)
             ),
             GeneratedFile(
                 name: "Models.generated.swift",
-                contents: Emitter.file(declarations: structModels.map(Emitter.structDeclaration))
+                contents: Emitter.file(declarations: structModels.map(Emitter.structDeclaration), namespace: namespace)
             ),
             GeneratedFile(
                 name: "Unions.generated.swift",
-                contents: Emitter.file(declarations: unions)
+                contents: Emitter.file(declarations: unions, namespace: namespace)
             ),
             GeneratedFile(
                 name: "Unresolved.generated.swift",
-                contents: Emitter.file(declarations: placeholders)
+                contents: Emitter.file(declarations: placeholders, namespace: namespace)
             ),
         ]
         if let metaJSON {
@@ -142,11 +146,17 @@ public struct SchemaGenerator: Sendable {
                 try methodTableFile(
                     definitions: definitions,
                     metaJSON: metaJSON,
-                    unstableMetaJSON: unstableMetaJSON
+                    unstableMetaJSON: unstableMetaJSON,
+                    namespace: namespace
                 )
             )
         }
-        return files
+        guard let namespace else {
+            return files
+        }
+        return files.map { file in
+            GeneratedFile(name: "\(namespace).\(file.name)", contents: file.contents)
+        }
     }
 
     // MARK: - Schema keywords
@@ -1150,13 +1160,16 @@ extension SchemaGenerator {
     ///   - unstableMetaJSON: The raw bytes of the unstable routing manifest;
     ///     when present, its methods beyond the stable manifest are emitted
     ///     into the `Unstable` namespace.
+    ///   - namespace: The enclosing namespace enum to nest the table in, or
+    ///     `nil` to emit it at the top level.
     /// - Returns: The rendered `MethodTable.generated.swift`.
     /// - Throws: `GeneratorError` when a manifest cannot be parsed or the
     ///   manifests disagree with the schema's annotations.
     private func methodTableFile(
         definitions: [String: JSONValue],
         metaJSON: Data,
-        unstableMetaJSON: Data?
+        unstableMetaJSON: Data?,
+        namespace: String?
     ) throws -> GeneratedFile {
         let manifest = try parseRoutingManifest(data: metaJSON, context: "routing manifest")
         let stable = try stableMethodModels(manifest: manifest, routes: try schemaRoutes(from: definitions))
@@ -1174,7 +1187,7 @@ extension SchemaGenerator {
         }
         return GeneratedFile(
             name: "MethodTable.generated.swift",
-            contents: Emitter.file(declarations: declarations)
+            contents: Emitter.file(declarations: declarations, namespace: namespace)
         )
     }
 

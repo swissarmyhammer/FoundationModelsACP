@@ -39,6 +39,18 @@ func vendoredOutput(named name: String) throws -> String {
     return try #require(file, "expected generated file \(name)").contents
 }
 
+/// Loads the vendored schema document and both routing manifests as raw bytes.
+///
+/// - Returns: The schema, stable-manifest, and unstable-manifest bytes.
+/// - Throws: A test failure when any artifact cannot be read.
+func vendoredArtifacts() throws -> (schema: Data, meta: Data, unstableMeta: Data) {
+    (
+        try Data(contentsOf: vendoredSchemaURL),
+        try Data(contentsOf: vendoredMetaURL),
+        try Data(contentsOf: vendoredUnstableMetaURL)
+    )
+}
+
 /// Loads a vendored routing manifest's side groups for data-driven tests.
 ///
 /// - Parameter url: The manifest file to load.

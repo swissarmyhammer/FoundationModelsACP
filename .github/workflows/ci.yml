@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-codegen:
+    name: Build, test, and codegen diff gate
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      # Regenerate from the vendored schema and fail if the checked-in output
+      # drifts. The command plugin writes into the package directory, so CI
+      # must grant the write permission non-interactively.
+      - name: Regenerate codegen
+        run: swift package --allow-writing-to-package-directory generate-acp
+
+      - name: Codegen diff gate
+        run: git diff --exit-code

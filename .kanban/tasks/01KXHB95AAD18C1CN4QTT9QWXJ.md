@@ -96,10 +96,27 @@ comments:
   id: 01kxk2y3gh6wtrpmdmgtzk38e6
   text: 'Review pass 8: 15 findings, all one class (hardcoded JSON schema keywords), all fixed in commit 5b6204a: every schema keyword used as a lookup key in SchemaGenerator.swift is now a named constant (defsKey, refKey, typeKey, oneOfKey, anyOfKey, allOfKey, enumKey, descriptionKey, constKey, requiredKey, propertiesKey) under a "Schema keywords" MARK, the "#/$defs/" pointer prefix is built from defsKey, and the error messages that cite those keywords interpolate the same constants. Verification: count-asserting script (caught a sixth ["type"] site the plan missed), swift test 167/167 green, zero warnings, regeneration leaves Generated/ byte-identical. Running review pass 9.'
   timestamp: 2026-07-15T14:29:47.665225+00:00
+- actor: wballard
+  id: 01kxk4s1f9pxv4vssfnzt53e7a
+  text: |-
+    Review pass 9: 15 findings, all mechanical dedup, all fixed in commit 5396d2d — shared helpers orderedEntries(of:) (4 sorted-map iteration sites), objectMembers(of:context:subject:) (2 guard-throw sites), unionVariants(of:) (2 oneOf-extraction sites), collectBySide(entries:) + orderedByWireMethod(of:) (both routing-table per-side loops), emptyUnionDetail constant (2 sites), plus const/required keyword interpolation in 3 remaining error messages. swift test 167/167 green, zero warnings, regeneration byte-identical.
+
+    LOOP-HEALTH NOTE (per coordinator guidance): passes 3-9 have all been pure stylistic churn (doc style, private modifiers, named constants, param labels, helper extraction, keyword constants, iteration dedup), each a NEW finding class so the same-finding-3x guardrail never trips. Functionality has been verified-complete since implementation (167 tests, double-check re-derived the 23-method table + 20-entry unstable diff). Continuing toward convergence; ceiling is pass 12.
+  timestamp: 2026-07-15T15:01:58.889810+00:00
+- actor: wballard
+  id: 01kxk51sx68z6hpzqk0w8fcz7g
+  text: |-
+    Review pass 9 re-review on HEAD~1..HEAD: CLEAN (0 findings, 14 rules attempted, 0 failed). Converged — task moved to done. NOT forced: the engine returned zero findings on the final checkpoint after the pass-9 dedup landed, so the mechanical-churn sequence resolved on its own before the pass-12 ceiling.
+
+    FINAL STATE for the plugin (^2em38ty) and role-protocols (^k0n872z) threads:
+    - Method-routing table emitted at Sources/FoundationModelsACP/Generated/MethodTable.generated.swift (public enum ACPMethodTable.methods: [MethodInfo], 23 stable v1.19 methods; public enum Unstable.MethodTable.methods: [UnstableMethodInfo], 20 unstable-only entries). Derived purely from Schema/acp-v1.meta.json + .meta.unstable.json cross-validated against the schema's x-side/x-method annotations — no hand-typed method strings. session/set_mode carries deprecationMessage. Runtime types (MethodSide/MethodKind/MethodInfo/UnstableMethodInfo) in Sources/FoundationModelsACP/Core/MethodInfo.swift. Generator stage lives at the bottom of Sources/ACPGenerateCore/SchemaGenerator.swift (MethodTable.swift was folded in during pass 3).
+    - 9 local commits total (dcee9a6 feature; c2ea743, 9bfc1ad, d428866, e2f0b2d, 11f4c06, 9442444, 5b6204a, 5396d2d review-fix passes). Local only, nothing pushed.
+    - swift test 167/167 green (70 FoundationModelsACPTests + 97 ACPGenerateTests), zero warnings; swift run acp-generate leaves Generated/ byte-identical.
+  timestamp: 2026-07-15T15:06:46.054679+00:00
 depends_on:
 - 01KXHB88Q1GSGHMPXHNSMKM2XF
-position_column: review
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8880'
 title: 'Codegen: method-routing table from meta.json + Unstable namespace'
 ---
 ## What
