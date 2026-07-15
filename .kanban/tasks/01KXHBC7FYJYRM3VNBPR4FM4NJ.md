@@ -27,10 +27,35 @@ comments:
 
     TESTS (swift test exit 0): FoundationModelsACPTests 104 (was 100; +4) + ACPGenerateTests 108 = 212, zero warnings. New: updatesDemuxAcrossInterleavedSessions, lateToolCallUpdateAfterPromptResponseIsDelivered, postCancelTrailingUpdatesThenCancelledStopReasonInOrder, connectionEOFFinishesAllSessionStreams. Pre-existing clientSideSessionUpdateNotificationDispatchesToTheHandler still green (serveNotification change is additive). Tests drive raw agent->client frames over InMemoryTransport (WireReader/send) for deterministic ordering and to subscribe before driving the turn.
   timestamp: 2026-07-15T17:12:26.689464+00:00
+- actor: wballard
+  id: 01kxkcyarbxkngjjk60az9jekb
+  text: |-
+    Review pass 2 on HEAD~1..HEAD: CLEAN (0 findings, 14 validators attempted, 0 failed). Converged in 2 implement->test->commit->review iterations (checkpoints ee83ab8 feature, cf75776 review-fix). Review pass 1 returned 3 findings (all the same concurrency finding: `defer { Task { await client.close() } }` is an unstructured fire-and-forget Task) in the new test file only. NOTE the engine's literal suggestion `defer { _ = await client.close() }` does NOT compile — Swift forbids `await` in a defer body — so I fixed at the root differently: dropped defer+Task, made close an explicit `await client.close()` final statement in each test (matches FactoryClosureTests / test 4). The stored-and-awaited collector/prompt Tasks were not flagged (they are managed, not fire-and-forget).
+
+    FINAL PUBLIC API for downstream (bridge prompt-turn ^gs0d3kp, e2e ^e2x6ra0):
+
+    STREAM API — on `ClientSideConnection` (public final class, Sendable):
+      `public func updates(for sessionId: SessionId) -> AsyncStream<SessionUpdate>`
+    - Element type is the generated `SessionUpdate` enum (agentMessageChunk, agentThoughtChunk, userMessageChunk, toolCall, toolCallUpdate, plan, availableCommandsUpdate, currentModeUpdate, configOptionUpdate, sessionInfoUpdate, usageUpdate, unknown(String)) — i.e. the `.update` field of each `SessionNotification`, demultiplexed by `.sessionId`.
+    - Multi-subscriber: each call returns a FRESH stream; every subscriber of a session receives every update (broadcast). A subscription made after the connection closed returns an immediately-finished stream.
+    - The served Client.sessionUpdate handler still fires too — the router.deliver runs first, then client.sessionUpdate. Hosts can consume via EITHER the stream (primary) or a custom Client conformer.
+
+    STRAGGLER POLICY (documented, deliberate):
+    - Every session/update is correlated to its sessionId and delivered to that session's active subscribers.
+    - Stream lifetime = subscription -> connection close, INDEPENDENT of prompt-turn lifetime. So a tool_call_update arriving AFTER the prompt response, or AFTER session/cancel, is still delivered (verified by lateToolCallUpdate... and postCancelTrailing... tests). session/cancel is a notification; the turn still ends via the prompt response carrying StopReason.cancelled, and trailing updates before/after that land in wire order (notifications are awaited inline by the Connection read loop, preserving order).
+    - Notifications for a session with NO active subscriber are DROPPED, not buffered (no unbounded retention). CONTRACT: subscribe via updates(for:) BEFORE driving the turn (the AgentViewKit adapter does this right after newSession/loadSession).
+    - Streams finish when the connection dies: EOF, stream failure, or close(). All session streams finish (verified by connectionEOFFinishesAllSessionStreams).
+
+    DISCONNECT MECHANISM (bridge/stdio-transport ^wrf8dzd should know):
+    - Added `public typealias Connection.CloseHandler = @Sendable () -> Void` and an optional `onClose` param on `Connection.init` (default nil, backward compatible). It fires exactly once at the END of shutDown() (after every pending request is rejected with ConnectionError.closed), so upper layers finish derived streams only after callers are unblocked. RoleConnectionCore threads onClose through (default nil; AgentSideConnection unchanged). ClientSideConnection passes `{ router.finishAll() }`.
+    - New internal type SessionUpdateRouter (Mutex-backed) owns the demux registry. Built as an init local captured by the notification dispatcher AND the onClose closure (NOT self) — preserves the write-once RoleHolder init-cycle break.
+
+    VERIFICATION: swift build zero warnings; swift test = 104 FoundationModelsACPTests (was 100; +4 new stream tests) + 108 ACPGenerateTests = 212, zero failures, zero warnings. 2 local commits (ee83ab8, cf75776), local only, nothing pushed.
+  timestamp: 2026-07-15T17:24:40.843873+00:00
 depends_on:
 - 01KXHBBTQ24BC8586M5K0N872Z
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: 8c80
 title: Client-side per-session AsyncStream<SessionUpdate> with straggler tolerance
 ---
 ## What
