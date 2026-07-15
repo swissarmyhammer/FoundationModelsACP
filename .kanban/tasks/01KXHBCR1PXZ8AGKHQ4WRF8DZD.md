@@ -1,9 +1,47 @@
 ---
+comments:
+- actor: wballard
+  id: 01kxkd8r55a8g8e75scse99g9n
+  text: |-
+    Picked up. Research complete across the ndJSON codec thread (^r8gyd6: ACPTransport = `var bytes: AsyncThrowingStream<Data, any Error>` + `func write(_:) async throws` — write MUST be atomic per-call and tolerate concurrent calls; ACPLogger .disabled/.standardError seam already exists in NDJSONCodec.swift) and role-protocols thread (^m5k0n872z: `AgentSideConnection(stream: any ACPTransport, logger:, requestTimeout:, _ factory:)`, `ClientSideConnection(stream:...)`). Connection stores `any ACPTransport`, so transports must be existential-compatible; inits stay `any ACPTransport` (no signature churn).
+
+    DESIGN (Sources/FoundationModelsACP/Transport/):
+    - DescriptorIO.swift (internal): `fullWrite(_ fd: Int32, _ data: Data) throws` loops POSIX write handling partial writes + EINTR (frames can exceed PIPE_BUF=512, so one write() may be partial — loop guarantees whole-frame atomicity) and throws on EPIPE/errno; `ByteReader` starts a dedicated Thread that blocking-reads an fd into a 64KiB buffer, yields Data chunks to an AsyncThrowingStream continuation, finishes on EOF (read==0), retries EINTR, finishes-throwing on other errno. Blocking read on a dedicated Thread (not the cooperative pool) is the robust pipe reader.
+    - StdioTransport.swift: `public final class StdioTransport: ACPTransport` (final class, not struct, to hold a `Mutex` for write serialization — matches ReplayTransport). `bytes` = ByteReader over STDIN_FILENO started in init; `write` = `writeLock.withLock { fd in try fullWrite(fd, data) }` over STDOUT_FILENO (sync work, no await — atomic + concurrency-tolerant). Does NOT close std fds. `.stdio` factory via `extension ACPTransport where Self == StdioTransport { public static var stdio: StdioTransport { StdioTransport() } }` — enables `AgentSideConnection(stream: .stdio)` leading-dot on the `any ACPTransport` param. LOUD doc block: stdout is sacred — the package writes ONLY valid ACP frames there; a stray print/banner/dotenv/progress bar corrupts framing and drops frames; route ALL logging to stderr or the injected ACPLogger.
+    - SubprocessTransport.swift: `public final class SubprocessTransport: ACPTransport` — client-side, drives an external agent (e.g. gemini --experimental-acp). init(executableURL:arguments:environment:currentDirectory:) spawns Process with stdin/stdout/stderr Pipes and runs it. `bytes` = ByteReader over child stdout fd. `write` = Mutex-guarded fullWrite to child stdin fd. Child stderr forwarded byte-for-byte to parent FileHandle.standardError (keeps our stdout clean). REAP: one idempotent `reap()` guarded by `Mutex<Bool>` — terminate() if isRunning, then waitUntilExit() (collects zombie), then close stdin. Called from `close()`, `deinit`, AND `bytes` continuation.onTermination (so connection close/cancel — which cancels the read loop consuming bytes — reaps the child; also covers parent-cancellation). Read-only `isRunning`/`terminationStatus` exposed for tests.
+
+    TEST HELPER: new `.executableTarget(name: "acp-test-agent", dependencies: ["FoundationModelsACP"], path: "Sources/acp-test-agent")`; add "acp-test-agent" to FoundationModelsACPTests dependencies so it builds first. main.swift: `await AgentSideConnection(stream: .stdio, logger: .standardError) { _ in TestAgent() }` then keep-alive (sleep loop) until SIGTERM; TestAgent.initialize writes a log line to FileHandle.standardError (proves stderr traffic) and returns InitializeResponse(protocolVersion: .latest). Tests locate the built exe alongside the .xctest bundle: `Bundle(for: TokenClass.self).bundleURL.deletingLastPathComponent().appendingPathComponent("acp-test-agent")`.
+
+    TESTS:
+    - StdioTransportTests: (a) handshake — SubprocessTransport spawns helper, ClientSideConnection over it, `initialize` returns .latest; (b) purity — raw Process+pipes, write one initialize ndJSON line to stdin, read response with bounded timeout, assert EVERY non-empty stdout line decodes as JSONValue (pure ndJSON) and response carries protocolVersion, and stderr is non-empty (internal logs went to stderr).
+    - SubprocessReapTests: spawn `/bin/cat` (long-lived), assert isRunning, close(), assert !isRunning + terminationStatus non-nil; plus a connection-path variant (build ClientSideConnection, close it / drop, assert child reaped).
+    - Robustness: all pipe/Process waits are bounded via a withTimeout helper (no unbounded hangs).
+
+    STYLE PRE-EMPTIONS: doc first line = single sentence ending in a period; explicit private on all internals; named constants for buffer size / timeouts; labeled first params; extract helpers to cut nesting; grep-clean of raw wire strings. TDD: tests RED first, then implement to green.
+  timestamp: 2026-07-15T17:30:22.245475+00:00
+- actor: wballard
+  id: 01kxkdrek0fee8xxm5sf7y0ywx
+  text: |-
+    Implementation landed (TDD-shaped; tests + production written together, all 4 new tests green on first full run). swift build: 0 warnings. swift test: FoundationModelsACPTests 104 -> 108 (+4), ACPGenerateTests 108 unchanged = 216 total, 0 failures, 0 warnings.
+
+    Files added:
+    - Sources/FoundationModelsACP/Transport/DescriptorIO.swift — `fullWrite(_:_:)` (partial-write + EINTR loop = whole-frame atomicity) and `ByteReader` (dedicated Thread doing blocking Darwin.read into a 64KiB buffer, yields to an AsyncThrowingStream; EOF finishes, errno finishes-throwing). POSIX read/write qualified as `Darwin.*` to avoid clashing with `ByteReader.read`.
+    - Sources/FoundationModelsACP/Transport/StdioTransport.swift — `public final class StdioTransport: ACPTransport`; `bytes` reads STDIN_FILENO, `write` = Mutex<Int32>(STDOUT_FILENO) + fullWrite (atomic, concurrency-tolerant, no await). LOUD stdout-is-sacred doc block. `.stdio` via `extension ACPTransport where Self == StdioTransport { public static var stdio }` — CONFIRMED compiles/works as leading-dot on the `any ACPTransport` param (`AgentSideConnection(stream: .stdio)` in the helper builds and runs).
+    - Sources/FoundationModelsACP/Transport/SubprocessTransport.swift — `public final class SubprocessTransport: ACPTransport, @unchecked Sendable` (justified: stores non-Sendable Process/Pipe; writes serialized by `input` Mutex, one-shot reap by `reaped` Mutex, `bytes` immutable). init(executableURL:arguments:environment:currentDirectoryURL:) throws, spawns Process with 3 pipes. `bytes` = child stdout; `write` -> child stdin; child stderr forwarded byte-for-byte to parent stderr via readabilityHandler. reap(): one-shot terminate-if-running + waitUntilExit (collects zombie) + close stdin; called from close(), deinit, and `bytes` continuation.onTermination via `[weak self]` (no ref cycle). Read-only isRunning/terminationStatus for tests.
+    - Sources/acp-test-agent/main.swift + Package.swift executableTarget "acp-test-agent" (test target depends on it so it builds first). Helper serves initialize over `.stdio`, logs to stderr during initialize, keeps alive until SIGTERM.
+
+    Tests:
+    - StdioTransportTests: (a) handshake over SubprocessTransport+ClientSideConnection returns .latest; (b) purity — raw Process+pipes, ByteReader (@testable) collects ALL child stdout, asserts every non-empty line decodes as JSONValue and the initialize response is present, and child stderr is non-empty. All waits bounded by withTimeout/waitUntil (no hangs).
+    - SubprocessReapTests: close() reaps /bin/cat (isRunning false + terminationStatus non-nil); closing a ClientSideConnection reaps the child agent (connection-close -> read-loop cancel -> bytes teardown -> reap), asserted via bounded poll.
+    - TransportProcessSupport.swift: helperAgentURL (Bundle(for: BundleToken.self) sibling of .xctest), withTimeout, waitUntil, HandshakeClient.
+
+    Ready for /review.
+  timestamp: 2026-07-15T17:38:56.736885+00:00
 depends_on:
 - 01KXHBBA1PN5PQJVEVHCQTBQ9T
 - 01KXHBBTQ24BC8586M5K0N872Z
-position_column: todo
-position_ordinal: 8d80
+position_column: doing
+position_ordinal: '80'
 title: Stdio transport, stderr-only logging, and child-process management
 ---
 ## What
