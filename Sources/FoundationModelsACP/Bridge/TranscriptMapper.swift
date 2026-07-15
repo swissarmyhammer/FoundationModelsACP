@@ -52,7 +52,7 @@ struct TranscriptMapper {
     ///
     /// - Parameter entry: The settled transcript entry to map.
     /// - Returns: The entry's updates, in order; empty for input-only entries.
-    static func updates(for entry: Transcript.Entry) -> [SessionUpdate] {
+    private static func updates(for entry: Transcript.Entry) -> [SessionUpdate] {
         switch entry {
         case .instructions, .prompt:
             return []
