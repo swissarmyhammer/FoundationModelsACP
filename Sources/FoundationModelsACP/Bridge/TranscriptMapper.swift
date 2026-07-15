@@ -61,9 +61,9 @@ struct TranscriptMapper {
         case .reasoning(let reasoning):
             return reasoning.segments.compactMap { update(for: $0, role: .thought) }
         case .toolCalls(let calls):
-            return calls.map(toolCallStarted(_:))
+            return calls.map(toolCallStarted(call:))
         case .toolOutput(let output):
-            return [toolCallCompleted(output)]
+            return [toolCallCompleted(output: output)]
         @unknown default:
             return []
         }
@@ -82,12 +82,12 @@ struct TranscriptMapper {
     private static func update(for segment: Transcript.Segment, role: SegmentRole) -> SessionUpdate? {
         switch segment {
         case .text(let text):
-            return chunk(text.content, role: role)
+            return chunk(text: text.content, role: role)
         case .structure(let structure):
             if role == .message, let plan = plan(from: structure) {
                 return .plan(plan)
             }
-            return chunk(structure.content.jsonString, role: role)
+            return chunk(text: structure.content.jsonString, role: role)
         case .attachment, .custom:
             return nil
         @unknown default:
@@ -101,7 +101,7 @@ struct TranscriptMapper {
     ///   - text: The chunk's text.
     ///   - role: Whether to emit a message or a thought chunk.
     /// - Returns: The chunk update.
-    private static func chunk(_ text: String, role: SegmentRole) -> SessionUpdate {
+    private static func chunk(text: String, role: SegmentRole) -> SessionUpdate {
         let content = ContentChunk(content: .text(TextContent(text: text)))
         switch role {
         case .message:
@@ -115,7 +115,7 @@ struct TranscriptMapper {
     ///
     /// - Parameter call: The transcript tool call.
     /// - Returns: The `tool_call` update, keyed by the call's id.
-    private static func toolCallStarted(_ call: Transcript.ToolCall) -> SessionUpdate {
+    private static func toolCallStarted(call: Transcript.ToolCall) -> SessionUpdate {
         .toolCall(
             ToolCall(
                 title: call.toolName,
@@ -135,7 +135,7 @@ struct TranscriptMapper {
     ///
     /// - Parameter output: The transcript tool output.
     /// - Returns: The `tool_call_update` update, keyed by the answered call's id.
-    private static func toolCallCompleted(_ output: Transcript.ToolOutput) -> SessionUpdate {
+    private static func toolCallCompleted(output: Transcript.ToolOutput) -> SessionUpdate {
         .toolCallUpdate(
             ToolCallUpdate(
                 toolCallId: ToolCallId(rawValue: output.id),
@@ -178,13 +178,12 @@ struct TranscriptMapper {
     ///
     /// Plans are not a first-class transcript entry; FoundationModels emits an
     /// agent plan as a structured-generation segment. The bridge recognizes one
-    /// by a `plan` schema name or source whose JSON decodes to a non-empty plan.
+    /// by a `plan` schema name whose JSON decodes to a non-empty plan.
     ///
     /// - Parameter structure: The structured segment to inspect.
     /// - Returns: The decoded plan, or nil when the segment is not a plan.
     private static func plan(from structure: Transcript.StructuredSegment) -> Plan? {
-        let names = "\(structure.schemaName) \(structure.source)".lowercased()
-        guard names.contains("plan"),
+        guard structure.schemaName.lowercased().contains("plan"),
             let data = structure.content.jsonString.data(using: .utf8),
             let plan = try? JSONDecoder().decode(Plan.self, from: data),
             !plan.entries.isEmpty

@@ -153,7 +153,7 @@ public actor FoundationModelsAgent: Agent {
     ///   error.
     public func prompt(_ params: PromptRequest) async throws -> PromptResponse {
         let renderedPrompt = try PromptInputMapper.render(
-            params.prompt,
+            blocks: params.prompt,
             capabilities: Self.promptCapabilities
         )
         let sessionId = params.sessionId

@@ -41,7 +41,7 @@ comments:
 depends_on:
 - 01KXHBDAK0NQ5RA2NWTF1ESXQP
 - 01KXHBC7FYJYRM3VNBPR4FM4NJ
-position_column: doing
+position_column: review
 position_ordinal: '80'
 title: 'Bridge prompt turn: Transcript → session/update mapping, StopReason, cancel'
 ---
@@ -81,3 +81,13 @@ Testing note: drive the mapping through a seam that feeds scripted Transcript en
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-07-15 14:22)
+
+- [ ] `Sources/FoundationModelsACP/Bridge/PromptInputMapper.swift:19` — Swift argument-label rule: label the first parameter of the transforming `render` function; `render(_ blocks:` → `render(blocks:`. Fix at root across the file's transform/builder helpers.
+- [ ] `Sources/FoundationModelsACP/Bridge/PromptInputMapper.swift:36` — Label the first parameter of `requireSupported` (a validation, not a value-preserving conversion): `requireSupported(_ block:` → `requireSupported(block:`.
+- [ ] `Sources/FoundationModelsACP/Bridge/PromptInputMapper.swift:88` — Label the first parameter of the error builder `unsupported`: `unsupported(_ type:` → `unsupported(type:`.
+- [ ] `Sources/FoundationModelsACP/Bridge/TranscriptMapper.swift:112` — Label the first parameter of the transform `toolCallStarted`: `toolCallStarted(_ call:` → `toolCallStarted(call:`.
+- [ ] `Sources/FoundationModelsACP/Bridge/TranscriptMapper.swift:123` — Label the first parameter of the transform `toolCallCompleted`: `toolCallCompleted(_ output:` → `toolCallCompleted(output:`.
+
+(8 further findings on `Tests/FoundationModelsACPTests/Bridge/BridgeTestSupport.swift` — relabeling/deduplicating/restructuring of shared test-support helpers, most pre-existing — fall under the review contract's blanket exception for refactoring existing test code and are not tracked.)

@@ -23,9 +23,9 @@ enum PromptInputMapper {
     /// - Returns: The blocks rendered and joined into one prompt string.
     /// - Throws: ``RequestError`` with code `-32602` when a block's type is not
     ///   advertised.
-    static func render(_ blocks: [ContentBlock], capabilities: PromptCapabilities) throws -> String {
+    static func render(blocks: [ContentBlock], capabilities: PromptCapabilities) throws -> String {
         for block in blocks {
-            try requireSupported(block, capabilities)
+            try requireSupported(block: block, capabilities: capabilities)
         }
         return blocks.compactMap(fragment(for:)).joined(separator: "\n\n")
     }
@@ -38,8 +38,8 @@ enum PromptInputMapper {
     /// - Throws: ``RequestError`` with code `-32602` when the block is not
     ///   advertised.
     private static func requireSupported(
-        _ block: ContentBlock,
-        _ capabilities: PromptCapabilities
+        block: ContentBlock,
+        capabilities: PromptCapabilities
     ) throws {
         let (allowed, typeName): (Bool, String) =
             switch block {
@@ -51,15 +51,15 @@ enum PromptInputMapper {
             case .unknown(let type): (false, type)
             }
         guard allowed else {
-            throw unsupported(typeName)
+            throw unsupported(type: typeName)
         }
     }
 
     /// Renders one supported block to its prompt fragment.
     ///
     /// Only the block kinds the bridge renders into a text prompt return a
-    /// fragment; kinds gated out by ``requireSupported(_:_:)`` never reach here
-    /// and map to nothing.
+    /// fragment; kinds gated out by ``requireSupported(block:capabilities:)``
+    /// never reach here and map to nothing.
     ///
     /// - Parameter block: The block to render.
     /// - Returns: The fragment, or nil when the block has no text form.
@@ -70,7 +70,7 @@ enum PromptInputMapper {
         case .resourceLink(let link):
             return "[resource: \(link.name)](\(link.uri))"
         case .resource(let resource):
-            return embeddedFragment(resource)
+            return embeddedFragment(resource: resource)
         case .image, .audio, .unknown:
             return nil
         }
@@ -81,7 +81,7 @@ enum PromptInputMapper {
     ///
     /// - Parameter resource: The embedded resource block.
     /// - Returns: The inline context fragment.
-    private static func embeddedFragment(_ resource: EmbeddedResource) -> String {
+    private static func embeddedFragment(resource: EmbeddedResource) -> String {
         guard case .object(let fields) = resource.resource else {
             return "[embedded resource]"
         }
@@ -98,7 +98,7 @@ enum PromptInputMapper {
     ///
     /// - Parameter type: The rejected block's wire type name.
     /// - Returns: The `-32602` error carrying the type in its data.
-    private static func unsupported(_ type: String) -> RequestError {
+    private static func unsupported(type: String) -> RequestError {
         RequestError(
             code: -32602,
             message: "Invalid params",

@@ -20,7 +20,7 @@ func multiBlockPromptRendersToString() throws {
     ]
 
     let rendered = try PromptInputMapper.render(
-        blocks,
+        blocks: blocks,
         capabilities: FoundationModelsAgent.promptCapabilities
     )
 
@@ -34,7 +34,7 @@ func audioBlockRejectedWhenCapabilityOff() {
     let blocks: [ContentBlock] = [.audio(AudioContent(data: "AAAA", mimeType: "audio/wav"))]
 
     let error = capturedRequestError {
-        _ = try PromptInputMapper.render(blocks, capabilities: FoundationModelsAgent.promptCapabilities)
+        _ = try PromptInputMapper.render(blocks: blocks, capabilities: FoundationModelsAgent.promptCapabilities)
     }
     #expect(error?.code == -32602)
 }
@@ -44,7 +44,7 @@ func imageBlockRejectedWhenCapabilityOff() {
     let blocks: [ContentBlock] = [.image(ImageContent(data: "AAAA", mimeType: "image/png"))]
 
     let error = capturedRequestError {
-        _ = try PromptInputMapper.render(blocks, capabilities: FoundationModelsAgent.promptCapabilities)
+        _ = try PromptInputMapper.render(blocks: blocks, capabilities: FoundationModelsAgent.promptCapabilities)
     }
     #expect(error?.code == -32602)
 }
@@ -57,7 +57,7 @@ func embeddedResourceRejectedWhenCapabilityOff() {
     let capabilities = PromptCapabilities(audio: false, embeddedContext: false, image: false)
 
     let error = capturedRequestError {
-        _ = try PromptInputMapper.render(blocks, capabilities: capabilities)
+        _ = try PromptInputMapper.render(blocks: blocks, capabilities: capabilities)
     }
     #expect(error?.code == -32602)
 }
@@ -67,7 +67,7 @@ func unknownBlockRejected() {
     let blocks: [ContentBlock] = [.unknown("video")]
 
     let error = capturedRequestError {
-        _ = try PromptInputMapper.render(blocks, capabilities: FoundationModelsAgent.promptCapabilities)
+        _ = try PromptInputMapper.render(blocks: blocks, capabilities: FoundationModelsAgent.promptCapabilities)
     }
     #expect(error?.code == -32602)
 }
