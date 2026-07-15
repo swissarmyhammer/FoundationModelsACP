@@ -75,27 +75,33 @@ struct PermissionFlowTests {
         }
     }
 
-    @Test("A permission denial converts into a failed tool_call_update")
+    @Test("A permission denial drives the tool to a failed tool_call_update")
     func denialBecomesFailedUpdate() async throws {
         let (environment, _) = await wire(
             outcome: .selected(SelectedPermissionOutcome(optionId: Self.reject.optionId))
         )
 
-        var denial: ClientEnvironmentError?
-        do {
-            _ = try await environment.requestPermission(toolCall: Self.toolCall, options: Self.options)
-        } catch let error as ClientEnvironmentError {
-            denial = error
-        }
+        // Model a tool wrapping the gated call: it completes on a grant and
+        // fails on any client-environment denial. The resulting status is
+        // decided by which branch the SUT drives, not assigned up front.
+        let update = await Self.toolCallGuardedByPermission(environment)
 
-        let error = try #require(denial)
-        // A tool turns the typed denial into a failed tool_call_update.
-        let update = ToolCallUpdate(
-            toolCallId: Self.toolCall.toolCallId,
-            content: [.content(Content(content: .text(TextContent(text: "\(error)"))))],
-            status: .failed
-        )
         #expect(update.status == .failed)
-        #expect(update.toolCallId == Self.toolCall.toolCallId)
+    }
+
+    /// Runs a permission-gated tool call and reports the tool call it would
+    /// send: completed on a grant, failed when the environment denies.
+    ///
+    /// - Parameter environment: The environment whose permission the tool asks.
+    /// - Returns: The tool call update reflecting the outcome.
+    private static func toolCallGuardedByPermission(_ environment: ClientEnvironment) async -> ToolCallUpdate {
+        do {
+            _ = try await environment.requestPermission(toolCall: toolCall, options: options)
+            return ToolCallUpdate(toolCallId: toolCall.toolCallId, status: .completed)
+        } catch is ClientEnvironmentError {
+            return ToolCallUpdate(toolCallId: toolCall.toolCallId, status: .failed)
+        } catch {
+            return ToolCallUpdate(toolCallId: toolCall.toolCallId, status: .unknown("unexpected"))
+        }
     }
 }

@@ -320,7 +320,17 @@ public struct ClientEnvironment: Sendable {
             environment: environment,
             outputByteLimit: outputByteLimit
         )
-        await embedTerminal(terminalId, in: toolCallId)
+        // Embed the terminal in the tool call so the client renders its output
+        // live (spec §9); a closed connection is swallowed, mirroring how the
+        // bridge delivers session updates.
+        let embed = ToolCallUpdate(
+            toolCallId: toolCallId,
+            content: [.terminal(Terminal(terminalId: terminalId))],
+            status: .inProgress
+        )
+        try? await connection.sessionUpdate(
+            SessionNotification(sessionId: sessionId, update: .toolCallUpdate(embed))
+        )
         do {
             let exit = try await waitForTerminalExit(terminalId)
             let snapshot = try await terminalOutput(terminalId)
@@ -338,26 +348,6 @@ public struct ClientEnvironment: Sendable {
     }
 
     // MARK: - Helpers
-
-    /// Emits a `tool_call_update` embedding a terminal so the client renders its
-    /// live output.
-    ///
-    /// The update is best-effort: a closed connection is swallowed, mirroring
-    /// how the bridge delivers session updates.
-    ///
-    /// - Parameters:
-    ///   - terminalId: The terminal to embed.
-    ///   - toolCallId: The tool call to update.
-    private func embedTerminal(_ terminalId: TerminalId, in toolCallId: ToolCallId) async {
-        let update = ToolCallUpdate(
-            toolCallId: toolCallId,
-            content: [.terminal(Terminal(terminalId: terminalId))],
-            status: .inProgress
-        )
-        try? await connection.sessionUpdate(
-            SessionNotification(sessionId: sessionId, update: .toolCallUpdate(update))
-        )
-    }
 
     /// Requires that a gated capability was advertised, failing locally before
     /// any wire call when it was not.

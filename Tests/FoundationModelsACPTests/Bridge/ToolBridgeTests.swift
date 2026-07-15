@@ -12,7 +12,7 @@ struct ToolBridgeTests {
     private let path = AbsolutePath(rawValue: "/workspace/file.txt")!
 
     @Test("Reading a file issues fs/read_text_file and returns the client's content")
-    func readTextFileRoundTrip() async throws {
+    func readsFileThroughClient() async throws {
         let client = RecordingEnvironmentClient(configuration: .init(fileContent: "hello from client"))
         let wired = await makeWiredEnvironment(capabilities: .readOnly, client: client)
 
@@ -25,7 +25,7 @@ struct ToolBridgeTests {
     }
 
     @Test("Writing a file issues fs/write_text_file with the content")
-    func writeTextFileRoundTrip() async throws {
+    func writesFileThroughClient() async throws {
         let client = RecordingEnvironmentClient()
         let wired = await makeWiredEnvironment(capabilities: .writeOnly, client: client)
 
