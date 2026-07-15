@@ -12,6 +12,8 @@ import Synchronization
 /// Replay is deterministic: same script in, same chunks out, writes captured
 /// byte-for-byte in order.
 public final class ReplayTransport: ACPTransport {
+    /// The replayed script, delivered one line per chunk (newline included)
+    /// and finishing once the script is exhausted.
     public let bytes: AsyncThrowingStream<Data, any Error>
 
     /// Everything written so far, guarded for concurrent writers.

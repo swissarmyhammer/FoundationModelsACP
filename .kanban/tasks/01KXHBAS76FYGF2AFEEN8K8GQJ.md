@@ -38,3 +38,9 @@ These live in the main target (they're useful to consumers' tests too), with no 
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-07-14 22:25)
+
+- [x] `Sources/FoundationModelsACP/Transport/InMemoryTransport.swift:15` — `bytes` is a public property but has no documentation comment. Public declarations require `///` documentation to describe the property's purpose and role in the API. Add a `///` documentation comment above the `bytes` property. For example: `/// Delivers incoming messages from the peer, finishing when the peer closes its outgoing direction.`.
+- [x] `Sources/FoundationModelsACP/Transport/ReplayTransport.swift:13` — Public property `bytes` lacks documentation — callers need to understand what stream this provides and how to use it. Add a documentation comment above line 13 describing what `bytes` represents, e.g. the replayed script stream being fed line by line.
+- [x] `Sources/FoundationModelsACP/Transport/ReplayTransport.swift:16` — `bytes` is a public property but has no documentation comment. Public declarations require `///` documentation to describe the property's purpose and role in the API. Add a `///` documentation comment above the `bytes` property. For example: `/// The replayed script, delivered one line per chunk until exhausted.`.

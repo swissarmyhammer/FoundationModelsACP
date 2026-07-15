@@ -12,6 +12,8 @@ public struct InMemoryTransport: ACPTransport {
     /// this end was closed or the peer stopped consuming.
     public struct ClosedError: Error, Equatable {}
 
+    /// Incoming chunks written by the peer, finishing when the peer closes
+    /// its outgoing direction.
     public let bytes: AsyncThrowingStream<Data, any Error>
 
     /// Feeds the peer's `bytes` stream; finished by `close()`.
