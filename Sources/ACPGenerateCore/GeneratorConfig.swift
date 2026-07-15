@@ -9,7 +9,12 @@
 public struct GeneratorConfig: Sendable {
     /// A hand-written invariant-carrying newtype a schema field can map to.
     public enum InvariantType: String, Sendable {
+        /// The field carries a file path that must be absolute; it emits as
+        /// the hand-written `AbsolutePath`, rejecting relative paths at decode.
         case absolutePath = "AbsolutePath"
+
+        /// The field carries a 1-based line number; it emits as the
+        /// hand-written `LineNumber`, rejecting `0` and negatives at decode.
         case lineNumber = "LineNumber"
     }
 
@@ -71,7 +76,9 @@ public struct GeneratorConfig: Sendable {
         ],
         typeRenames: [
             // `Error` would shadow `Swift.Error` inside the module.
-            "Error": "ACPError"
+            "Error": "ACPError",
+            // Swift API Design Guidelines cased acronym (`entryID`-style).
+            "RequestId": "RequestID",
         ],
         handwrittenDefinitions: [
             // Hand-written in Core with the negotiated-version invariant.

@@ -203,8 +203,9 @@ enum Emitter {
         }
     }
 
-    /// Renders `encode(to:)`, omitting `nil` optional fields entirely and
-    /// keeping schema-`required` nullable fields present as JSON null.
+    /// Renders `encode(to:)`, omitting `nil` optional fields entirely —
+    /// mirroring `init(from:)`, which decodes every optional property via
+    /// `decodeIfPresent`, so both directions apply the same condition.
     ///
     /// - Parameter model: The struct's emission model.
     /// - Returns: The method lines, indented one level.
@@ -220,7 +221,7 @@ enum Emitter {
         ]
         for property in model.properties {
             let name = property.swiftName
-            if property.isOptional && !property.isRequired {
+            if property.isOptional {
                 lines.append("        try container.encodeIfPresent(\(name), forKey: .\(name))")
             } else {
                 lines.append("        try container.encode(\(name), forKey: .\(name))")

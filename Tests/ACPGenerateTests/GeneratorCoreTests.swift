@@ -184,6 +184,31 @@ import Testing
         #expect(source.contains("public typealias McpServer = JSONValue"))
     }
 
+    @Test func requiredNullableFieldsEncodeSymmetricallyWithDecode() throws {
+        // A schema-required but nullable field decodes via decodeIfPresent, so
+        // it must also encode via encodeIfPresent — same condition both ways.
+        let schema = Data(
+            """
+            {
+              "$defs": {
+                "ExitStatus": {
+                  "type": "object",
+                  "properties": {
+                    "exitCode": {
+                      "type": ["integer", "null"]
+                    }
+                  },
+                  "required": ["exitCode"]
+                }
+              }
+            }
+            """.utf8)
+        let files = try SchemaGenerator().generate(schemaJSON: schema)
+        let source = try #require(files.first { $0.name == "Models.generated.swift" }).contents
+        #expect(source.contains("try container.decodeIfPresent(Int.self, forKey: .exitCode)"))
+        #expect(source.contains("try container.encodeIfPresent(exitCode, forKey: .exitCode)"))
+    }
+
     @Test func objectDefaultMismatchingTargetDefaultsFailsLoudly() throws {
         // `fs` declares default {"readTextFile": true} but FileSystemCapabilities'
         // own default is false — rendering `FileSystemCapabilities()` would
@@ -265,6 +290,10 @@ import Testing
         // `Error` collides with Swift.Error and is renamed via generator config.
         #expect(all.contains("public struct ACPError"))
         #expect(!all.contains("public struct Error"))
+        // `RequestId` is renamed `RequestID` (API Design Guidelines acronym
+        // casing) via generator config; def names never appear on the wire.
+        #expect(all.contains("public typealias RequestID = JSONValue"))
+        #expect(!all.contains("RequestId"))
     }
 
     @Test func vendoredSchemaGenerationIsDeterministic() throws {

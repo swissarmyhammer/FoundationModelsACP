@@ -127,7 +127,7 @@ public typealias PlanEntryStatus = JSONValue
 /// \[2\] Fractional parts may be problematic, since many decimal fractions cannot be represented exactly as binary fractions.
 ///
 /// Placeholder seam: schema `anyOf` union, decoded as raw JSON until the tagged-union/string-enum generator stage replaces it.
-public typealias RequestId = JSONValue
+public typealias RequestID = JSONValue
 
 /// The outcome of a permission request.
 ///

@@ -68,21 +68,22 @@ private struct ListFixture: Codable, Hashable {
     }
 }
 
+/// Decodes a fixture or generated value from a JSON string — shared by both
+/// suites in this file.
+///
+/// - Parameters:
+///   - type: The type to decode.
+///   - json: The JSON document text.
+/// - Returns: The decoded value.
+/// - Throws: Any decoding error, which most tests expect not to happen.
+private func decode<T: Decodable>(_ type: T.Type, from json: String) throws -> T {
+    try JSONDecoder().decode(T.self, from: Data(json.utf8))
+}
+
 /// Tests the forgiving-decoding runtime helpers through compile-time fixture
 /// types shaped like generator output: defaults-on-error, skip-invalid-items,
 /// and nil-omitting encoding.
 @Suite struct ForgivingDecodingTests {
-    /// Decodes a fixture value from a JSON string.
-    ///
-    /// - Parameters:
-    ///   - type: The fixture type to decode.
-    ///   - json: The JSON document text.
-    /// - Returns: The decoded value.
-    /// - Throws: Any decoding error, which most tests expect not to happen.
-    private func decode<T: Decodable>(_ type: T.Type, from json: String) throws -> T {
-        try JSONDecoder().decode(T.self, from: Data(json.utf8))
-    }
-
     /// Encodes a value to a JSON object dictionary for key-presence checks.
     ///
     /// - Parameter value: The value to encode.
@@ -166,13 +167,23 @@ private struct ListFixture: Codable, Hashable {
     // MARK: - Nil omission on encode
 
     @Test func encodeOmitsNilOptionalFields() throws {
-        let object = try encodeToObject(CapabilityFixture(readTextFile: true))
+        let original = CapabilityFixture(readTextFile: true)
+        let object = try encodeToObject(original)
         #expect(object.keys.sorted() == ["readTextFile"])
+        // Round-trip: the omitted key decodes back to nil.
+        let decoded = try JSONDecoder().decode(CapabilityFixture.self, from: JSONEncoder().encode(original))
+        #expect(decoded == original)
+        #expect(decoded.meta == nil)
     }
 
     @Test func encodeIncludesPresentOptionalFields() throws {
-        let object = try encodeToObject(CapabilityFixture(readTextFile: false, meta: .object(["k": .string("v")])))
+        let original = CapabilityFixture(readTextFile: false, meta: .object(["k": .string("v")]))
+        let object = try encodeToObject(original)
         #expect(object.keys.sorted() == ["_meta", "readTextFile"])
+        // Round-trip: the present optional survives encode → decode intact.
+        let decoded = try JSONDecoder().decode(CapabilityFixture.self, from: JSONEncoder().encode(original))
+        #expect(decoded == original)
+        #expect(decoded.meta == .object(["k": .string("v")]))
     }
 
     @Test func forgivingRoundTripPreservesValidData() throws {
@@ -187,17 +198,6 @@ private struct ListFixture: Codable, Hashable {
 /// capability field degrades to defaults instead of failing the `initialize`
 /// handshake, wire-invariant fields stay strict, and encoding omits nil.
 @Suite struct GeneratedTypeAcceptanceTests {
-    /// Decodes a generated type from a JSON string.
-    ///
-    /// - Parameters:
-    ///   - type: The generated type to decode.
-    ///   - json: The JSON document text.
-    /// - Returns: The decoded value.
-    /// - Throws: Any decoding error.
-    private func decode<T: Decodable>(_ type: T.Type, from json: String) throws -> T {
-        try JSONDecoder().decode(T.self, from: Data(json.utf8))
-    }
-
     @Test func malformedCapabilityFieldsDecodeToDefaults() throws {
         let response = try decode(
             InitializeResponse.self,
