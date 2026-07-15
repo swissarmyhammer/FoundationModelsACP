@@ -56,6 +56,28 @@ comments:
 
     RESOLUTION (root, not the cited line): renaming to `sessionID` would fight this package's deliberate, pervasive naming contract — the generated newtype is `SessionId` and every property/label across the generated models and the already-reviewed Connection layer uses `sessionId` (mirroring the ACP wire schema field `sessionId`); the engine itself refuted 9 sibling `sessionId` usages and confirmed only this one externally-visible label. Rather than introduce an inconsistent `sessionID`, I removed the offending parameter entirely: the `SessionProvider(session:sessionId:)` convenience init's `sessionId:` override was an un-asked-for public knob (the card's one-liner is just "a provider whose makeSession returns that session, hooks nil" — no pinnable id). Now `SessionProvider(session:)` mints the id internally (`let identity = SessionId(rawValue: UUID().uuidString)`), which removes the flagged externally-visible label, tightens the public surface to exactly the card, and leaves the package-wide `sessionId` convention intact. Tests that need a pinned id now build "an explicit single-session provider" via the full `SessionProvider(makeSession:)` initializer — more faithful to the acceptance-criterion wording. swift test still 114 + 108 green, 0 warnings. Re-reviewing HEAD~1..HEAD.
   timestamp: 2026-07-15T18:17:05.936133+00:00
+- actor: wballard
+  id: 01kxkh4x1jbm2d83v5a4sa37gm
+  text: |-
+    STUCK — guardrail hit (same finding class across 3 review iterations). Leaving in review for human adjudication; NOT forcing done, NOT editing the validator.
+
+    The work is functionally COMPLETE and green: all four acceptance criteria met (one-liner == explicit provider on the wire; initialize gates session-mgmt caps by hook presence; newSession plumbs cwd+MCP configs and tracks the SessionId; concurrent same-session prompts serialize strictly, cross-session run concurrently). swift build --build-tests: 0 warnings/errors. swift test: 114 FoundationModelsACPTests + 108 ACPGenerateTests, 0 failures. FoundationModels is real and imported; no API divergence.
+
+    The ONLY thing blocking `done` is the swift ID-acronym casing validator, which has recurred across three review passes escalating to an unsatisfiable demand:
+    - Pass 1 (fb6ae8f): rename the `sessionId:` arg label on SessionProvider(session:sessionId:). Fixed by REMOVING that un-asked-for convenience param (d9a6500) — a genuine scope tightening.
+    - Pass 2 (d9a6500): rename test-local `sessionId`/`assignedId`/`explicitId` to `...ID`. I complied (f065dcc).
+    - Pass 3 (f065dcc): different rule (missing `- Throws:` on initialize) — fixed cleanly (5899148).
+    - Pass 4 (5899148): rename the `SessionId` TYPE ITSELF to `SessionID`.
+
+    Pass 4 is unsatisfiable within this task and is the review skill's documented-contract exception:
+    1. `SessionId` is a GENERATED type (Sources/FoundationModelsACP/Generated/Identifiers.generated.swift), produced by acp-generate from the ACP JSON schema whose field is `sessionId`. Spec §6 mandates "regenerate, don't patch" — I must not hand-edit generated code.
+    2. Renaming it would break the ENTIRE package: every generated model, the already-reviewed-and-done Connection layer, and 200+ existing tests all spell `SessionId`/`sessionId`, and it would diverge from the wire schema (the whole ACP surface names session identity `SessionId`; no method can avoid spelling it).
+    3. Partial compliance is incoherent (`sessionID: SessionId`, `NewSessionResponse(sessionId: sessionID)`), so I reverted my pass-2 casing churn (b43350f) to restore the package-uniform `sessionId`/`SessionId` convention — the cleanest, most consistent state for the human and for downstream tasks (^gs0d3kp etc.) that will follow the same convention.
+
+    RECOMMENDATION for the human: either scope the ID-acronym casing rule to exempt this schema-mirroring package (the deliberate `SessionId`/`sessionId` contract from §6 codegen), OR — if the convention should truly change to `SessionID` — do it in the GENERATOR (a separate epic touching all generated identifiers + checked-in output + routing table + every test), not this card. The validator is also nondeterministic on this class (it refuted 9 sibling `sessionId` uses in pass 1, then confirmed the same pattern in later passes), which is why chasing it identifier-by-identifier does not converge.
+
+    Current HEAD b43350f. Local commits only, nothing pushed. Task remains in `review`.
+  timestamp: 2026-07-15T18:38:10.482522+00:00
 depends_on:
 - 01KXHBBTQ24BC8586M5K0N872Z
 position_column: review
