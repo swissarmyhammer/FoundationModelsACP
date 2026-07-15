@@ -111,9 +111,9 @@ public actor FoundationModelsAgent: Agent {
     /// - Returns: The identity the provider assigned to the new session.
     /// - Throws: Any error the provider's factory throws.
     public func newSession(_ params: NewSessionRequest) async throws -> NewSessionResponse {
-        let (sessionID, session) = try await provider.makeSession(params.cwd, params.mcpServers)
-        sessions[sessionID] = SessionState(session: session)
-        return NewSessionResponse(sessionId: sessionID)
+        let (sessionId, session) = try await provider.makeSession(params.cwd, params.mcpServers)
+        sessions[sessionId] = SessionState(session: session)
+        return NewSessionResponse(sessionId: sessionId)
     }
 
     /// Runs one prompt turn, serialized against other turns on the same session.
@@ -152,16 +152,16 @@ public actor FoundationModelsAgent: Agent {
     /// failed turn still completes its token, so a throw never wedges the chain.
     ///
     /// - Parameters:
-    ///   - sessionID: The session whose turn chain to append to.
+    ///   - sessionId: The session whose turn chain to append to.
     ///   - body: The turn's work, run once its predecessor completes.
     /// - Returns: The value `body` produced.
     /// - Throws: ``RequestError/invalidParams`` when the session is unknown, or
     ///   any error `body` throws.
     func serializeTurn<Value: Sendable>(
-        for sessionID: SessionId,
+        for sessionId: SessionId,
         _ body: @escaping @Sendable () async throws -> Value
     ) async throws -> Value {
-        guard let state = sessions[sessionID] else {
+        guard let state = sessions[sessionId] else {
             throw RequestError.invalidParams
         }
         let predecessor = state.turnTail

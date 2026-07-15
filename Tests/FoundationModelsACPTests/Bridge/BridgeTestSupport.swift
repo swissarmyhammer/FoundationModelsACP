@@ -22,13 +22,13 @@ func makeModelSession() -> LanguageModelSession {
 /// A provider that always yields one fixed session under a fixed id, with no
 /// store hooks — the shape the one-liner sugar produces.
 ///
-/// - Parameter sessionID: The identity every `session/new` returns.
+/// - Parameter sessionId: The identity every `session/new` returns.
 /// - Returns: A single-session provider.
 func singleSessionProvider(
-    sessionID: SessionId = SessionId(rawValue: "session-1")
+    sessionId: SessionId = SessionId(rawValue: "session-1")
 ) -> SessionProvider {
     let session = makeModelSession()
-    return SessionProvider(makeSession: { _, _ in (sessionID, session) })
+    return SessionProvider(makeSession: { _, _ in (sessionId, session) })
 }
 
 /// A multi-session provider that mints a distinct id and session per
