@@ -1,0 +1,2 @@
+{"id":"req-1","jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":1}}
+{"id":"req-2","jsonrpc":"2.0","method":"session/prompt","params":{"text":"hello"}}

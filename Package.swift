@@ -36,7 +36,9 @@ let package = Package(
         .testTarget(
             name: "FoundationModelsACPTests",
             dependencies: ["FoundationModelsACP"],
-            path: "Tests/FoundationModelsACPTests"
+            path: "Tests/FoundationModelsACPTests",
+            // Replay fixtures are loaded via #filePath, not as bundle resources.
+            exclude: ["Fixtures"]
         ),
         .testTarget(
             name: "ACPGenerateTests",
