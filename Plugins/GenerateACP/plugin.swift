@@ -1,6 +1,12 @@
 import Foundation
 import PackagePlugin
 
+/// A failure raised while running the `acp-generate` tool.
+struct GenerateACPError: Error, CustomStringConvertible {
+    /// The human-readable failure description.
+    let description: String
+}
+
 /// The `swift package generate-acp` command plugin.
 ///
 /// A command plugin — not a build-tool plugin — because regeneration must
@@ -16,7 +22,9 @@ struct GenerateACPPlugin: CommandPlugin {
     ///   - context: The plugin context, providing the built tool and package
     ///     directory.
     ///   - arguments: Extra arguments forwarded verbatim to `acp-generate`.
-    /// - Throws: An error when the tool cannot be located or launched.
+    /// - Throws: `GenerateACPError` when the tool cannot be launched or exits
+    ///   with a non-zero status, so a failed regeneration fails the command
+    ///   (and the CI diff gate that runs it).
     func performCommand(context: PluginContext, arguments: [String]) async throws {
         let tool = try context.tool(named: "acp-generate")
         let process = Process()
@@ -26,8 +34,9 @@ struct GenerateACPPlugin: CommandPlugin {
         try process.run()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
-            Diagnostics.error("acp-generate exited with status \(process.terminationStatus)")
-            return
+            throw GenerateACPError(
+                description: "acp-generate exited with status \(process.terminationStatus)"
+            )
         }
     }
 }

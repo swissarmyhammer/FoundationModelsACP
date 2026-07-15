@@ -36,7 +36,7 @@ comments:
 depends_on:
 - 01KXHB8QAXW73Z00S3HEE3F2AZ
 - 01KXHB95AAD18C1CN4QTT9QWXJ
-position_column: doing
+position_column: review
 position_ordinal: '80'
 title: SwiftPM command plugin, hash stamp, and CI diff gate for codegen
 ---
