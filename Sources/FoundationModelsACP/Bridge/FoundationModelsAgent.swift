@@ -88,6 +88,8 @@ public actor FoundationModelsAgent: Agent {
     ///
     /// - Parameter params: The client's initialization request.
     /// - Returns: The negotiated protocol version and advertised capabilities.
+    /// - Throws: Never; capability negotiation cannot fail. The `throws` is the
+    ///   ``Agent`` protocol requirement.
     public func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
         InitializeResponse(
             protocolVersion: .latest,
