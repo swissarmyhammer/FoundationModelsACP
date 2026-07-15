@@ -47,9 +47,18 @@ comments:
 
     VERIFICATION: swift build --build-tests zero warnings/errors. swift test = 114 FoundationModelsACPTests + 108 ACPGenerateTests, 0 failures, 0 warnings. Serialization tests ran 5x consecutively — deterministic, no flakiness, no live-model dependency, no SIGTRAP risk (fake bodies never touch the model). FoundationModels imported and linked in the library target on macOS 27 with zero divergence from the verified API. Checkpoint + review next.
   timestamp: 2026-07-15T18:07:02.696225+00:00
+- actor: wballard
+  id: 01kxkfya4gpaxy4jaq0y8dzypr
+  text: |-
+    Review pass 1 (sha HEAD~1..HEAD): 1 finding confirmed, 9 refuted, 14 attempted, 0 failed.
+
+    FINDING: SessionProvider.swift:58 — swift casing rule wanted the `sessionId:` argument label renamed to `sessionID`.
+
+    RESOLUTION (root, not the cited line): renaming to `sessionID` would fight this package's deliberate, pervasive naming contract — the generated newtype is `SessionId` and every property/label across the generated models and the already-reviewed Connection layer uses `sessionId` (mirroring the ACP wire schema field `sessionId`); the engine itself refuted 9 sibling `sessionId` usages and confirmed only this one externally-visible label. Rather than introduce an inconsistent `sessionID`, I removed the offending parameter entirely: the `SessionProvider(session:sessionId:)` convenience init's `sessionId:` override was an un-asked-for public knob (the card's one-liner is just "a provider whose makeSession returns that session, hooks nil" — no pinnable id). Now `SessionProvider(session:)` mints the id internally (`let identity = SessionId(rawValue: UUID().uuidString)`), which removes the flagged externally-visible label, tightens the public surface to exactly the card, and leaves the package-wide `sessionId` convention intact. Tests that need a pinned id now build "an explicit single-session provider" via the full `SessionProvider(makeSession:)` initializer — more faithful to the acceptance-criterion wording. swift test still 114 + 108 green, 0 warnings. Re-reviewing HEAD~1..HEAD.
+  timestamp: 2026-07-15T18:17:05.936133+00:00
 depends_on:
 - 01KXHBBTQ24BC8586M5K0N872Z
-position_column: doing
+position_column: review
 position_ordinal: '80'
 title: 'FoundationModelsAgent core: SessionProvider, one-liner init, turn serialization'
 ---

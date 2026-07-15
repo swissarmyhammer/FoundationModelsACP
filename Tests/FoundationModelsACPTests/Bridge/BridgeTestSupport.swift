@@ -27,7 +27,8 @@ func makeModelSession() -> LanguageModelSession {
 func singleSessionProvider(
     sessionId: SessionId = SessionId(rawValue: "session-1")
 ) -> SessionProvider {
-    SessionProvider(session: makeModelSession(), sessionId: sessionId)
+    let session = makeModelSession()
+    return SessionProvider(makeSession: { _, _ in (sessionId, session) })
 }
 
 /// A multi-session provider that mints a distinct id and session per

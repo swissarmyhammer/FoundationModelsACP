@@ -85,18 +85,15 @@ public struct SessionProvider: Sendable {
 
 extension SessionProvider {
     /// Creates a single-session provider: every `session/new` yields the same
-    /// pre-built session, and no store hooks are advertised.
+    /// pre-built session under a freshly minted identity, and no store hooks are
+    /// advertised.
     ///
     /// Backs the flagship one-liner
     /// ``FoundationModelsAgent/init(connection:session:)``.
     ///
-    /// - Parameters:
-    ///   - session: The pre-built session to hand out.
-    ///   - sessionId: The identity to track it under; defaults to a fresh UUID.
-    public init(
-        session: LanguageModelSession,
-        sessionId: SessionId = SessionId(rawValue: UUID().uuidString)
-    ) {
-        self.init(makeSession: { _, _ in (sessionId, session) })
+    /// - Parameter session: The pre-built session to hand out.
+    public init(session: LanguageModelSession) {
+        let identity = SessionId(rawValue: UUID().uuidString)
+        self.init(makeSession: { _, _ in (identity, session) })
     }
 }

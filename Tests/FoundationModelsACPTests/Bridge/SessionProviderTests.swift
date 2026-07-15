@@ -84,7 +84,7 @@ func oneLinerMatchesExplicitProvider() async throws {
     let explicit = await makeWiredBridge { connection in
         FoundationModelsAgent(
             connection: connection,
-            provider: SessionProvider(session: session, sessionId: explicitId)
+            provider: SessionProvider(makeSession: { _, _ in (explicitId, session) })
         )
     }
 
