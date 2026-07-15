@@ -13,10 +13,17 @@ comments:
     - Fixtures live in Tests/FoundationModelsACPTests/Fixtures/ loaded via #filePath (same pattern as SchemaFixtureTests), and Package.swift excludes "Fixtures" from the test target — they are not bundle resources.
     - Swift toolchain gotcha: the pattern `case .string(let m)? = dict["k"]` crashed the Xcode-beta frontend diagnostic path; `case .string(let m) = dict["k", default: .null]` is the safe spelling used in tests.
   timestamp: 2026-07-15T03:24:32.051068+00:00
+- actor: wballard
+  id: 01kxhxkthhn2ywsf8kn9s51hhe
+  text: |-
+    Review pass on checkpoint 89a252c (HEAD~1..HEAD) came back clean: 0 findings, 14/14 checks, 0 failed (first attempt had 1 engine subtask fail with 0 findings; re-run completed clean). Task done in two implement→test→commit→review iterations — iteration 1 landed the transports (checkpoint 2f8b904), iteration 2 fixed 3 doc-comment findings on the public `bytes` properties (checkpoint 89a252c).
+
+    For downstream connection/e2e tasks (^qtbq9t, ^2x6ra0): wire back-to-back tests with `let (client, agent) = InMemoryTransport.pair()` — remember half-close semantics (`close()` finishes only the peer's incoming stream; close both ends to finish both directions). For golden replay tests, `ReplayTransport(script:)` + drive the agent loop + compare `capturedOutput` byte-for-byte against a committed fixture; keep JSON-RPC ids as strings in fixtures to avoid Double formatting drift. Fixtures pattern: Tests/FoundationModelsACPTests/Fixtures/ via #filePath, excluded in Package.swift.
+  timestamp: 2026-07-15T03:37:33.489329+00:00
 depends_on:
 - 01KXHBADH1XF34Q5C911R8GYD6
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8580'
 title: InMemoryTransport and ReplayTransport test infrastructure
 ---
 ## What
