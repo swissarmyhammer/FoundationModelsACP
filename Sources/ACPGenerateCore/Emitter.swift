@@ -18,6 +18,21 @@ enum Emitter {
         ([header] + declarations).joined(separator: "\n\n") + "\n"
     }
 
+    /// Renders schema-derived text as an escaped Swift string literal.
+    ///
+    /// Backslashes and quotes are escaped so no schema value can break out
+    /// of the generated source. `swiftCaseName` already rejects such values
+    /// at the generator boundary; the emitter stays safe on its own terms.
+    ///
+    /// - Parameter text: The schema-derived text (wire name, value, or tag).
+    /// - Returns: The quoted, escaped Swift string literal.
+    private static func stringLiteral(_ text: String) -> String {
+        let escaped = text
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+
     /// Renders a distinct ID newtype wrapping a wire string.
     ///
     /// - Parameters:
@@ -42,9 +57,10 @@ enum Emitter {
         return lines.joined(separator: "\n")
     }
 
-    /// Renders a placeholder typealias seam for a definition deferred to a
-    /// later generator stage (tagged unions, string enums) or permanently
-    /// free-form.
+    /// Renders a placeholder typealias seam.
+    ///
+    /// Covers definitions deferred to a later generator stage as well as
+    /// permanently free-form definitions.
     ///
     /// - Parameters:
     ///   - name: The emitted Swift type name.
@@ -61,7 +77,9 @@ enum Emitter {
         return lines.joined(separator: "\n")
     }
 
-    /// Renders an object struct with explicit CodingKeys, a public memberwise
+    /// Renders an object struct declaration.
+    ///
+    /// The struct carries explicit CodingKeys, a public memberwise
     /// initializer, forgiving decoding, and nil-omitting encoding.
     ///
     /// - Parameter model: The struct's emission model.
@@ -106,8 +124,10 @@ enum Emitter {
         property.typeExpression + (property.isOptional ? "?" : "")
     }
 
-    /// Renders the public memberwise initializer, defaulting optional
-    /// parameters to `nil` and defaulted parameters to their schema default.
+    /// Renders the public memberwise initializer.
+    ///
+    /// Optional parameters default to `nil`; defaulted parameters use their
+    /// schema default.
     ///
     /// - Parameter model: The struct's emission model.
     /// - Returns: The initializer lines, indented one level.
@@ -143,15 +163,17 @@ enum Emitter {
             if property.swiftName == property.wireName {
                 lines.append("        case \(property.swiftName)")
             } else {
-                lines.append("        case \(property.swiftName) = \"\(property.wireName)\"")
+                lines.append("        case \(property.swiftName) = \(stringLiteral(property.wireName))")
             }
         }
         lines.append("    }")
         return lines
     }
 
-    /// Renders `init(from:)`, decoding invariant fields strictly and
-    /// annotated fields through the forgiving helpers.
+    /// Renders `init(from:)`.
+    ///
+    /// Invariant fields decode strictly; annotated fields decode through
+    /// the forgiving helpers.
     ///
     /// - Parameter model: The struct's emission model.
     /// - Returns: The initializer lines, indented one level.
@@ -203,8 +225,9 @@ enum Emitter {
         }
     }
 
-    /// Renders `encode(to:)`, omitting `nil` optional fields entirely —
-    /// mirroring `init(from:)`, which decodes every optional property via
+    /// Renders `encode(to:)`, omitting `nil` optional fields entirely.
+    ///
+    /// This mirrors `init(from:)`, which decodes every optional property via
     /// `decodeIfPresent`, so both directions apply the same condition.
     ///
     /// - Parameter model: The struct's emission model.
@@ -233,23 +256,11 @@ enum Emitter {
 
     // MARK: - Unions
 
-    /// Renders schema-derived text as a double-quoted Swift string literal,
-    /// escaping backslashes and quotes so no wire value can break out of the
-    /// generated source. `swiftCaseName` already rejects such values at the
-    /// generator boundary; the emitter stays safe on its own terms.
+    /// Renders a string enum with hand-rolled `Codable`.
     ///
-    /// - Parameter text: The schema-derived text (wire value or tag).
-    /// - Returns: The quoted, escaped Swift string literal.
-    private static func stringLiteral(_ text: String) -> String {
-        let escaped = text
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"\(escaped)\""
-    }
-
-    /// Renders a string enum with hand-rolled `Codable`: known snake_case
-    /// wire strings map to camelCase cases, anything else decodes to
-    /// `unknown(String)`, and `.unknown` re-encodes its captured string.
+    /// Known snake_case wire strings map to camelCase cases, anything else
+    /// decodes to `unknown(String)`, and `.unknown` re-encodes its captured
+    /// string.
     ///
     /// - Parameter model: The enum's emission model.
     /// - Returns: The rendered enum declaration.
@@ -314,11 +325,12 @@ enum Emitter {
         return lines.joined(separator: "\n")
     }
 
-    /// Renders a tagged union as an enum with associated payload values and
-    /// hand-rolled `Codable` keyed on the discriminator: the payload's fields
-    /// sit flattened beside the discriminator (serde's internally-tagged
-    /// representation), and unrecognized discriminators decode to
-    /// `unknown(String)`.
+    /// Renders a tagged union as an enum with hand-rolled `Codable`.
+    ///
+    /// Cases carry associated payload values and coding is keyed on the
+    /// discriminator: the payload's fields sit flattened beside the
+    /// discriminator (serde's internally-tagged representation), and
+    /// unrecognized discriminators decode to `unknown(String)`.
     ///
     /// - Parameter model: The union's emission model.
     /// - Returns: The rendered enum declaration.

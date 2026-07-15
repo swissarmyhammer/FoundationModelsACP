@@ -271,6 +271,34 @@ import Testing
         }
     }
 
+    @Test func quoteBearingWireNameEscapesInCodingKeys() throws {
+        // The emitter must be safe on its own terms: a quote or backslash in
+        // a property wire name may never break out of the generated
+        // CodingKeys string literal.
+        let model = StructModel(
+            name: "Weird",
+            documentation: nil,
+            properties: [
+                PropertyModel(
+                    wireName: #"a"b\c"#,
+                    swiftName: "aBC",
+                    typeExpression: "String",
+                    elementType: nil,
+                    isOptional: false,
+                    isRequired: true,
+                    defaultExpression: nil,
+                    defaultsToEmptyInstance: false,
+                    objectDefaultMembers: nil,
+                    strategy: .strict,
+                    documentation: nil
+                )
+            ]
+        )
+        let source = Emitter.structDeclaration(model)
+        #expect(source.contains(#"case aBC = "a\"b\\c""#))
+        #expect(!source.contains(#"case aBC = "a"b\c""#))
+    }
+
     // MARK: - Full vendored schema
 
     /// The package-root `Schema/acp-v1.json`, located relative to this file.

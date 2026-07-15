@@ -4,8 +4,9 @@ import Testing
 
 @testable import ACPGenerateCore
 
-/// Reduces JSON bytes to a canonical sorted-keys form so byte comparisons
-/// ignore key order (and nothing else).
+/// Reduces JSON bytes to a canonical sorted-keys form.
+///
+/// Byte comparisons of canonicalized JSON ignore key order and nothing else.
 ///
 /// - Parameter data: The JSON bytes to canonicalize.
 /// - Returns: The same JSON re-serialized with sorted keys.
@@ -15,8 +16,10 @@ private func canonicalized(_ data: Data) throws -> Data {
     return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .fragmentsAllowed])
 }
 
-/// Decodes a fixture, re-encodes it, and asserts byte-equivalence modulo
-/// key order plus decode-back equality.
+/// Decodes a fixture and asserts it re-encodes byte-equivalent.
+///
+/// Byte-equivalence is modulo key order; the re-encoded bytes must also
+/// decode back equal to the first decode.
 ///
 /// - Parameters:
 ///   - type: The generated type to round-trip.
@@ -34,9 +37,10 @@ private func assertRoundTrips<T: Codable & Equatable>(_ type: T.Type, fixture: S
     return decoded
 }
 
-/// Round-trips every discriminator variant of the generated tagged unions
-/// against wire fixtures: decode picks the right case, and re-encoding is
-/// byte-equivalent modulo key order.
+/// Round-trips every generated tagged-union variant against wire fixtures.
+///
+/// Decode picks the right case, and re-encoding is byte-equivalent modulo
+/// key order.
 @Suite struct TaggedUnionRoundTripTests {
     @Test(arguments: [
         #"{"type":"text","text":"Hello"}"#,
@@ -120,9 +124,11 @@ private func assertRoundTrips<T: Codable & Equatable>(_ type: T.Type, fixture: S
     }
 }
 
-/// Tests the tagged-union generator stage: `oneOf` definitions whose object
-/// variants carry a const discriminator emit Swift enums with associated
-/// values and hand-rolled `Codable` keyed on that discriminator.
+/// Tests the tagged-union generator stage.
+///
+/// `oneOf` definitions whose object variants carry a const discriminator
+/// emit Swift enums with associated values and hand-rolled `Codable` keyed
+/// on that discriminator.
 @Suite struct TaggedUnionEmissionTests {
     @Test func contentBlockEmitsEnumWithAssociatedValues() throws {
         let source = try vendoredOutput(named: "Unions.generated.swift")

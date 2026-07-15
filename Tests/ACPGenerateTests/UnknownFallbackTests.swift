@@ -4,7 +4,8 @@ import Testing
 
 @testable import ACPGenerateCore
 
-/// Tests the string-enum generator stage and the `unknown(String)` fallback:
+/// Tests the string-enum generator stage and the `unknown(String)` fallback.
+///
 /// snake_case wire strings map to camelCase Swift cases, and any value a
 /// newer peer sends routes to `unknown(String)` instead of failing decode.
 @Suite struct UnknownFallbackEmissionTests {
@@ -81,10 +82,11 @@ private func encodeToJSON(_ value: some Encodable) throws -> String {
     String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
 }
 
-/// Runtime acceptance of the `unknown(String)` fallback against the
-/// checked-in generated types: unrecognized string-enum values and union
-/// discriminators decode to `.unknown` and re-encode their captured string,
-/// so a newer peer can never crash decoding.
+/// Runtime acceptance of the `unknown(String)` fallback.
+///
+/// Against the checked-in generated types, unrecognized string-enum values
+/// and union discriminators decode to `.unknown` and re-encode their
+/// captured string, so a newer peer can never crash decoding.
 @Suite struct UnknownFallbackRoundTripTests {
     @Test func unknownToolKindRoundTripsItsWireString() throws {
         let kind = try decode(ToolKind.self, from: #""telepathy""#)
@@ -98,8 +100,10 @@ private func encodeToJSON(_ value: some Encodable) throws -> String {
         #expect(try encodeToJSON(reason) == #""cosmic_ray""#)
     }
 
-    /// Asserts every (wire string, Swift case) pair of a string enum decodes
-    /// to the expected case and re-encodes the exact wire string.
+    /// Asserts a string enum's complete wire table round-trips.
+    ///
+    /// Every (wire string, Swift case) pair must decode to the expected case
+    /// and re-encode the exact wire string.
     ///
     /// - Parameter pairs: The enum's complete wire↔case table.
     private func assertExhaustiveRoundTrip<T: Codable & Equatable>(_ pairs: [(wire: String, expected: T)]) throws {
