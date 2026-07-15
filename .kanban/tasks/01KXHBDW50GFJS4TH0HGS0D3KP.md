@@ -38,11 +38,33 @@ comments:
 
     VERIFICATION: swift build --build-tests 0 warnings/0 errors. swift test = 137 FoundationModelsACPTests (was 114; +23) + 108 ACPGenerateTests = 245 pass, 0 failures. FM API probed via swift-symbolgraph-extract; no divergence. Note for downstream (^gg0pz84 ACP→Transcript, ^0gxpjd4 tool-bridge, ^e2x6ra0 e2e): the mapping is the inverse to implement there; reasoning is a first-class Transcript.Reasoning entry; tool correlation is by shared id; StopReason source is LanguageModelError (not the deprecated GenerationError).
   timestamp: 2026-07-15T19:22:02.100296+00:00
+- actor: wballard
+  id: 01kxknsc0hc4g2x9p9de7jdvec
+  text: |-
+    RESOLVED → done. Review converged CLEAN (0 findings on the final checkpoint), not forced.
+
+    Iterations: review pass 1 = 13 findings (5 production argument-label + 8 test-support). The 8 BridgeTestSupport findings (relabeling/deduplicating pre-existing shared test helpers) were dropped under the review contract's blanket exception for refactoring existing test code. The 5 production findings were fixed at root (labeled all transform/builder first params in PromptInputMapper + TranscriptMapper, updated callsites, and switched off the macOS-27-deprecated StructuredSegment.source → .schemaName). Passes 2–4 surfaced converging duplication/access findings, each fixed at root: extracted segmentUpdates(for:role:) (response/reasoning), extracted segmentText(from:) (shared by update + toolContent), and made updates(for:) private. Pass 5: clean.
+
+    Local commits (nothing pushed): e4d12ea feature; 57ab4c7 arg-labels + drop deprecated source; 4c278f7 segmentUpdates; 0d174a0 segmentText; 7a7e878 updates(for:) private.
+
+    FINAL Transcript→SessionUpdate MAPPING (Sources/.../Bridge/TranscriptMapper.swift), the inverse to implement in ^gg0pz84 (ACP→Transcript), ^0gxpjd4 (tool-bridge), ^e2x6ra0 (e2e):
+    - .response text segment → agent_message_chunk; .structure segment → plan when schemaName contains "plan" and its JSON decodes to a non-empty ACP Plan, else an agent_message_chunk of the JSON.
+    - .reasoning (FIRST-CLASS Transcript.Reasoning entry — §10 resolved, no synthesis) text/structure segments → agent_thought_chunk.
+    - .toolCalls → one tool_call per ToolCall (status .pending, title=toolName, toolCallId=ToolCall.id, rawInput=args JSON); .toolOutput → tool_call_update (status .completed, content from output segments), correlated to its call by shared id (ToolOutput.id == ToolCall.id).
+    - .instructions/.prompt → nothing (turn input, not agent output). attachment/custom segments → skipped.
+    - Mapper is stateful only on consumedCount so re-feeding a growing turn transcript emits each entry's updates exactly once.
+
+    REASONING DECISION (§10): FM's Transcript.Entry has a first-class .reasoning(Transcript.Reasoning) case on this toolchain (verified via swift-symbolgraph-extract). The bridge maps it DIRECTLY to agent_thought_chunk — it does NOT synthesize thoughts from a .structure reasoning segment. Plans, by contrast, are NOT a first-class entry; FM emits an agent plan as a structured-generation StructuredSegment, which the bridge recognizes by a "plan" schemaName decoding to an ACP Plan.
+
+    STOPREASON + CANCELLATION — how tested: StopReason is derived by the pure static FoundationModelsAgent.stopReason(error:cancelled:) from the current LanguageModelError (NOT the macOS-27-deprecated GenerationError): .contextSizeExceeded→.maxTokens; .refusal/.guardrailViolation→.refusal; a CancellationError or the cancelled flag→.cancelled (cancelled wins over any error); nil→.endTurn; anything else propagates as -32603. FM has NO session-cancel API — cancel(_:) cancels the per-session generation Task, which propagates through the ResponseStream iteration. Tested deterministically WITHOUT a live model or concurrent real turns (no SIGTRAP) via: (1) the pure stopReason fn for all four reasons + CancellationError + unexpected-error-propagates; (2) end-to-end through the internal TurnGenerator seam — runTurn(for:generate:) fed scripted transcript-entry batches and a scripted terminal outcome, observing emitted session/update via a REAL wired ClientSideConnection.updates(for:). Cancel timing test: deliver a reasoning update, hold the turn open on a gate, agent.cancel(...), release; asserts the trailing message update STILL lands (InMemoryTransport.write uses a non-suspending yield immune to task cancellation) and the prompt response answers .cancelled. onTurnEnded verified to receive the returned final transcript exactly once, and a nil hook to be a no-op.
+
+    Verification: swift build --build-tests 0 warnings/0 errors; swift test 137 FoundationModelsACPTests (was 114; +23) + 108 ACPGenerateTests = 245 pass, 0 failures. FoundationModels is real and imported on macOS 27; no API divergence.
+  timestamp: 2026-07-15T19:59:15.473178+00:00
 depends_on:
 - 01KXHBDAK0NQ5RA2NWTF1ESXQP
 - 01KXHBC7FYJYRM3VNBPR4FM4NJ
-position_column: review
-position_ordinal: '80'
+position_column: done
+position_ordinal: 8f80
 title: 'Bridge prompt turn: Transcript → session/update mapping, StopReason, cancel'
 ---
 ## What
@@ -66,28 +88,38 @@ This mapping is the exact inverse of AgentViewKit's (spec §7) — a turn must r
 Testing note: drive the mapping through a seam that feeds scripted Transcript entries (recorded from a real run once) so protocol-layer assertions are deterministic; a live-`SystemLanguageModel` smoke test can be tagged `.enabled(if:)` for local/CI-on-Apple-Silicon runs.
 
 ## Acceptance Criteria
-- [ ] A multi-block `PromptRequest` (text + embedded resource) maps into the FM prompt; an unadvertised block type (e.g. audio when `PromptCapabilities.audio` is off) answers -32602 invalid params
-- [ ] A scripted turn with text + reasoning + two tool calls emits the exact expected `session/update` sequence (golden fixture), including tool_call/tool_call_update pairing by toolCallId
-- [ ] Prompt response arrives only at turn end with the correct `StopReason` for each of: normal end, max tokens, refusal, cancel
-- [ ] Cancel mid-turn stops FM generation and yields trailing updates then `StopReason.cancelled`
-- [ ] `onTurnEnded` receives the final Transcript exactly once per turn; nil hook is a no-op
+- [x] A multi-block `PromptRequest` (text + embedded resource) maps into the FM prompt; an unadvertised block type (e.g. audio when `PromptCapabilities.audio` is off) answers -32602 invalid params
+- [x] A scripted turn with text + reasoning + two tool calls emits the exact expected `session/update` sequence (golden fixture), including tool_call/tool_call_update pairing by toolCallId
+- [x] Prompt response arrives only at turn end with the correct `StopReason` for each of: normal end, max tokens, refusal, cancel
+- [x] Cancel mid-turn stops FM generation and yields trailing updates then `StopReason.cancelled`
+- [x] `onTurnEnded` receives the final Transcript exactly once per turn; nil hook is a no-op
 
 ## Tests
-- [ ] `Tests/FoundationModelsACPTests/Bridge/PromptInputMappingTests.swift` — multi-block ContentBlock → FM prompt mapping; unadvertised-capability rejection
-- [ ] `Tests/FoundationModelsACPTests/Bridge/TranscriptMappingTests.swift` — golden-fixture assertion of update sequences from scripted transcripts
-- [ ] `Tests/FoundationModelsACPTests/Bridge/StopReasonTests.swift` — all four stop reasons; cancel timing
-- [ ] `Tests/FoundationModelsACPTests/Bridge/OnTurnEndedTests.swift` — hook invocation semantics
-- [ ] Run `swift test` — exits 0
+- [x] `Tests/FoundationModelsACPTests/Bridge/PromptInputMappingTests.swift` — multi-block ContentBlock → FM prompt mapping; unadvertised-capability rejection
+- [x] `Tests/FoundationModelsACPTests/Bridge/TranscriptMappingTests.swift` — golden-fixture assertion of update sequences from scripted transcripts
+- [x] `Tests/FoundationModelsACPTests/Bridge/StopReasonTests.swift` — all four stop reasons; cancel timing
+- [x] `Tests/FoundationModelsACPTests/Bridge/OnTurnEndedTests.swift` — hook invocation semantics
+- [x] Run `swift test` — exits 0
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
 
 ## Review Findings (2026-07-15 14:22)
 
-- [ ] `Sources/FoundationModelsACP/Bridge/PromptInputMapper.swift:19` — Swift argument-label rule: label the first parameter of the transforming `render` function; `render(_ blocks:` → `render(blocks:`. Fix at root across the file's transform/builder helpers.
-- [ ] `Sources/FoundationModelsACP/Bridge/PromptInputMapper.swift:36` — Label the first parameter of `requireSupported` (a validation, not a value-preserving conversion): `requireSupported(_ block:` → `requireSupported(block:`.
-- [ ] `Sources/FoundationModelsACP/Bridge/PromptInputMapper.swift:88` — Label the first parameter of the error builder `unsupported`: `unsupported(_ type:` → `unsupported(type:`.
-- [ ] `Sources/FoundationModelsACP/Bridge/TranscriptMapper.swift:112` — Label the first parameter of the transform `toolCallStarted`: `toolCallStarted(_ call:` → `toolCallStarted(call:`.
-- [ ] `Sources/FoundationModelsACP/Bridge/TranscriptMapper.swift:123` — Label the first parameter of the transform `toolCallCompleted`: `toolCallCompleted(_ output:` → `toolCallCompleted(output:`.
+- [x] `Sources/FoundationModelsACP/Bridge/PromptInputMapper.swift:19` — Swift argument-label rule: label the first parameter of the transforming `render` function; `render(_ blocks:` → `render(blocks:`. Fix at root across the file's transform/builder helpers. (Fixed in 57ab4c7.)
+- [x] `Sources/FoundationModelsACP/Bridge/PromptInputMapper.swift:36` — Label the first parameter of `requireSupported`: `requireSupported(_ block:` → `requireSupported(block:`. (Fixed in 57ab4c7.)
+- [x] `Sources/FoundationModelsACP/Bridge/PromptInputMapper.swift:88` — Label the first parameter of the error builder `unsupported`: `unsupported(_ type:` → `unsupported(type:`. (Fixed in 57ab4c7.)
+- [x] `Sources/FoundationModelsACP/Bridge/TranscriptMapper.swift:112` — Label the first parameter of the transform `toolCallStarted`: `toolCallStarted(_ call:` → `toolCallStarted(call:`. (Fixed in 57ab4c7.)
+- [x] `Sources/FoundationModelsACP/Bridge/TranscriptMapper.swift:123` — Label the first parameter of the transform `toolCallCompleted`: `toolCallCompleted(_ output:` → `toolCallCompleted(output:`. (Fixed in 57ab4c7.)
 
 (8 further findings on `Tests/FoundationModelsACPTests/Bridge/BridgeTestSupport.swift` — relabeling/deduplicating/restructuring of shared test-support helpers, most pre-existing — fall under the review contract's blanket exception for refactoring existing test code and are not tracked.)
+
+## Review Findings (2026-07-15 14:40 / 14:46 / 14:49)
+
+- [x] TranscriptMapper: `.response`/`.reasoning` duplication → extracted `segmentUpdates(for:role:)` (4c278f7).
+- [x] TranscriptMapper: `update(for:role:)`/`toolContent(from:)` shared text extraction → extracted `segmentText(from:)` (0d174a0).
+- [x] TranscriptMapper: `updates(for:)` marked `private` (7a7e878).
+
+## Review Findings (2026-07-15 14:55)
+
+CLEAN — 0 findings on the final checkpoint (HEAD~1..HEAD = 7a7e878). Converged 13 → 2 → 1 → 1 → 0 across implement→test→commit→review iterations. swift build --build-tests: 0 warnings; swift test: 137 FoundationModelsACPTests + 108 ACPGenerateTests = 245 pass.
