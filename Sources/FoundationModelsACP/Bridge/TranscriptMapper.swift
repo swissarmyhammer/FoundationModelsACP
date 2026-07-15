@@ -57,9 +57,9 @@ struct TranscriptMapper {
         case .instructions, .prompt:
             return []
         case .response(let response):
-            return response.segments.compactMap { update(for: $0, role: .message) }
+            return segmentUpdates(for: response.segments, role: .message)
         case .reasoning(let reasoning):
-            return reasoning.segments.compactMap { update(for: $0, role: .thought) }
+            return segmentUpdates(for: reasoning.segments, role: .thought)
         case .toolCalls(let calls):
             return calls.map(toolCallStarted(call:))
         case .toolOutput(let output):
@@ -67,6 +67,20 @@ struct TranscriptMapper {
         @unknown default:
             return []
         }
+    }
+
+    /// Maps a segment group into its updates under one role.
+    ///
+    /// - Parameters:
+    ///   - segments: The response's or reasoning's segments.
+    ///   - role: Whether the segments carry the message or reasoning.
+    /// - Returns: The segments' updates, in order, skipping segments with no
+    ///   chunk form.
+    private static func segmentUpdates(
+        for segments: [Transcript.Segment],
+        role: SegmentRole
+    ) -> [SessionUpdate] {
+        segments.compactMap { update(for: $0, role: role) }
     }
 
     /// Maps one response or reasoning segment into its update, if any.
