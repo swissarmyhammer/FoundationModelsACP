@@ -51,11 +51,15 @@ comments:
 
     Also recorded in the findings section: Models.generated.swift (262,199 bytes) exceeds the review engine's 262,144-byte batch cap and cannot be scanned by the engine — reviewed as machine output via generator tests instead. Suite now 59 tests, all green, zero warnings.
   timestamp: 2026-07-15T02:27:01.049340+00:00
+- actor: wballard
+  id: 01kxhva2n2fpcjec61nbcqeajr
+  text: 'Review pass 2 findings (4) fixed in commit 093edd6: schema-path validated tree-relative like output-dir via shared requireTreeRelative helper (NOTE: acp-generate now rejects absolute schema/output paths — run it from the package root with relative paths); toolPrefix constant for all CLI diagnostics; doc-comment parameter labels corrected in both test files. Review pass 3 clean (0 findings on both changed scopes). Task complete → done. Final: 3 local commits (d8ce673 feature, c4e44ce pass-1 fixes, 093edd6 pass-2 fixes), swift test 59/59 green, zero warnings, regeneration idempotent.'
+  timestamp: 2026-07-15T02:57:16.962949+00:00
 depends_on:
 - 01KXHB7BRWP3WN7SNQ1342ZXED
 - 01KXHB7QEVKA0ZDJCRAZWTTEGJ
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8380'
 title: 'Codegen generator core: structs, ID newtypes, optional/forgiving decoding'
 ---
 ## What
