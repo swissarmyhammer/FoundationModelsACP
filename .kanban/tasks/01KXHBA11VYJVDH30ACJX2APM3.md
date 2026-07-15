@@ -17,10 +17,14 @@ comments:
   id: 01kxk79y78b2hdh82p9r7c3e7k
   text: 'really-done: verification green (swift build exit 0; swift run acp-generate no-op, Generated/ byte-identical/git clean; swift test exit 0). Adversarial double-check returned REVISE with 2 findings, both fixed same iteration:\n\n1. (medium) InitializeResponse null-omission was never asserted — expectStableRoundTrip (decode→encode→decode) normalizes null→nil on the second decode, so a spurious `agentInfo`/`_meta` null would have been masked. Added initializeResponseOmitsAbsentOptionalsNotEncodedAsNull (encodes InitializeResponse(protocolVersion:.v1), asserts agentInfo/_meta keys absent + !containsNull), mirroring the request-side test.\n2. (low) sessionUpdateFixturesCoverEveryKnownVariant comment overstated the guarantee (hand-typed literal, not type-anchored; SessionUpdate has associated values so cannot be CaseIterable). Reworded comment to state what it actually enforces and strengthened it to also assert every fixture decodes to a recognized variant (not .unknown).\n\nswift test after fixes: 108 ACPGenerateTests + 91 FoundationModelsACPTests = 199, exit 0, zero failures, zero warnings.'
   timestamp: 2026-07-15T15:46:09.768483+00:00
+- actor: wballard
+  id: 01kxk7ja8wnevetz6etj32h6nw
+  text: 'Review pass 1 (review sha HEAD~1..HEAD): CLEAN — 0 findings, 14 rules attempted, 0 failed. Task moved doing → review → done. Converged in 1 iteration (no code-fix passes needed); the double-check REVISE findings were resolved during implement before the checkpoint commit, so the review engine saw a clean tree.\n\nFINAL STATE:\n- No generator/production changes. Full v1 generated surface was already committed, compiling, and byte-idempotent (swift run acp-generate = no-op, git clean). Acceptance criterion "Generated/ compiles with no hand edits" verified as pre-existing.\n- New tests only, all hand-written clean: Tests/FoundationModelsACPTests/WireFixtureSupport.swift (shared helpers), WireConformanceTests.swift (17 tests), MetaPreservationTests.swift (4 tests).\n- Coverage added: initialize req/resp round-trip + protocolVersion asserted as bare integer .number(1); unknown capability fields degrade to defaults; absent optionals omitted / no null on encode (both request AND response sides); session/new; session/prompt over all 5 StopReason values; session/update every variant (11, data-driven) + recognized-variant guard + SessionNotification wrapper; tool_call lifecycle (pending→in_progress→completed, 3 cases); RequestError over all 7 codes (-32700..-32603, -32000 authRequired, -32002 resourceNotFound) with structured data proven to live in `data` not the message; _meta (incl. nested null) round-trips untouched on request/response/notification.\n- swift test: 108 ACPGenerateTests + 91 FoundationModelsACPTests = 199, exit 0, zero failures, zero warnings.\n- Commit: 625ec20 (local only, not pushed).'
+  timestamp: 2026-07-15T15:50:44.252700+00:00
 depends_on:
 - 01KXHB9KHBC38R4V0C82EM38TY
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: 8a80
 title: Generate and check in the full v1 type surface + wire-conformance tests
 ---
 ## What
