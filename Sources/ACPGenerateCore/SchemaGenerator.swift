@@ -69,7 +69,7 @@ public struct SchemaGenerator: Sendable {
                 "unstable routing manifest requires the stable routing manifest"
             )
         }
-        let schema = try decodeJSON(schemaJSON, context: "schema document")
+        let schema = try decodeJSON(data: schemaJSON, context: "schema document")
         guard let definitions = schema["$defs"]?.objectValue else {
             throw GeneratorError.invalidSchema("missing top-level $defs object")
         }
@@ -86,7 +86,7 @@ public struct SchemaGenerator: Sendable {
                 continue
             case .stringIdentifier:
                 identifiers.append(
-                    Emitter.identifierNewtype(name: emittedName(name), documentation: documentation)
+                    Emitter.identifierNewtype(name: emittedName(name: name), documentation: documentation)
                 )
             case .stringEnum:
                 unions.append(
@@ -99,7 +99,7 @@ public struct SchemaGenerator: Sendable {
             case .deferredUnion(let keyword):
                 placeholders.append(
                     Emitter.placeholder(
-                        name: emittedName(name),
+                        name: emittedName(name: name),
                         reason: "Placeholder seam: schema `\(keyword)` union, decoded as raw JSON until a later generator stage replaces it.",
                         documentation: documentation
                     )
@@ -107,7 +107,7 @@ public struct SchemaGenerator: Sendable {
             case .freeform:
                 placeholders.append(
                     Emitter.placeholder(
-                        name: emittedName(name),
+                        name: emittedName(name: name),
                         reason: "Free-form by schema: the definition places no shape constraints, so raw JSON is its final representation.",
                         documentation: documentation
                     )
@@ -117,7 +117,7 @@ public struct SchemaGenerator: Sendable {
             }
         }
 
-        try validateEmptyInstanceDefaults(structModels)
+        try validateEmptyInstanceDefaults(models: structModels)
 
         var files = [
             GeneratedFile(
@@ -194,7 +194,7 @@ public struct SchemaGenerator: Sendable {
     ///
     /// - Parameter name: The schema definition name.
     /// - Returns: The renamed Swift type name, or the name unchanged.
-    private func emittedName(_ name: String) -> String {
+    private func emittedName(name: String) -> String {
         config.typeRenames[name] ?? name
     }
 
@@ -208,7 +208,7 @@ public struct SchemaGenerator: Sendable {
     ///   - context: Which document, for error messages.
     /// - Returns: The parsed JSON value.
     /// - Throws: `GeneratorError.invalidSchema` when the bytes are not JSON.
-    private func decodeJSON(_ data: Data, context: String) throws -> JSONValue {
+    private func decodeJSON(data: Data, context: String) throws -> JSONValue {
         do {
             return try JSONDecoder().decode(JSONValue.self, from: data)
         } catch {
@@ -265,9 +265,9 @@ public struct SchemaGenerator: Sendable {
                 documentation: variant["description"]?.stringValue
             )
         }
-        try validateCaseNames(cases.map(\.swiftName), context: name)
+        try validateCaseNames(names: cases.map(\.swiftName), context: name)
         return StringEnumModel(
-            name: emittedName(name),
+            name: emittedName(name: name),
             documentation: fragment["description"]?.stringValue,
             cases: cases
         )
@@ -318,7 +318,7 @@ public struct SchemaGenerator: Sendable {
                 guard allOf.count == 1, let reference = allOf[0]["$ref"]?.stringValue else {
                     throw GeneratorError.unsupportedShape(context: context, detail: "expected allOf to be a single payload $ref")
                 }
-                payloadType = try referencedTypeName(reference, context: context)
+                payloadType = try referencedTypeName(reference: reference, context: context)
             }
             return UnionCaseModel(
                 tag: tag,
@@ -330,12 +330,12 @@ public struct SchemaGenerator: Sendable {
         guard let discriminator else {
             throw GeneratorError.unsupportedShape(context: name, detail: "empty oneOf")
         }
-        try validateCaseNames(cases.map(\.swiftName), context: name)
+        try validateCaseNames(names: cases.map(\.swiftName), context: name)
         // The discriminator becomes the CodingKeys case, so it must itself
         // be a valid Swift identifier.
         _ = try swiftCaseName(fromWire: discriminator, context: "\(name) discriminator")
         return TaggedUnionModel(
-            name: emittedName(name),
+            name: emittedName(name: name),
             documentation: fragment["description"]?.stringValue,
             discriminator: discriminator,
             cases: cases
@@ -390,7 +390,7 @@ public struct SchemaGenerator: Sendable {
     ///   - names: The Swift case names in schema order.
     ///   - context: The definition name for error messages.
     /// - Throws: `GeneratorError.unsupportedShape` on any collision.
-    private func validateCaseNames(_ names: [String], context: String) throws {
+    private func validateCaseNames(names: [String], context: String) throws {
         var seen = Set<String>()
         for name in names {
             guard name != "unknown" else {
@@ -428,7 +428,7 @@ public struct SchemaGenerator: Sendable {
             (emissionRank(of: lhs), lhs.wireName) < (emissionRank(of: rhs), rhs.wireName)
         }
         return StructModel(
-            name: emittedName(name),
+            name: emittedName(name: name),
             documentation: fragment["description"]?.stringValue,
             properties: models
         )
@@ -467,50 +467,17 @@ public struct SchemaGenerator: Sendable {
     ) throws -> PropertyModel {
         let context = "\(definition).\(wireName)"
         let override = config.wireInvariantFields[context]
-        let resolved = try resolveType(fragment, override: override, context: context)
-
-        let hasDefaultOnError = fragment[Self.defaultOnErrorKey]?.boolValue == true
-        let skipsInvalidItems = fragment[Self.skipInvalidItemsKey]?.boolValue == true
-
-        var defaultExpression: String?
-        var defaultsToEmptyInstance = false
-        var objectDefaultMembers: [String: JSONValue]?
-        if let rawDefault = fragment["default"], rawDefault != .null {
-            (defaultExpression, defaultsToEmptyInstance) = try defaultExpressionParts(
-                for: rawDefault,
-                type: resolved,
-                context: context
-            )
-            if defaultsToEmptyInstance {
-                objectDefaultMembers = rawDefault.objectValue
-            }
-        }
-        let isOptional = defaultExpression == nil && (!isRequired || resolved.nullable)
-
-        let strategy: DecodeStrategy
-        if override != nil {
-            // Wire invariants win over forgiving annotations: a relative path
-            // or 0-based line must stay a decode-time error.
-            strategy = .strict
-        } else if skipsInvalidItems {
-            guard resolved.element != nil else {
-                throw GeneratorError.unsupportedShape(
-                    context: context,
-                    detail: "\(Self.skipInvalidItemsKey) on a non-array field"
-                )
-            }
-            strategy = .forgivingArray
-        } else if hasDefaultOnError {
-            guard isOptional || defaultExpression != nil else {
-                throw GeneratorError.unsupportedShape(
-                    context: context,
-                    detail: "\(Self.defaultOnErrorKey) on a required field with no default"
-                )
-            }
-            strategy = .forgivingScalar
-        } else {
-            strategy = .strict
-        }
+        let resolved = try resolveType(fragment: fragment, override: override, context: context)
+        let defaults = try defaultParts(of: fragment, type: resolved, context: context)
+        let isOptional = defaults.expression == nil && (!isRequired || resolved.nullable)
+        let strategy = try decodeStrategy(
+            of: fragment,
+            resolved: resolved,
+            override: override,
+            isOptional: isOptional,
+            hasDefault: defaults.expression != nil,
+            context: context
+        )
 
         return PropertyModel(
             wireName: wireName,
@@ -519,12 +486,100 @@ public struct SchemaGenerator: Sendable {
             elementType: resolved.element,
             isOptional: isOptional,
             isRequired: isRequired,
-            defaultExpression: defaultExpression,
-            defaultsToEmptyInstance: defaultsToEmptyInstance,
-            objectDefaultMembers: objectDefaultMembers,
+            defaultExpression: defaults.expression,
+            defaultsToEmptyInstance: defaults.emptyInstance,
+            objectDefaultMembers: defaults.objectMembers,
             strategy: strategy,
             documentation: fragment["description"]?.stringValue
         )
+    }
+
+    /// The parsed `default` facets of a property fragment.
+    private struct DefaultParts {
+        /// The rendered Swift default expression, if any.
+        let expression: String?
+
+        /// Whether the expression is a `Type()` empty instance.
+        let emptyInstance: Bool
+
+        /// The schema default's object members when `emptyInstance`.
+        let objectMembers: [String: JSONValue]?
+    }
+
+    /// Parses a property fragment's schema `default`, if any.
+    ///
+    /// - Parameters:
+    ///   - fragment: The property's schema fragment.
+    ///   - type: The property's resolved type.
+    ///   - context: `Definition.field` for error messages.
+    /// - Returns: The parsed default facets; all-empty when absent.
+    /// - Throws: `GeneratorError.unsupportedShape` for un-renderable
+    ///   defaults.
+    private func defaultParts(
+        of fragment: JSONValue,
+        type: ResolvedType,
+        context: String
+    ) throws -> DefaultParts {
+        guard let rawDefault = fragment["default"], rawDefault != .null else {
+            return DefaultParts(expression: nil, emptyInstance: false, objectMembers: nil)
+        }
+        let (expression, emptyInstance) = try defaultExpressionParts(
+            for: rawDefault,
+            type: type,
+            context: context
+        )
+        return DefaultParts(
+            expression: expression,
+            emptyInstance: emptyInstance,
+            objectMembers: emptyInstance ? rawDefault.objectValue : nil
+        )
+    }
+
+    /// Chooses how the generated `init(from:)` decodes a property.
+    ///
+    /// Wire invariants win over forgiving annotations: a relative path or
+    /// 0-based line must stay a decode-time error.
+    ///
+    /// - Parameters:
+    ///   - fragment: The property's schema fragment.
+    ///   - resolved: The property's resolved type.
+    ///   - override: The wire-invariant newtype, if configured.
+    ///   - isOptional: Whether the property is `Optional` in Swift.
+    ///   - hasDefault: Whether the property carries a schema default.
+    ///   - context: `Definition.field` for error messages.
+    /// - Returns: The decode strategy.
+    /// - Throws: `GeneratorError.unsupportedShape` when a forgiving
+    ///   annotation cannot apply to the field's shape.
+    private func decodeStrategy(
+        of fragment: JSONValue,
+        resolved: ResolvedType,
+        override: GeneratorConfig.InvariantType?,
+        isOptional: Bool,
+        hasDefault: Bool,
+        context: String
+    ) throws -> DecodeStrategy {
+        guard override == nil else {
+            return .strict
+        }
+        if fragment[Self.skipInvalidItemsKey]?.boolValue == true {
+            guard resolved.element != nil else {
+                throw GeneratorError.unsupportedShape(
+                    context: context,
+                    detail: "\(Self.skipInvalidItemsKey) on a non-array field"
+                )
+            }
+            return .forgivingArray
+        }
+        if fragment[Self.defaultOnErrorKey]?.boolValue == true {
+            guard isOptional || hasDefault else {
+                throw GeneratorError.unsupportedShape(
+                    context: context,
+                    detail: "\(Self.defaultOnErrorKey) on a required field with no default"
+                )
+            }
+            return .forgivingScalar
+        }
+        return .strict
     }
 
     /// Derives the Swift property name from the wire name.
@@ -549,42 +604,19 @@ public struct SchemaGenerator: Sendable {
     /// - Returns: The resolved type.
     /// - Throws: `GeneratorError.unsupportedShape` for un-modelable fragments.
     private func resolveType(
-        _ fragment: JSONValue,
+        fragment: JSONValue,
         override: GeneratorConfig.InvariantType?,
         context: String
     ) throws -> ResolvedType {
         guard let members = fragment.objectValue else {
             throw GeneratorError.unsupportedShape(context: context, detail: "fragment is not a JSON object")
         }
-
-        if let reference = members["$ref"]?.stringValue {
-            return ResolvedType(base: try referencedTypeName(reference, context: context), element: nil, nullable: false)
-        }
-        if let allOf = members["allOf"]?.arrayValue {
-            guard allOf.count == 1 else {
-                throw GeneratorError.unsupportedShape(context: context, detail: "allOf with \(allOf.count) entries")
-            }
-            return try resolveType(allOf[0], override: override, context: context)
-        }
-        if let anyOf = members["anyOf"]?.arrayValue {
-            let nonNull = anyOf.filter { $0["type"]?.stringValue != "null" }
-            if anyOf.count == 2, nonNull.count == 1 {
-                var inner = try resolveType(nonNull[0], override: override, context: context)
-                inner.nullable = true
-                return inner
-            }
-            if anyOf.count == 1 {
-                return try resolveType(anyOf[0], override: override, context: context)
-            }
-            // Inline anonymous union — the tagged-union stage's seam.
-            return ResolvedType(base: "JSONValue", element: nil, nullable: false)
-        }
-        if members["oneOf"] != nil {
-            return ResolvedType(base: "JSONValue", element: nil, nullable: false)
+        if let composite = try resolveCompositeType(members: members, override: override, context: context) {
+            return composite
         }
 
         var nullable = false
-        var typeName: String?
+        let typeName: String
         switch members["type"] {
         case .some(.string(let single)):
             typeName = single
@@ -603,12 +635,82 @@ public struct SchemaGenerator: Sendable {
         case let other:
             throw GeneratorError.unsupportedShape(context: context, detail: "unhandled type \(String(describing: other))")
         }
+        return try resolveScalarType(
+            named: typeName,
+            nullable: nullable,
+            members: members,
+            override: override,
+            context: context
+        )
+    }
 
+    /// Resolves a fragment's composite forms: `$ref`, `allOf`, `anyOf`, and
+    /// `oneOf`.
+    ///
+    /// - Parameters:
+    ///   - members: The fragment's object members.
+    ///   - override: The wire-invariant newtype the scalar position maps to.
+    ///   - context: `Definition.field` for error messages.
+    /// - Returns: The resolved type, or `nil` when the fragment is not a
+    ///   composite and scalar resolution should proceed.
+    /// - Throws: `GeneratorError.unsupportedShape` for un-modelable
+    ///   composites.
+    private func resolveCompositeType(
+        members: [String: JSONValue],
+        override: GeneratorConfig.InvariantType?,
+        context: String
+    ) throws -> ResolvedType? {
+        if let reference = members["$ref"]?.stringValue {
+            return ResolvedType(base: try referencedTypeName(reference: reference, context: context), element: nil, nullable: false)
+        }
+        if let allOf = members["allOf"]?.arrayValue {
+            guard allOf.count == 1 else {
+                throw GeneratorError.unsupportedShape(context: context, detail: "allOf with \(allOf.count) entries")
+            }
+            return try resolveType(fragment: allOf[0], override: override, context: context)
+        }
+        if let anyOf = members["anyOf"]?.arrayValue {
+            let nonNull = anyOf.filter { $0["type"]?.stringValue != "null" }
+            if anyOf.count == 2, nonNull.count == 1 {
+                var inner = try resolveType(fragment: nonNull[0], override: override, context: context)
+                inner.nullable = true
+                return inner
+            }
+            if anyOf.count == 1 {
+                return try resolveType(fragment: anyOf[0], override: override, context: context)
+            }
+            // Inline anonymous union — the tagged-union stage's seam.
+            return ResolvedType(base: "JSONValue", element: nil, nullable: false)
+        }
+        if members["oneOf"] != nil {
+            return ResolvedType(base: "JSONValue", element: nil, nullable: false)
+        }
+        return nil
+    }
+
+    /// Resolves a scalar or array `type` keyword to a Swift type.
+    ///
+    /// - Parameters:
+    ///   - typeName: The JSON schema type keyword (e.g. `string`).
+    ///   - nullable: Whether the wire value admits JSON `null`.
+    ///   - members: The fragment's object members, for `items`.
+    ///   - override: The wire-invariant newtype the scalar position maps to.
+    ///   - context: `Definition.field` for error messages.
+    /// - Returns: The resolved type.
+    /// - Throws: `GeneratorError.unsupportedShape` for unknown keywords and
+    ///   un-modelable arrays.
+    private func resolveScalarType(
+        named typeName: String,
+        nullable: Bool,
+        members: [String: JSONValue],
+        override: GeneratorConfig.InvariantType?,
+        context: String
+    ) throws -> ResolvedType {
         switch typeName {
         case "string":
-            return ResolvedType(base: try scalarName("String", override: override, allowed: .absolutePath, context: context), element: nil, nullable: nullable)
+            return ResolvedType(base: try scalarName(plain: "String", override: override, allowed: .absolutePath, context: context), element: nil, nullable: nullable)
         case "integer":
-            return ResolvedType(base: try scalarName("Int", override: override, allowed: .lineNumber, context: context), element: nil, nullable: nullable)
+            return ResolvedType(base: try scalarName(plain: "Int", override: override, allowed: .lineNumber, context: context), element: nil, nullable: nullable)
         case "boolean":
             return ResolvedType(base: "Bool", element: nil, nullable: nullable)
         case "number":
@@ -620,13 +722,13 @@ public struct SchemaGenerator: Sendable {
             guard let items = members["items"] else {
                 throw GeneratorError.unsupportedShape(context: context, detail: "array without items")
             }
-            let element = try resolveType(items, override: override, context: context)
+            let element = try resolveType(fragment: items, override: override, context: context)
             guard element.element == nil else {
                 throw GeneratorError.unsupportedShape(context: context, detail: "nested arrays are not modeled")
             }
             return ResolvedType(base: "[\(element.base)]", element: element.base, nullable: nullable)
         default:
-            throw GeneratorError.unsupportedShape(context: context, detail: "unhandled scalar type \"\(typeName ?? "nil")\"")
+            throw GeneratorError.unsupportedShape(context: context, detail: "unhandled scalar type \"\(typeName)\"")
         }
     }
 
@@ -641,7 +743,7 @@ public struct SchemaGenerator: Sendable {
     /// - Throws: `GeneratorError.unsupportedShape` when the configured
     ///   override does not fit the scalar (a stale config entry).
     private func scalarName(
-        _ plain: String,
+        plain: String,
         override: GeneratorConfig.InvariantType?,
         allowed: GeneratorConfig.InvariantType,
         context: String
@@ -663,12 +765,12 @@ public struct SchemaGenerator: Sendable {
     ///   - context: `Definition.field` for error messages.
     /// - Returns: The referenced type's emitted name.
     /// - Throws: `GeneratorError.unsupportedShape` for external references.
-    private func referencedTypeName(_ reference: String, context: String) throws -> String {
+    private func referencedTypeName(reference: String, context: String) throws -> String {
         let prefix = "#/$defs/"
         guard reference.hasPrefix(prefix) else {
             throw GeneratorError.unsupportedShape(context: context, detail: "unsupported $ref \"\(reference)\"")
         }
-        return emittedName(String(reference.dropFirst(prefix.count)))
+        return emittedName(name: String(reference.dropFirst(prefix.count)))
     }
 
     // MARK: - Defaults
@@ -732,7 +834,7 @@ public struct SchemaGenerator: Sendable {
     /// - Throws: `GeneratorError.unsupportedShape` when a `Type()` default
     ///   points at a non-generated or not-fully-defaulted type, or when the
     ///   schema's default object diverges from the target's own defaults.
-    private func validateEmptyInstanceDefaults(_ models: [StructModel]) throws {
+    private func validateEmptyInstanceDefaults(models: [StructModel]) throws {
         let byName = Dictionary(uniqueKeysWithValues: models.map { ($0.name, $0) })
         for model in models {
             for property in model.properties where property.defaultsToEmptyInstance {
@@ -780,7 +882,7 @@ public struct SchemaGenerator: Sendable {
         }
         for (wireName, value) in members.sorted(by: { $0.key < $1.key }) {
             try validateDefaultMember(
-                value,
+                value: value,
                 wireName: wireName,
                 target: target,
                 targetName: targetName,
@@ -804,7 +906,7 @@ public struct SchemaGenerator: Sendable {
     ///   - structsByName: All generated struct models by emitted name.
     /// - Throws: `GeneratorError.unsupportedShape` on any mismatch.
     private func validateDefaultMember(
-        _ value: JSONValue,
+        value: JSONValue,
         wireName: String,
         target: StructModel,
         targetName: String,
@@ -931,12 +1033,12 @@ extension SchemaGenerator {
         metaJSON: Data,
         unstableMetaJSON: Data?
     ) throws -> GeneratedFile {
-        let manifest = try parseRoutingManifest(metaJSON, context: "routing manifest")
+        let manifest = try parseRoutingManifest(data: metaJSON, context: "routing manifest")
         let stable = try stableMethodModels(manifest: manifest, routes: try schemaRoutes(from: definitions))
         var declarations = [Emitter.methodTableDeclaration(stable)]
         if let unstableMetaJSON {
             let unstableManifest = try parseRoutingManifest(
-                unstableMetaJSON,
+                data: unstableMetaJSON,
                 context: "unstable routing manifest"
             )
             declarations.append(
@@ -962,8 +1064,8 @@ extension SchemaGenerator {
     ///   - context: Which manifest, for error messages.
     /// - Returns: The parsed manifest.
     /// - Throws: `GeneratorError.invalidSchema` for any shape deviation.
-    private func parseRoutingManifest(_ data: Data, context: String) throws -> RoutingManifest {
-        let manifest = try decodeJSON(data, context: context)
+    private func parseRoutingManifest(data: Data, context: String) throws -> RoutingManifest {
+        let manifest = try decodeJSON(data: data, context: context)
         guard let members = manifest.objectValue else {
             throw GeneratorError.invalidSchema("\(context) is not a JSON object")
         }
@@ -980,7 +1082,7 @@ extension SchemaGenerator {
             guard let group = members[key]?.objectValue else {
                 throw GeneratorError.invalidSchema("\(context) is missing routing group \"\(key)\"")
             }
-            methodsBySide[side] = try parseRoutingGroup(group, key: key, context: context)
+            methodsBySide[side] = try parseRoutingGroup(group: group, key: key, context: context)
         }
         return RoutingManifest(methodsBySide: methodsBySide)
     }
@@ -995,7 +1097,7 @@ extension SchemaGenerator {
     /// - Throws: `GeneratorError.invalidSchema` on a non-string value or a
     ///   wire method routed twice.
     private func parseRoutingGroup(
-        _ group: [String: JSONValue],
+        group: [String: JSONValue],
         key: String,
         context: String
     ) throws -> [String: String] {
@@ -1083,7 +1185,7 @@ extension SchemaGenerator {
                     side: side,
                     definitionNames: definitionNames
                 )
-                try registerHandlerName(model.handlerName, side: side, in: &handlerNames, label: "handler")
+                try registerHandlerName(handlerName: model.handlerName, side: side, in: &handlerNames, label: "handler")
                 models.append(model)
             }
         }
@@ -1150,11 +1252,11 @@ extension SchemaGenerator {
             let base = String(requests[0].dropLast(Self.requestSuffix.count))
             return MethodModel(
                 wireMethod: wireMethod,
-                handlerName: try swiftCaseName(fromWire: lowerFirst(base), context: context),
+                handlerName: try swiftCaseName(fromWire: lowerFirst(name: base), context: context),
                 side: side,
                 kind: .request,
-                paramsTypeName: emittedName(requests[0]),
-                resultTypeName: emittedName(responses[0]),
+                paramsTypeName: emittedName(name: requests[0]),
+                resultTypeName: emittedName(name: responses[0]),
                 deprecationMessage: deprecationMessage
             )
         }
@@ -1164,7 +1266,7 @@ extension SchemaGenerator {
                 handlerName: try swiftCaseName(fromWire: routingKey, context: context),
                 side: side,
                 kind: .notification,
-                paramsTypeName: emittedName(notifications[0]),
+                paramsTypeName: emittedName(name: notifications[0]),
                 resultTypeName: nil,
                 deprecationMessage: deprecationMessage
             )
@@ -1204,7 +1306,7 @@ extension SchemaGenerator {
                     fromWire: routingKey,
                     context: "unstable method \(wireMethod)"
                 )
-                try registerHandlerName(handlerName, side: side, in: &handlerNames, label: "unstable handler")
+                try registerHandlerName(handlerName: handlerName, side: side, in: &handlerNames, label: "unstable handler")
                 models.append(
                     UnstableMethodModel(wireMethod: wireMethod, handlerName: handlerName, side: side)
                 )
@@ -1226,7 +1328,7 @@ extension SchemaGenerator {
     ///     for the error message.
     /// - Throws: `GeneratorError.invalidSchema` when the name is taken.
     private func registerHandlerName(
-        _ handlerName: String,
+        handlerName: String,
         side: MethodSide,
         in seen: inout Set<String>,
         label: String
@@ -1242,7 +1344,7 @@ extension SchemaGenerator {
     ///
     /// - Parameter name: The Pascal-case base name (e.g. `NewSession`).
     /// - Returns: The lower-camel form (e.g. `newSession`).
-    private func lowerFirst(_ name: String) -> String {
+    private func lowerFirst(name: String) -> String {
         guard let first = name.first else { return name }
         return first.lowercased() + name.dropFirst()
     }
