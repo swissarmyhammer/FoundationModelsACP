@@ -80,6 +80,7 @@ public struct SchemaGenerator: Sendable {
 
         var identifiers: [String] = []
         var structModels: [StructModel] = []
+        var modelDeclarations: [String] = []
         var unions: [String] = []
         var placeholders: [String] = []
 
@@ -100,6 +101,14 @@ public struct SchemaGenerator: Sendable {
                 unions.append(
                     Emitter.taggedUnionDeclaration(try taggedUnionModel(name: name, fragment: fragment))
                 )
+            case .discriminatedUnion:
+                unions.append(
+                    Emitter.discriminatedUnionDeclaration(try discriminatedUnionModel(name: name, fragment: fragment))
+                )
+            case .objectValueUnion:
+                let model = try objectValueUnionModel(name: name, fragment: fragment)
+                structModels.append(model.base)
+                modelDeclarations.append(Emitter.objectValueUnionDeclaration(model))
             case .deferredUnion(let keyword):
                 placeholders.append(
                     Emitter.placeholder(
@@ -117,7 +126,9 @@ public struct SchemaGenerator: Sendable {
                     )
                 )
             case .objectStruct:
-                structModels.append(try structModel(name: name, fragment: fragment))
+                let model = try structModel(name: name, fragment: fragment)
+                structModels.append(model)
+                modelDeclarations.append(Emitter.structDeclaration(model))
             }
         }
 
@@ -130,7 +141,7 @@ public struct SchemaGenerator: Sendable {
             ),
             GeneratedFile(
                 name: "Models.generated.swift",
-                contents: Emitter.file(declarations: structModels.map(Emitter.structDeclaration), namespace: namespace)
+                contents: Emitter.file(declarations: modelDeclarations, namespace: namespace)
             ),
             GeneratedFile(
                 name: "Unions.generated.swift",
@@ -191,6 +202,10 @@ public struct SchemaGenerator: Sendable {
     /// The schema keyword pinning a member to a single value.
     private static let constKey = "const"
 
+    /// The schema keyword naming a variant, used to name a discriminator-less
+    /// default union case.
+    private static let titleKey = "title"
+
     /// The schema keyword listing an object's required members.
     private static let requiredKey = "required"
 
@@ -218,8 +233,14 @@ public struct SchemaGenerator: Sendable {
             }
             return try classifyOneOf(name: name, variants: variants)
         }
-        for keyword in [Self.anyOfKey, Self.enumKey] where members[keyword] != nil {
-            return .deferredUnion(keyword: keyword)
+        if members[Self.anyOfKey] != nil {
+            guard let variants = members[Self.anyOfKey]?.arrayValue else {
+                throw GeneratorError.unsupportedShape(context: name, detail: "\(Self.anyOfKey) is not an array")
+            }
+            return classifyAnyOf(name: name, members: members, variants: variants)
+        }
+        if members[Self.enumKey] != nil {
+            return .deferredUnion(keyword: Self.enumKey)
         }
         switch members[Self.typeKey]?.stringValue {
         case "object":
@@ -319,6 +340,43 @@ public struct SchemaGenerator: Sendable {
         )
     }
 
+    /// Distinguishes the `anyOf` families this stage emits from those still
+    /// deferred to a later stage.
+    ///
+    /// - Parameters:
+    ///   - name: The definition's schema name.
+    ///   - members: The definition's object members.
+    ///   - variants: The `anyOf` entries.
+    /// - Returns: `.objectValueUnion` for an object that also carries a value
+    ///   union, `.discriminatedUnion` for a discriminated `$ref`-payload union
+    ///   with a default variant, or `.deferredUnion` for every other `anyOf`.
+    private func classifyAnyOf(
+        name: String,
+        members: [String: JSONValue],
+        variants: [JSONValue]
+    ) -> DefinitionKind {
+        if members[Self.typeKey]?.stringValue == "object", members[Self.propertiesKey] != nil {
+            return .objectValueUnion
+        }
+        if variants.contains(where: hasConstDiscriminator) {
+            return .discriminatedUnion
+        }
+        return .deferredUnion(keyword: Self.anyOfKey)
+    }
+
+    /// Reports whether an `anyOf` variant pins a `const` discriminator member.
+    ///
+    /// A `const`-pinned inline property is the marker of a discriminated-union
+    /// variant, distinguishing `McpServer`-shaped unions from the scalar,
+    /// envelope, and payload-only `anyOf` unions that stay deferred.
+    ///
+    /// - Parameter variant: The `anyOf` variant fragment.
+    /// - Returns: `true` when some inline property carries a `const` value.
+    private func hasConstDiscriminator(_ variant: JSONValue) -> Bool {
+        let properties = variant[Self.propertiesKey]?.objectValue ?? [:]
+        return properties.values.contains { $0[Self.constKey] != nil }
+    }
+
     /// Builds the emission model for a string-enum definition.
     ///
     /// - Parameters:
@@ -366,21 +424,7 @@ public struct SchemaGenerator: Sendable {
         var discriminator: String?
         let cases = try variants.enumerated().map { index, variant in
             let context = "\(name) variant \(index)"
-            guard let properties = variant[Self.propertiesKey]?.objectValue, properties.count == 1,
-                let (key, keyFragment) = properties.first
-            else {
-                throw GeneratorError.unsupportedShape(
-                    context: context,
-                    detail: "expected exactly one inline property (the discriminator)"
-                )
-            }
-            guard let tag = keyFragment[Self.constKey]?.stringValue else {
-                throw GeneratorError.unsupportedShape(context: context, detail: "discriminator \(key) has no \(Self.constKey) value")
-            }
-            let required = (variant[Self.requiredKey]?.arrayValue ?? []).compactMap(\.stringValue)
-            guard required == [key] else {
-                throw GeneratorError.unsupportedShape(context: context, detail: "expected \(Self.requiredKey) to be exactly [\(key)]")
-            }
+            let (key, tag) = try discriminatorTag(of: variant, context: context)
             if let established = discriminator, established != key {
                 throw GeneratorError.unsupportedShape(
                     context: context,
@@ -415,6 +459,239 @@ public struct SchemaGenerator: Sendable {
             discriminator: discriminator,
             cases: cases
         )
+    }
+
+    /// Reads the internally-tagged discriminator member of a union variant.
+    ///
+    /// The variant must carry exactly one inline property (the discriminator),
+    /// that property must pin a `const` tag, and it must be the sole `required`
+    /// member.
+    ///
+    /// - Parameters:
+    ///   - variant: The union variant fragment.
+    ///   - context: The variant's error context.
+    /// - Returns: The discriminator wire name and its `const` tag value.
+    /// - Throws: `GeneratorError.unsupportedShape` when the variant deviates
+    ///   from the internally-tagged discriminator shape.
+    private func discriminatorTag(of variant: JSONValue, context: String) throws -> (key: String, tag: String) {
+        guard let properties = variant[Self.propertiesKey]?.objectValue, properties.count == 1,
+            let (key, keyFragment) = properties.first
+        else {
+            throw GeneratorError.unsupportedShape(
+                context: context,
+                detail: "expected exactly one inline property (the discriminator)"
+            )
+        }
+        guard let tag = keyFragment[Self.constKey]?.stringValue else {
+            throw GeneratorError.unsupportedShape(context: context, detail: "discriminator \(key) has no \(Self.constKey) value")
+        }
+        let required = (variant[Self.requiredKey]?.arrayValue ?? []).compactMap(\.stringValue)
+        guard required == [key] else {
+            throw GeneratorError.unsupportedShape(context: context, detail: "expected \(Self.requiredKey) to be exactly [\(key)]")
+        }
+        return (key, tag)
+    }
+
+    /// Resolves the single `$ref` payload a discriminated variant flattens.
+    ///
+    /// - Parameters:
+    ///   - variant: The `anyOf` variant fragment.
+    ///   - context: The variant's error context.
+    /// - Returns: The emitted payload type name.
+    /// - Throws: `GeneratorError.unsupportedShape` unless `allOf` is a single
+    ///   payload `$ref`.
+    private func discriminatedPayloadType(of variant: JSONValue, context: String) throws -> String {
+        guard let allOf = variant[Self.allOfKey]?.arrayValue, allOf.count == 1,
+            let reference = allOf[0][Self.refKey]?.stringValue
+        else {
+            throw GeneratorError.unsupportedShape(context: context, detail: "expected \(Self.allOfKey) to be a single payload \(Self.refKey)")
+        }
+        return try referencedTypeName(reference: reference, context: context)
+    }
+
+    /// Builds the emission model for a discriminated `anyOf` union.
+    ///
+    /// Each variant wraps a single `$ref` payload via `allOf`. Variants that
+    /// pin a shared `const` discriminator become tagged cases; exactly one
+    /// discriminator-less variant becomes the default, selected when the
+    /// discriminator is absent on the wire.
+    ///
+    /// - Parameters:
+    ///   - name: The definition's schema name.
+    ///   - fragment: The definition's schema fragment.
+    /// - Returns: The discriminated-union model with cases in schema order.
+    /// - Throws: `GeneratorError.unsupportedShape` when a variant deviates from
+    ///   the payload-ref shape, the discriminators disagree, or there is not
+    ///   exactly one default variant.
+    private func discriminatedUnionModel(name: String, fragment: JSONValue) throws -> DiscriminatedUnionModel {
+        let variants = fragment[Self.anyOfKey]?.arrayValue ?? []
+        var discriminator: String?
+        var defaultCount = 0
+        let cases = try variants.enumerated().map { index, variant -> DiscriminatedCaseModel in
+            let context = "\(name) variant \(index)"
+            let payloadType = try discriminatedPayloadType(of: variant, context: context)
+            let documentation = variant[Self.descriptionKey]?.stringValue
+            let properties = variant[Self.propertiesKey]?.objectValue ?? [:]
+            guard !properties.isEmpty else {
+                defaultCount += 1
+                return DiscriminatedCaseModel(
+                    tag: nil,
+                    swiftName: try defaultVariantCaseName(of: variant, context: context),
+                    payloadType: payloadType,
+                    documentation: documentation
+                )
+            }
+            let (key, tag) = try discriminatorTag(of: variant, context: context)
+            if let established = discriminator, established != key {
+                throw GeneratorError.unsupportedShape(
+                    context: context,
+                    detail: "variants disagree on the discriminator: \(established) vs \(key)"
+                )
+            }
+            discriminator = key
+            return DiscriminatedCaseModel(
+                tag: tag,
+                swiftName: try swiftCaseName(fromWire: tag, context: context),
+                payloadType: payloadType,
+                documentation: documentation
+            )
+        }
+        guard let discriminator else {
+            throw GeneratorError.unsupportedShape(context: name, detail: "no variant carries a \(Self.constKey) discriminator")
+        }
+        guard defaultCount == 1 else {
+            throw GeneratorError.unsupportedShape(context: name, detail: "expected exactly one discriminator-less default variant, found \(defaultCount)")
+        }
+        try validateCaseNames(names: cases.map(\.swiftName), context: name)
+        _ = try swiftCaseName(fromWire: discriminator, context: "\(name) discriminator")
+        return DiscriminatedUnionModel(
+            name: emittedName(name: name),
+            documentation: fragment[Self.descriptionKey]?.stringValue,
+            discriminator: discriminator,
+            cases: cases
+        )
+    }
+
+    /// Names a discriminator-less default variant from its `title`.
+    ///
+    /// - Parameters:
+    ///   - variant: The default variant fragment.
+    ///   - context: The variant's error context.
+    /// - Returns: The camelCase Swift case name.
+    /// - Throws: `GeneratorError.unsupportedShape` when the variant carries no
+    ///   `title` to name its case.
+    private func defaultVariantCaseName(of variant: JSONValue, context: String) throws -> String {
+        guard let title = variant[Self.titleKey]?.stringValue else {
+            throw GeneratorError.unsupportedShape(context: context, detail: "default variant needs a \(Self.titleKey) to name its case")
+        }
+        return try swiftCaseName(fromWire: title, context: context)
+    }
+
+    /// Builds the emission model for an object definition with a value union.
+    ///
+    /// The base object properties are modeled as an ordinary struct. Each
+    /// top-level `anyOf` variant contributes a `value`-payload case: the
+    /// `const`-pinned variants are tagged, and the single discriminator-less
+    /// variant is the default, selected when the discriminator is absent or
+    /// unrecognized on the wire.
+    ///
+    /// - Parameters:
+    ///   - name: The definition's schema name.
+    ///   - fragment: The definition's schema fragment.
+    /// - Returns: The object-value-union model.
+    /// - Throws: `GeneratorError.unsupportedShape` when a variant deviates from
+    ///   the single-`value`-payload shape or there is not exactly one default.
+    private func objectValueUnionModel(name: String, fragment: JSONValue) throws -> ObjectValueUnionModel {
+        let base = try structModel(name: name, fragment: fragment)
+        let variants = fragment[Self.anyOfKey]?.arrayValue ?? []
+        var discriminator: String?
+        var valueWireName: String?
+        var defaultCount = 0
+        let cases = try variants.enumerated().map { index, variant -> ValueUnionCaseModel in
+            let context = "\(name) value variant \(index)"
+            let properties = variant[Self.propertiesKey]?.objectValue ?? [:]
+            let (valueKey, valueFragment) = try valueMember(of: properties, context: context)
+            if let established = valueWireName, established != valueKey {
+                throw GeneratorError.unsupportedShape(context: context, detail: "variants disagree on the value member: \(established) vs \(valueKey)")
+            }
+            valueWireName = valueKey
+            let valueType = try resolveType(fragment: valueFragment, override: nil, context: "\(context).\(valueKey)").base
+            let documentation = variant[Self.descriptionKey]?.stringValue
+            guard let (key, tag) = try valueDiscriminator(in: properties, valueKey: valueKey, context: context) else {
+                defaultCount += 1
+                return ValueUnionCaseModel(
+                    tag: nil,
+                    swiftName: try defaultVariantCaseName(of: variant, context: context),
+                    valueType: valueType,
+                    documentation: documentation
+                )
+            }
+            if let established = discriminator, established != key {
+                throw GeneratorError.unsupportedShape(context: context, detail: "variants disagree on the discriminator: \(established) vs \(key)")
+            }
+            discriminator = key
+            return ValueUnionCaseModel(
+                tag: tag,
+                swiftName: try swiftCaseName(fromWire: tag, context: context),
+                valueType: valueType,
+                documentation: documentation
+            )
+        }
+        guard let discriminator, let valueWireName else {
+            throw GeneratorError.unsupportedShape(context: name, detail: "value union needs a \(Self.constKey) discriminator and a value member")
+        }
+        guard defaultCount == 1 else {
+            throw GeneratorError.unsupportedShape(context: name, detail: "expected exactly one default value variant, found \(defaultCount)")
+        }
+        try validateCaseNames(names: cases.map(\.swiftName), context: name)
+        return ObjectValueUnionModel(
+            base: base,
+            discriminator: discriminator,
+            valueWireName: valueWireName,
+            valueEnumName: valueWireName.prefix(1).uppercased() + valueWireName.dropFirst(),
+            cases: cases
+        )
+    }
+
+    /// Finds the single non-discriminator `value` payload member of a variant.
+    ///
+    /// - Parameters:
+    ///   - properties: The variant's inline properties.
+    ///   - context: The variant's error context.
+    /// - Returns: The value member's wire name and fragment.
+    /// - Throws: `GeneratorError.unsupportedShape` unless exactly one member is
+    ///   not `const`-pinned.
+    private func valueMember(of properties: [String: JSONValue], context: String) throws -> (key: String, fragment: JSONValue) {
+        let payloadMembers = properties.filter { $0.value[Self.constKey] == nil }
+        guard payloadMembers.count == 1, let member = payloadMembers.first else {
+            throw GeneratorError.unsupportedShape(context: context, detail: "expected exactly one non-discriminator value member")
+        }
+        return (member.key, member.value)
+    }
+
+    /// Reads the `const` discriminator among a value variant's properties.
+    ///
+    /// - Parameters:
+    ///   - properties: The variant's inline properties.
+    ///   - valueKey: The value member's wire name, excluded from the search.
+    ///   - context: The variant's error context.
+    /// - Returns: The discriminator wire name and tag, or `nil` for the
+    ///   discriminator-less default variant.
+    /// - Throws: `GeneratorError.unsupportedShape` when more than one
+    ///   discriminator is present.
+    private func valueDiscriminator(
+        in properties: [String: JSONValue],
+        valueKey: String,
+        context: String
+    ) throws -> (key: String, tag: String)? {
+        let discriminators = properties.filter { $0.key != valueKey && $0.value[Self.constKey] != nil }
+        guard !discriminators.isEmpty else { return nil }
+        guard discriminators.count == 1, let (key, keyFragment) = discriminators.first,
+            let tag = keyFragment[Self.constKey]?.stringValue
+        else {
+            throw GeneratorError.unsupportedShape(context: context, detail: "expected at most one \(Self.constKey) discriminator")
+        }
+        return (key, tag)
     }
 
     /// Swift keywords that cannot appear as bare `case` names.

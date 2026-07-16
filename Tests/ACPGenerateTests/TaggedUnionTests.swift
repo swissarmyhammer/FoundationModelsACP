@@ -169,8 +169,9 @@ private func assertRoundTrips<T: Codable & Equatable>(_ type: T.Type, fixture: S
         #expect(!source.contains("typealias ContentBlock"))
         #expect(!source.contains("typealias SessionUpdate"))
         #expect(!source.contains("typealias ToolKind"))
-        // `anyOf` unions stay deferred as placeholder seams for a later stage.
-        #expect(source.contains("public typealias McpServer = JSONValue"))
+        // The `anyOf` unions this stage does not resolve stay deferred as
+        // placeholder seams for a later stage.
+        #expect(source.contains("public typealias AuthMethod = JSONValue"))
         #expect(source.contains("public typealias RequestID = JSONValue"))
     }
 

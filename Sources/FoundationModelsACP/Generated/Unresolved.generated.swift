@@ -64,16 +64,6 @@ public typealias ExtRequest = JSONValue
 /// Free-form by schema: the definition places no shape constraints, so raw JSON is its final representation.
 public typealias ExtResponse = JSONValue
 
-/// Configuration for connecting to an MCP (Model Context Protocol) server.
-///
-/// MCP servers provide tools and context that the agent can use when
-/// processing prompts.
-///
-/// See protocol docs: [MCP Servers](https://agentclientprotocol.com/protocol/session-setup#mcp-servers)
-///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
-public typealias McpServer = JSONValue
-
 /// JSON RPC Request Id
 ///
 /// An identifier established by the Client that MUST contain a String, Number, or NULL value if included. If it is not included it is assumed to be a notification. The value SHOULD normally not be Null \[1\] and Numbers SHOULD NOT contain fractional parts \[2\]
@@ -104,8 +94,3 @@ public typealias SessionConfigOptionCategory = JSONValue
 ///
 /// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
 public typealias SessionConfigSelectOptions = JSONValue
-
-/// Request parameters for setting a session configuration option.
-///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
-public typealias SetSessionConfigOptionRequest = JSONValue

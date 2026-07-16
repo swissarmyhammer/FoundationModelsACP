@@ -1,8 +1,34 @@
 ---
 assignees:
 - claude-code
-position_column: todo
-position_ordinal: '8180'
+comments:
+- actor: wballard
+  id: 01kxndma3nsn0e9mxzt2f2qaen
+  text: |-
+    Implementation landed (TDD; generator-only, no hand edits to generated files). Summary + signature changes for consumers:
+
+    GENERATOR (ACPGenerateCore)
+    - classify(): anyOf now routes via classifyAnyOf. An object def carrying BOTH `type:object`+`properties` AND `anyOf` → .objectValueUnion; a pure-anyOf whose variants pin a `const` discriminator → .discriminatedUnion; every other anyOf (AuthMethod, EmbeddedResourceResource, AgentResponse/ClientResponse, ErrorCode, RequestID, SessionConfigOptionCategory/SelectOptions, AvailableCommandInput) stays .deferredUnion(anyOf). The `const`-discriminator trigger uniquely selects McpServer among pure-anyOf defs; the object+anyOf combo uniquely selects SetSessionConfigOptionRequest — both verified structurally against Schema/acp-v1.json.
+    - New models DiscriminatedUnionModel / ObjectValueUnionModel (SchemaModel.swift) + builders discriminatedUnionModel / objectValueUnionModel (SchemaGenerator.swift). Shared discriminator-reading extracted to discriminatorTag(of:context:) (taggedUnionModel refactored onto it — byte-identical output for the 5 existing oneOf unions). Fail-loud on: no default variant, >1 default, discriminated variant without a single $ref payload, torn discriminators, >1 value member.
+    - Emitter.swift: discriminatedUnionDeclaration + objectValueUnionDeclaration (+ valueUnion* helpers). Extracted codingKeyCase/encodeCall/initParameter shared with the struct emitter (output byte-identical). New Emitter file section is doc-first-line-period/param-labeled/named-constant clean.
+
+    GENERATED TYPES (checked-in output regenerated; byte-idempotent — forced a second generate, git diff empty)
+    - McpServer → Sources/.../Generated/Unions.generated.swift: `public enum McpServer: Codable, Hashable, Sendable { case http(McpServerHttp); case sse(McpServerSse); case stdio(McpServerStdio); case unknown(String) }`. Decode switches on decodeIfPresent(type): "http"/"sse" → those, nil → .stdio (missing-type default), any other → .unknown(preserved). Encode flattens the payload beside `type`; .stdio omits `type`; .unknown re-emits just `{type: value}`.
+    - SetSessionConfigOptionRequest → Models.generated.swift: `public struct` with sessionId: SessionId, configId: SessionConfigId, value: Value, meta: JSONValue?, and a nested `public enum Value { case boolean(Bool); case valueId(SessionConfigValueId) }`. Value decodes type=="boolean" → .boolean; default branch (absent OR unknown type) decodes `value` as SessionConfigValueId → .valueId (this is the unknown-type-with-string graceful fallback). .valueId encodes with no discriminator.
+    - Neither name remains in Unresolved.generated.swift (grep count 0). Remaining 9 anyOf + 3 free-form seams unchanged.
+
+    CONSUMER MIGRATIONS (McpServer/SetSessionConfigOptionRequest are no longer = JSONValue)
+    - SessionProvider.MCPServerConfig (= McpServer) is now the enum. Tests/.../Bridge/SessionProviderTests.swift builds `.stdio(McpServerStdio(args:[],command:AbsolutePath("/usr/local/bin/srv")!,env:[],name:"srv"))` instead of `.object([...])`.
+    - Tests/.../RoleDispatchTests.swift builds `SetSessionConfigOptionRequest(configId:sessionId:value:.valueId(...))` instead of `.object([...])`.
+    - Tests/ACPGenerateTests/TaggedUnionTests.swift deferred-seam assertion updated McpServer → AuthMethod (still deferred).
+    - Bridge/SessionProvider.swift + Connection/{Agent,ClientSideConnection,AgentSideConnection}.swift reference the type name only (still valid; now a real type).
+
+    TESTS ADDED: Tests/ACPGenerateTests/AnyOfUnionTests.swift (8 — vendored emission for both types, miniature discriminatedUnion + objectValueUnion positive classification, 3 fail-loud cases) and Tests/FoundationModelsACPTests/McpServerWireTests.swift (7 — http/sse/stdio round-trips, unknown-type preservation, boolean + value_id + unknown-type-string-fallback).
+
+    VERIFY: swift build clean; swift test --skip FoundationModelsACPEvals → 185 FoundationModelsACPTests + 116 ACPGenerateTests = 301, exit 0, zero warnings. swift run acp-generate byte-idempotent (regeneration leaves Generated/ unchanged).
+  timestamp: 2026-07-16T12:15:09.941801+00:00
+position_column: doing
+position_ordinal: '80'
 title: 'Codegen: resolve McpServer and SetSessionConfigOptionRequest placeholder seams into typed unions'
 ---
 ## What

@@ -66,7 +66,9 @@ func newSessionPlumbsRequestToProvider() async throws {
     let (connection, agent) = await makeBridgeAgent(provider: provider)
 
     let cwd = AbsolutePath(rawValue: "/work/dir")!
-    let servers: [MCPServerConfig] = [.object(["name": .string("srv"), "command": .string("run")])]
+    let servers: [MCPServerConfig] = [
+        .stdio(McpServerStdio(args: [], command: AbsolutePath(rawValue: "/usr/local/bin/srv")!, env: [], name: "srv")),
+    ]
     let response = try await agent.newSession(NewSessionRequest(cwd: cwd, mcpServers: servers))
 
     #expect(response.sessionId == assignedID)

@@ -5251,6 +5251,117 @@ public struct SessionResumeCapabilities: Codable, Hashable, Sendable {
     }
 }
 
+/// Request parameters for setting a session configuration option.
+public struct SetSessionConfigOptionRequest: Codable, Hashable, Sendable {
+    /// The configuration value carried by the request.
+    public enum Value: Codable, Hashable, Sendable {
+        /// A boolean value (`type: "boolean"`).
+        case boolean(Bool)
+        /// A [`SessionConfigValueId`] string value.
+        ///
+        /// This is the default when `type` is absent on the wire. Unknown `type`
+        /// values with string payloads also gracefully deserialize into this
+        /// variant.
+        case valueId(SessionConfigValueId)
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+            case value
+        }
+
+        /// Decodes the value by its `type` discriminator,
+        /// falling back to the default variant when it is absent or unknown.
+        ///
+        /// - Parameter decoder: The decoder positioned at the object.
+        /// - Throws: `DecodingError` when the payload is missing or mistyped.
+        public init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            switch try container.decodeIfPresent(String.self, forKey: .type) {
+            case "boolean"?:
+                self = .boolean(try container.decode(Bool.self, forKey: .value))
+            default:
+                self = .valueId(try container.decode(SessionConfigValueId.self, forKey: .value))
+            }
+        }
+
+        /// Encodes the value, flattening its payload beside the request's
+        /// own members; the default variant omits the discriminator.
+        ///
+        /// - Parameter encoder: The encoder to write the object into.
+        /// - Throws: Rethrows any error from the underlying encoder.
+        public func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            switch self {
+            case .boolean(let payload):
+                try container.encode("boolean", forKey: .type)
+                try container.encode(payload, forKey: .value)
+            case .valueId(let payload):
+                try container.encode(payload, forKey: .value)
+            }
+        }
+    }
+
+    /// The ID of the configuration option to set.
+    public var configId: SessionConfigId
+
+    /// The ID of the session to set the configuration option for.
+    public var sessionId: SessionId
+
+    /// The configuration value to set.
+    public var value: Value
+
+    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
+    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+    /// these keys.
+    ///
+    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+    public var meta: JSONValue?
+
+    /// Creates a `SetSessionConfigOptionRequest`.
+    public init(
+        configId: SessionConfigId,
+        sessionId: SessionId,
+        value: Value,
+        meta: JSONValue? = nil
+    ) {
+        self.configId = configId
+        self.sessionId = sessionId
+        self.value = value
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case configId
+        case sessionId
+        case meta = "_meta"
+    }
+
+    /// Decodes a `SetSessionConfigOptionRequest`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing or mistyped.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.configId = try container.decode(SessionConfigId.self, forKey: .configId)
+        self.sessionId = try container.decode(SessionId.self, forKey: .sessionId)
+        self.value = try Value(from: decoder)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `SetSessionConfigOptionRequest`, omitting nil optional fields.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(configId, forKey: .configId)
+        try container.encode(sessionId, forKey: .sessionId)
+        try value.encode(to: encoder)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
 /// Response to `session/set_config_option` method.
 public struct SetSessionConfigOptionResponse: Codable, Hashable, Sendable {
     /// The full set of configuration options and their current values.

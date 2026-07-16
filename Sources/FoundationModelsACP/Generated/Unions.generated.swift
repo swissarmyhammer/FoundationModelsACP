@@ -106,6 +106,80 @@ public enum ContentBlock: Codable, Hashable, Sendable {
     }
 }
 
+/// Configuration for connecting to an MCP (Model Context Protocol) server.
+///
+/// MCP servers provide tools and context that the agent can use when
+/// processing prompts.
+///
+/// See protocol docs: [MCP Servers](https://agentclientprotocol.com/protocol/session-setup#mcp-servers)
+public enum McpServer: Codable, Hashable, Sendable {
+    /// HTTP transport configuration
+    ///
+    /// Only available when the Agent capabilities indicate `mcp_capabilities.http` is `true`.
+    case http(McpServerHttp)
+
+    /// SSE transport configuration
+    ///
+    /// Only available when the Agent capabilities indicate `mcp_capabilities.sse` is `true`.
+    case sse(McpServerSse)
+
+    /// Stdio transport configuration
+    ///
+    /// All Agents MUST support this transport.
+    case stdio(McpServerStdio)
+
+    /// An unrecognized discriminator value, captured so decoding never
+    /// fails. Re-encoding emits only the discriminator; an unrecognized
+    /// variant's payload fields are not preserved.
+    case unknown(String)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+    }
+
+    /// Decodes by the `type` discriminator; an absent
+    /// discriminator selects the default variant and an unrecognized one
+    /// routes to `.unknown`.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a known variant's payload is malformed.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decodeIfPresent(String.self, forKey: .type) {
+        case "http"?:
+            self = .http(try McpServerHttp(from: decoder))
+        case "sse"?:
+            self = .sse(try McpServerSse(from: decoder))
+        case nil:
+            self = .stdio(try McpServerStdio(from: decoder))
+        case let other?:
+            self = .unknown(other)
+        }
+    }
+
+    /// Encodes the `type` discriminator, flattening the
+    /// payload's fields into the same object; the default variant omits
+    /// the discriminator.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .http(let payload):
+            try container.encode("http", forKey: .type)
+            try payload.encode(to: encoder)
+        case .sse(let payload):
+            try container.encode("sse", forKey: .type)
+            try payload.encode(to: encoder)
+        case .stdio(let payload):
+            try payload.encode(to: encoder)
+        case .unknown(let discriminator):
+            try container.encode(discriminator, forKey: .type)
+        }
+    }
+}
+
 /// The type of permission option being presented to the user.
 ///
 /// Helps clients choose appropriate icons and UI treatment.

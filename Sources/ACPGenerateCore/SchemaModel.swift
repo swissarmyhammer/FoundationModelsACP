@@ -35,6 +35,15 @@ enum DefinitionKind {
     /// with associated values, keyed on the shared discriminator member.
     case taggedUnion
 
+    /// An `anyOf` of `$ref`-payload variants keyed on a `const` discriminator
+    /// member, with one discriminator-less default variant, emitted as a Swift
+    /// enum with an `unknown(String)` fallback.
+    case discriminatedUnion
+
+    /// A `type: object` definition that also carries a top-level `anyOf`
+    /// value union, emitted as a struct with a nested value-union enum.
+    case objectValueUnion
+
     /// An `anyOf`/`enum` definition deferred to a later generator stage;
     /// emitted as a placeholder typealias seam.
     case deferredUnion(keyword: String)
@@ -165,6 +174,77 @@ struct TaggedUnionModel {
 
     /// Cases in schema order.
     let cases: [UnionCaseModel]
+}
+
+/// The emission model for one discriminated-`anyOf`-union variant.
+struct DiscriminatedCaseModel {
+    /// The discriminator value on the wire (e.g. `http`), or `nil` for the
+    /// discriminator-less default variant selected when the discriminator is
+    /// absent.
+    let tag: String?
+
+    /// The camelCase Swift case name (e.g. `http`, `stdio`).
+    let swiftName: String
+
+    /// The emitted payload type whose fields sit flattened beside the
+    /// discriminator.
+    let payloadType: String
+
+    /// The schema `description`, emitted as a doc comment.
+    let documentation: String?
+}
+
+/// The emission model for a discriminated `anyOf` union with a default variant.
+struct DiscriminatedUnionModel {
+    /// The emitted Swift type name (after renames).
+    let name: String
+
+    /// The schema `description`, emitted as a doc comment.
+    let documentation: String?
+
+    /// The wire name of the discriminator member (e.g. `type`).
+    let discriminator: String
+
+    /// Cases in schema order; exactly one carries a `nil` `tag` (the default).
+    let cases: [DiscriminatedCaseModel]
+}
+
+/// The emission model for one variant of an object's embedded value union.
+struct ValueUnionCaseModel {
+    /// The discriminator value on the wire (e.g. `boolean`), or `nil` for the
+    /// default variant selected when the discriminator is absent or unknown.
+    let tag: String?
+
+    /// The camelCase Swift case name (e.g. `boolean`, `valueId`).
+    let swiftName: String
+
+    /// The Swift type of the variant's `value` payload (e.g. `Bool`).
+    let valueType: String
+
+    /// The schema `description`, emitted as a doc comment.
+    let documentation: String?
+}
+
+/// The emission model for an object definition that carries a value union.
+///
+/// The base object properties are modeled as an ordinary struct; the top-level
+/// `anyOf` becomes a nested value-union enum whose fields flatten beside the
+/// base properties on the wire.
+struct ObjectValueUnionModel {
+    /// The base struct model built from the object's `properties`/`required`.
+    let base: StructModel
+
+    /// The wire name of the discriminator member (e.g. `type`).
+    let discriminator: String
+
+    /// The wire name of the union's payload member (e.g. `value`).
+    let valueWireName: String
+
+    /// The emitted name of the nested value-union enum (e.g. `Value`).
+    let valueEnumName: String
+
+    /// Cases in schema order; exactly one carries a `nil` `tag` (the default).
+    let cases: [ValueUnionCaseModel]
 }
 
 /// The emission model for one object-struct definition.

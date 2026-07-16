@@ -56,11 +56,11 @@ func agentSideRequestsDispatchToTheRightHandlerWithDecodedParams() async throws 
     _ = try await client.authenticate(authenticate)
     #expect(recorder.recorded("authenticate") == (try encodedValue(authenticate)))
 
-    let configOption: SetSessionConfigOptionRequest = .object([
-        "sessionId": .string("session-1"),
-        "optionId": .string("theme"),
-        "value": .string("dark"),
-    ])
+    let configOption = SetSessionConfigOptionRequest(
+        configId: SessionConfigId(rawValue: "theme"),
+        sessionId: SessionId(rawValue: "session-1"),
+        value: .valueId(SessionConfigValueId(rawValue: "dark"))
+    )
     _ = try await client.setSessionConfigOption(configOption)
     #expect(recorder.recorded("setSessionConfigOption") == (try encodedValue(configOption)))
 

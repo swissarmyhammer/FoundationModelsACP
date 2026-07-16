@@ -6,8 +6,12 @@ comments:
   id: 01kxnbts69xacp9t0xhgwyn63m
   text: 'Implemented: in oneLinerMatchesExplicitProvider, captured the concrete FoundationModelsAgent from the makeWiredBridge factory via a Mutex<FoundationModelsAgent?> (ReadmeExampleTests pattern), then enqueueScriptedTurn(for: first.sessionId) before the prompt call. Added `import FoundationModels` to SessionProviderTests.swift to name Transcript in the scripted-turn closure. Production one-liner API FoundationModelsAgent(connection:session:) still what is exercised. Fixed the stale makeModelSession doc in BridgeTestSupport.swift (was falsely claiming the bridge never drives a turn). Audited target: all other wire-prompt tests use stub agents (SpyAgent, ReversePromptAgent, raw wire) or already script turns (ReadmeExampleTests, EndToEndTests); PromptSerializationTests uses an unknown session (invalidParams, no model). SessionProviderTests now: all 3 tests pass, one-liner 0.013s (was ~2.1s), no outlier.'
   timestamp: 2026-07-16T11:43:44.841259+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: wballard
+  id: 01kxnc7yek6vfm9pkggwxpn21r
+  text: 'Review of HEAD~1..HEAD returned one finding: a duplication flag between makeBridgeAgent and makeWiredBridgeAgent in BridgeTestSupport.swift. Dropped per the review skill''s blanket exception on refactoring existing test code — both helpers pre-existed and my diff to that file was only the makeModelSession doc comment (no touch to either helper). Zero actionable findings; no prior findings sections. Moving to done.'
+  timestamp: 2026-07-16T11:50:56.211381+00:00
+position_column: done
+position_ordinal: '9680'
 title: Remove live-model inference from oneLinerMatchesExplicitProvider (deterministic unit suite)
 ---
 ## What
