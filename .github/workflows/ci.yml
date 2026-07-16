@@ -4,65 +4,34 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-test-codegen:
-    name: Build, test, and codegen diff gate
-    runs-on: macos-15
+  # Shared Swift CI on the self-hosted macOS runner (Swift 6.4 toolchain):
+  # build --build-tests, swift test (the eval target self-skips without
+  # RUN_EVALS), and the DocC build gate with --warnings-as-errors. The gated
+  # behavioral-eval suite drives the live on-device SystemLanguageModel and
+  # runs only on manual workflow_dispatch.
+  ci:
+    uses: swissarmyhammer/workflows/.github/workflows/swift-ci.yaml@main
+    with:
+      docc-target: FoundationModelsACP
+      integration-gate-env: RUN_EVALS
+      integration-xctest-glob: "*PackageTests.xctest"
+
+  # Repo-specific: regenerate the ACP types from the vendored schema and fail if
+  # the checked-in output drifts. Needs the Swift 6.4 toolchain to build the
+  # acp-generate plugin, so it runs on the same self-hosted runner.
+  codegen:
+    name: Codegen diff gate
+    runs-on: [self-hosted, macOS]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Swift version
-        run: swift --version
-
-      - name: Build
-        run: swift build
-
-      # Deterministic wire suite. The live-model eval scoring self-skips without
-      # RUN_EVALS, so this job never drives the model and eval variance can
-      # never fail it.
-      - name: Test
-        run: swift test
-
-      # DocC build gate. Documents the public API and fails on any doc-comment
-      # warning (broken symbol link, param mismatch), so the primary entry
-      # points always build clean. swift-docc-plugin is a plugin-only dependency.
-      - name: Documentation build (DocC)
-        run: >
-          swift package --allow-writing-to-directory "$RUNNER_TEMP/docs"
-          generate-documentation --target FoundationModelsACP
-          --warnings-as-errors --output-path "$RUNNER_TEMP/docs"
-
-      # Regenerate from the vendored schema and fail if the checked-in output
-      # drifts. The command plugin writes into the package directory, so CI
-      # must grant the write permission non-interactively.
+      - uses: actions/checkout@v4
       - name: Regenerate codegen
         run: swift package --allow-writing-to-package-directory generate-acp
-
-      - name: Codegen diff gate
+      - name: Fail on drift
         run: git diff --exit-code
-
-  # Distinct behavioral-eval job (spec §8). It drives the live on-device
-  # SystemLanguageModel via the bridge and scores tool-selection / well-formed
-  # -call rates against a threshold. It runs on Apple Silicon with the model
-  # present, is separate from the wire job above, and its pass/fail is
-  # independent — eval flake never blocks the deterministic suite.
-  evals:
-    name: Behavioral evals (live on-device model)
-    runs-on: [self-hosted, macOS, ARM64]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Swift version
-        run: swift --version
-
-      - name: Run eval suite
-        env:
-          RUN_EVALS: "1"
-        run: swift test --filter FoundationModelsACPEvals
