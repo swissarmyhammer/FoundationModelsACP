@@ -18,8 +18,29 @@ comments:
 
     TDD plan: (1) regression — fold [tool_call, inProgress-terminal-embed, completed] asserts exactly one .toolOutput entry with the completed text (2 entries before fix). (2) round-trip — build canonical = TranscriptMapper().consume([toolCall,toolOutput]); compose stream = [canonical[0], inProgress terminal embed, canonical[1]] (exact bridge shape); fold → rebuilt → reproject; assert reproject == canonical. Both fail before, pass after. Existing 5 RoundTripTests (incl. straggler) stay green — each has exactly one update per id, so merge-map records once.
   timestamp: 2026-07-16T12:24:10.518762+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: wballard
+  id: 01kxnej3r0g8tbc7h8agr2tp1j
+  text: |-
+    RESOLVED → done. Review converged CLEAN on the first checkpoint (0 findings, 14 validators attempted, 0 failed), not forced. Iterations: 1.
+
+    IMPLEMENTATION (Sources/.../Bridge/TranscriptBuilder.swift):
+    - fold's `.toolCallUpdate` case now calls a new mutating `mergeToolOutput(from:)` instead of unconditionally appending via toolOutputEntry(from:). New stored `toolOutputIndexByCallId: [String: Int]`: the first tool_call_update for a call id creates the .toolOutput entry and records its index; every later update merges its mapped segments into that existing entry (existing.segments + new). Merge is keyed by tool-call id — FM's model, exactly one Transcript.ToolOutput per Transcript.ToolCall (they share the id). toolName is still recovered from the correlated tool_call. Appends only grow `entries`, so a recorded index stays valid across later flushOpenGroup/append.
+    - fold(_:) doc comment now states the merge/skip rule; mergeToolOutput's doc documents the one lossy field.
+
+    MULTI-UPDATE MERGE NOW: the shipped command-tool composition for one toolCallId — tool_call(.pending, TranscriptMapper) → tool_call_update(.inProgress, [.terminal(Terminal(terminalId:))], ClientEnvironment.runCommand) → tool_call_update(.completed, text, TranscriptMapper) — folds to a single .toolCalls + a single .toolOutput entry. The .inProgress terminal-embed contributes no segment (a .terminal ToolCallContent has no Transcript.Segment form), so the merged output carries only the completed text.
+
+    TERMINAL-EMBED ROUND TRIP: LOSSLESS on the persisted turn. Reprojecting the folded transcript through TranscriptMapper yields exactly the canonical mapper projection [tool_call(.pending), tool_call_update(.completed, text)] — asserted in terminalEmbedTurnRoundTripsLosslessly. DOCUMENTED LOSSY FIELD (inherent, not fixable): the live terminal handle (ToolCallContent.terminal / TerminalId) is a transient §9 live-render signal, not persisted agent output; FM's Transcript.ToolOutput.segments ([text|structure|attachment|custom]) has no terminal form, so the handle is dropped. The command's actual captured output (text on the completing update) is preserved, so no real output is lost.
+
+    FM API CHECK: merge uses only Transcript.ToolOutput(id:toolName:segments:) with plain-array segment concatenation — no new/invented API; consistent with the constructors verified in ^gs0d3kp/^gg0pz84.
+
+    TESTS (Tests/.../Bridge/RoundTripTests.swift, +2): terminalEmbedTurnFoldsToOneToolOutput (regression: three-update terminal-embed turn folds to exactly one .toolOutput with the completed text — was 2 entries, first empty, before the fix); terminalEmbedTurnRoundTripsLosslessly (composes the exact bridge stream = canonical[0] + in-progress terminal embed + canonical[1]; folds → reprojects → asserts == canonical). Both RED before, GREEN after. Existing 5 RoundTripTests (golden, reasoning+response, plan, straggler, tool-name-recovery) stay green — each has one update per id.
+
+    VERIFICATION: swift build --build-tests 0 warnings/0 errors. swift test --skip FoundationModelsACPEvals = 187 FoundationModelsACPTests (was 185; +2) + 116 ACPGenerateTests = 303 pass, 0 failures, 0 skips.
+
+    Local commit (nothing pushed): 09a354a fix(bridge): merge multi-update tool calls in TranscriptBuilder.
+  timestamp: 2026-07-16T12:31:26.464054+00:00
+position_column: done
+position_ordinal: '9880'
 title: 'TranscriptBuilder: merge multi-update tool calls so terminal-embed turns round-trip losslessly'
 ---
 ## What
