@@ -127,3 +127,87 @@ func toolNameIsRecoveredThroughTheRoundTrip() async throws {
     }.first
     #expect(output?.toolName == "search")
 }
+
+// MARK: - Multi-update tool calls (terminal-embed turns)
+
+/// The in-progress `tool_call_update` `ClientEnvironment.runCommand` emits to
+/// embed a live terminal in a tool call (spec §9); its only content is a
+/// ``ToolCallContent/terminal(_:)``, which has no `Transcript.Segment` form.
+///
+/// - Parameters:
+///   - toolCallId: The tool call the terminal is embedded into.
+///   - terminalId: The live terminal to embed.
+/// - Returns: The in-progress terminal-embed update.
+private func terminalEmbedUpdate(toolCallId: ToolCallId, terminalId: TerminalId) -> SessionUpdate {
+    .toolCallUpdate(
+        ToolCallUpdate(
+            toolCallId: toolCallId,
+            content: [.terminal(Terminal(terminalId: terminalId))],
+            status: .inProgress
+        )
+    )
+}
+
+@Test(.timeLimit(.minutes(1)))
+func terminalEmbedTurnFoldsToOneToolOutput() throws {
+    // The shipped command-tool composition emits, for one tool-call id, a
+    // pending tool_call, then an in-progress tool_call_update embedding a live
+    // terminal, then the completed tool_call_update carrying the output. The
+    // terminal embed has no transcript segment, so folding must merge all three
+    // into one tool output — not append a spurious empty entry.
+    let toolCallId = ToolCallId(rawValue: "call-cmd")
+    var builder = TranscriptBuilder()
+    builder.fold(.toolCall(ToolCall(title: "run", toolCallId: toolCallId, rawInput: try jsonValue("{}"), status: .pending)))
+    builder.fold(terminalEmbedUpdate(toolCallId: toolCallId, terminalId: TerminalId(rawValue: "term-1")))
+    builder.fold(
+        .toolCallUpdate(
+            ToolCallUpdate(
+                toolCallId: toolCallId,
+                content: [.content(Content(content: .text(TextContent(text: "output"))))],
+                status: .completed
+            )
+        )
+    )
+
+    let outputs = Array(builder.transcript).compactMap { entry -> Transcript.ToolOutput? in
+        guard case .toolOutput(let output) = entry else {
+            return nil
+        }
+        return output
+    }
+    #expect(outputs.count == 1)
+    #expect(outputs.first?.id == "call-cmd")
+    #expect(outputs.first?.toolName == "run")
+    #expect(outputs.first?.segments.count == 1)
+}
+
+@Test(.timeLimit(.minutes(1)))
+func terminalEmbedTurnRoundTripsLosslessly() async throws {
+    // The canonical mapper projection of the equivalent turn — one tool call,
+    // one tool output — is what TranscriptMapper alone produces.
+    let entries: [Transcript.Entry] = [
+        try toolCallEntry(id: "call-cmd", name: "run", argumentsJSON: "{}"),
+        toolOutputEntry(id: "call-cmd", name: "run", text: "output"),
+    ]
+    var forward = TranscriptMapper()
+    let canonical = forward.consume(entries)
+
+    // The shipped bridge stream inserts the in-progress terminal embed between
+    // the mapper's own pending and completed updates; folding then re-projecting
+    // must reconstruct the canonical projection exactly.
+    let composed = [
+        canonical[0],
+        terminalEmbedUpdate(toolCallId: ToolCallId(rawValue: "call-cmd"), terminalId: TerminalId(rawValue: "term-1")),
+        canonical[1],
+    ]
+    let stream = AsyncStream<SessionUpdate> { continuation in
+        for update in composed {
+            continuation.yield(update)
+        }
+        continuation.finish()
+    }
+    let rebuilt = await TranscriptBuilder.transcript(folding: stream)
+
+    var reforward = TranscriptMapper()
+    #expect(reforward.consume(rebuilt) == canonical)
+}

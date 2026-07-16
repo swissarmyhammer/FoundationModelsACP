@@ -27,8 +27,21 @@ comments:
 
     VERIFY: swift build clean; swift test --skip FoundationModelsACPEvals → 185 FoundationModelsACPTests + 116 ACPGenerateTests = 301, exit 0, zero warnings. swift run acp-generate byte-idempotent (regeneration leaves Generated/ unchanged).
   timestamp: 2026-07-16T12:15:09.941801+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: wballard
+  id: 01kxndxsf48qf8gpmgdg5p72qw
+  text: |-
+    Review pass 1: CLEAN, converged in one iteration → done.
+
+    `review sha HEAD~1..HEAD` cannot run as a single batch: Models.generated.swift is 266808 bytes, over the engine's 262144-byte batch cap (expected per the codegen threads). Reviewed per-file instead, excluding that machine-generated artifact (validated via the generator tests):
+    - Sources/ACPGenerateCore/{SchemaGenerator,Emitter,SchemaModel}.swift — 0 findings (14 rules attempted, 0 failed).
+    - Tests/{ACPGenerateTests/AnyOfUnionTests,FoundationModelsACPTests/McpServerWireTests}.swift (new) — 0 findings.
+    - Sources/.../Generated/{Unions,Unresolved}.generated.swift (under cap) — 0 findings.
+    Existing-test edits (TaggedUnionTests/SessionProviderTests/RoleDispatchTests) are the mandatory call-site migrations, out of review scope per the existing-test exception.
+
+    CI diff gate re-verified: `swift run acp-generate` then `git diff --exit-code Sources/.../Generated/` → exit 0 (byte-idempotent). Final commit b575541 (local only, not pushed). swift test --skip FoundationModelsACPEvals → 185 + 116 = 301 tests, exit 0, zero warnings.
+  timestamp: 2026-07-16T12:20:20.580121+00:00
+position_column: done
+position_ordinal: '9780'
 title: 'Codegen: resolve McpServer and SetSessionConfigOptionRequest placeholder seams into typed unions'
 ---
 ## What

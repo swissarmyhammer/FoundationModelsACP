@@ -1,8 +1,25 @@
 ---
 assignees:
 - claude-code
-position_column: todo
-position_ordinal: '8280'
+comments:
+- actor: wballard
+  id: 01kxne4t0p8e5whbjatk0bynv4
+  text: |-
+    Picked up. Read the task + the three referenced threads (^gg0pz84 TranscriptBuilder, ^gs0d3kp TranscriptMapper, ^0gxpjd4 FM-tools/ClientEnvironment).
+
+    ROOT CAUSE confirmed in Sources/.../Bridge/TranscriptBuilder.swift: fold's `.toolCallUpdate` case unconditionally appends a fresh `.toolOutput` via toolOutputEntry(from:). The shipped bridge composition for a command tool emits, for ONE toolCallId, three updates in order: tool_call(status .pending, from TranscriptMapper) → tool_call_update(status .inProgress, content [.terminal(Terminal(terminalId:))], from ClientEnvironment.runCommand) → tool_call_update(status .completed, text content, from TranscriptMapper). Folding today produces a .toolCalls entry + TWO .toolOutput entries for the id — the first empty (a .terminal ToolCallContent has no Transcript.Segment form, so segment(from:) returns nil) plus the real completed one. Not lossless.
+
+    DESIGN (merge-by-id, the FM model: exactly one Transcript.ToolOutput per ToolCall.id):
+    - New stored `toolOutputIndexByCallId: [String: Int]`; the first tool_call_update for an id creates the .toolOutput entry and records its index, every later update merges its segments into that existing entry (existing.segments + newSegments). Appends never shift recorded indices, so this stays valid alongside flushOpenGroup.
+    - Terminal handle: a .terminal content block has no Transcript segment form; it is a transient live-render signal (spec §9), not persisted agent output. The command's real output (text, from the completed update) is preserved. Documented as the one inherently-unrepresentable field.
+    - Update fold(_:) doc to state the merge rule.
+
+    FM API check: Transcript.ToolOutput(id:toolName:segments:) — segments is a plain array; merge = concatenation. No new/invented API; matches the constructors verified in ^gs0d3kp/^gg0pz84.
+
+    TDD plan: (1) regression — fold [tool_call, inProgress-terminal-embed, completed] asserts exactly one .toolOutput entry with the completed text (2 entries before fix). (2) round-trip — build canonical = TranscriptMapper().consume([toolCall,toolOutput]); compose stream = [canonical[0], inProgress terminal embed, canonical[1]] (exact bridge shape); fold → rebuilt → reproject; assert reproject == canonical. Both fail before, pass after. Existing 5 RoundTripTests (incl. straggler) stay green — each has exactly one update per id, so merge-map records once.
+  timestamp: 2026-07-16T12:24:10.518762+00:00
+position_column: doing
+position_ordinal: '80'
 title: 'TranscriptBuilder: merge multi-update tool calls so terminal-embed turns round-trip losslessly'
 ---
 ## What

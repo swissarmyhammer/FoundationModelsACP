@@ -74,6 +74,11 @@ public struct TranscriptBuilder {
     /// later `tool_call_update` recovers the name its own payload omits.
     private var toolNamesByCallId: [String: String] = [:]
 
+    /// The index in ``entries`` of each call's tool-output entry, keyed by
+    /// tool-call id, so repeated `tool_call_update`s for one call merge into the
+    /// entry the first update created rather than appending duplicates.
+    private var toolOutputIndexByCallId: [String: Int] = [:]
+
     /// Creates an empty builder.
     public init() {}
 
@@ -93,6 +98,14 @@ public struct TranscriptBuilder {
     /// every other mapped update finalizes that entry and appends its own. An
     /// update with no transcript form is skipped.
     ///
+    /// Tool-call updates merge by tool-call id: FoundationModels keeps exactly
+    /// one `Transcript.ToolOutput` per `Transcript.ToolCall`, so the first
+    /// `tool_call_update` for a call creates its tool output and every later one
+    /// merges its content into that entry. This collapses a multi-update turn —
+    /// an in-progress `tool_call_update` embedding a live terminal (spec §9)
+    /// followed by the completed update — into one entry rather than appending a
+    /// spurious empty duplicate, so the turn round-trips losslessly.
+    ///
     /// - Parameter update: The `session/update` payload to fold in.
     public mutating func fold(_ update: SessionUpdate) {
         switch update {
@@ -106,7 +119,7 @@ public struct TranscriptBuilder {
             entries.append(Self.toolCallsEntry(from: call))
         case .toolCallUpdate(let update):
             flushOpenGroup()
-            entries.append(toolOutputEntry(from: update))
+            mergeToolOutput(from: update)
         case .plan(let plan):
             flushOpenGroup()
             if let entry = Self.planEntry(from: plan) {
@@ -157,16 +170,32 @@ public struct TranscriptBuilder {
         }
     }
 
-    /// Builds a tool output entry from a tool-call update, recovering the tool
-    /// name from the correlated `tool_call` seen earlier.
+    /// Folds a tool-call update into the tool output for its call, creating the
+    /// entry on the first update for a call id and merging every later update's
+    /// content into it.
+    ///
+    /// Merging keeps one `Transcript.ToolOutput` per call — FoundationModels'
+    /// model, where a tool output shares its call's id — so a turn whose call is
+    /// updated more than once (an in-progress terminal embed then its
+    /// completion) yields a single entry. The tool name is recovered from the
+    /// correlated `tool_call` seen earlier. A ``ToolCallContent/terminal(_:)``
+    /// content block carries a live terminal handle with no `Transcript.Segment`
+    /// form, so it contributes nothing; the command's captured output arrives as
+    /// text on the completing update and is preserved.
     ///
     /// - Parameter update: The tool-call update to fold in.
-    /// - Returns: A `Transcript.ToolOutput` entry keyed by the update's id.
-    private func toolOutputEntry(from update: ToolCallUpdate) -> Transcript.Entry {
+    private mutating func mergeToolOutput(from update: ToolCallUpdate) {
         let id = update.toolCallId.rawValue
-        let toolName = toolNamesByCallId[id] ?? ""
         let segments = (update.content ?? []).compactMap(Self.segment(from:))
-        return .toolOutput(Transcript.ToolOutput(id: id, toolName: toolName, segments: segments))
+        if let index = toolOutputIndexByCallId[id], case .toolOutput(let existing) = entries[index] {
+            entries[index] = .toolOutput(
+                Transcript.ToolOutput(id: id, toolName: existing.toolName, segments: existing.segments + segments)
+            )
+            return
+        }
+        let toolName = toolNamesByCallId[id] ?? ""
+        entries.append(.toolOutput(Transcript.ToolOutput(id: id, toolName: toolName, segments: segments)))
+        toolOutputIndexByCallId[id] = entries.count - 1
     }
 
     /// Reads a chunk's text, when it carries a text content block.
