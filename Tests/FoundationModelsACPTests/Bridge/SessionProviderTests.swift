@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 import Synchronization
 import Testing
 
@@ -77,8 +78,11 @@ func newSessionPlumbsRequestToProvider() async throws {
 @Test("the one-liner behaves identically on the wire to an explicit single-session provider")
 func oneLinerMatchesExplicitProvider() async throws {
     let session = makeModelSession()
+    let oneLinerAgent = Mutex<FoundationModelsAgent?>(nil)
     let oneLiner = await makeWiredBridge { connection in
-        FoundationModelsAgent(connection: connection, session: session)
+        let agent = FoundationModelsAgent(connection: connection, session: session)
+        oneLinerAgent.withLock { $0 = agent }
+        return agent
     }
     let explicitID = SessionId(rawValue: "explicit-session")
     let explicit = await makeWiredBridge { connection in
@@ -105,7 +109,15 @@ func oneLinerMatchesExplicitProvider() async throws {
     let explicitSession = try await explicit.client.newSession(bridgeNewSessionRequest())
     #expect(explicitSession.sessionId == explicitID)
 
-    // A prompt turn resolves at its own turn's end over the wire.
+    // A prompt turn resolves at its own turn's end over the wire. The turn is
+    // scripted against the one-liner's single session id, so it exercises the
+    // production turn path deterministically without driving live inference
+    // (spec §8).
+    let reply = "hi back"
+    oneLinerAgent.withLock { $0 }?.enqueueScriptedTurn(for: first.sessionId) { deliver in
+        await deliver([responseEntry(reply)])
+        return Transcript(entries: [responseEntry(reply)])
+    }
     let prompt = PromptRequest(
         prompt: [.text(TextContent(text: "hi"))],
         sessionId: first.sessionId

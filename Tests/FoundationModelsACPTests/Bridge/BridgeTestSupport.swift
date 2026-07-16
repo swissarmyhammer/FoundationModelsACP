@@ -9,8 +9,11 @@ import Testing
 
 /// Builds a live `LanguageModelSession` over the system model.
 ///
-/// Construction never runs inference, so this is safe and fast in tests; the
-/// bridge skeleton under test never drives a turn against the model.
+/// Construction never runs inference, so this is safe and fast in tests. A
+/// prompt turn drives this session's live model only when no scripted turn is
+/// enqueued for it; the deterministic tests script every turn, so the model is
+/// never actually driven here (live inference lives behind the availability
+/// gates in the `FoundationModelsACPEvals` target).
 ///
 /// - Returns: A fresh session over `SystemLanguageModel.default`.
 func makeModelSession() -> LanguageModelSession {
