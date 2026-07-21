@@ -1,103 +1,606 @@
-# FoundationModelsACP — package spec
+# Plan: FoundationModelsACP — the ACP agent composed over the harness
 
-**Status:** v0.6 · **Target:** Swift 6, macOS 27, Apple Silicon · **Updated:** 2026-07-14
+> **Reborn 2026-07-21.** This repo was slated for retirement when its wire
+> layer was inlined into the harness; the harness's re-scope into a
+> constructor-fed loop then left the composition layer (config, commands,
+> frontends, ACP) homeless in a `product_plan.md`. This package is that
+> layer's home: **FoundationModelsACP layers over FoundationModelsAgentHarness
+> and FoundationModelsRouter, and adds slash-command support and
+> configuration.** Everything the harness deliberately refuses to own — file
+> I/O, dotfolders, command registries, the wire — lives here.
 
-A standalone Swift Package — **`FoundationModelsACP`** — implementing the Agent Client Protocol (ACP)
-— idiomatic Swift analogs of the ACP types, both protocol roles, and JSON-RPC-over-stdio transport —
-plus a **FoundationModels bridge** (§7) that turns anything speaking the WWDC 2026 `LanguageModel`
-interface — Apple's on-device model, PCC, or a conforming Claude / Gemini / MLX / llama — into an ACP
-agent, so Apple-native → ACP is one wrapper. The name leads with the bridge because that is the
-package's flagship: it is the one ACP implementation that makes an Apple-native `LanguageModelSession`
-an ACP agent for free. One target, macOS 27. Reusable and open-sourceable, like the AgentViewKit and
-EditorKit packages. The runtime uses it for its ACP agent surface (runtime-spec §4.3); it has no
-dependency on the runtime or the registry.
+## Layering
+
+```
+editors (Zed, …) ──ndJSON/stdio──┐          CLI / Mac app (thin frontends,
+                                 │           consume the composition directly)
+                                 ▼                        │
+                      FoundationModelsACP  ◄──────────────┘
+                      │  config (Extras: DotfolderStack + TemplateEngine, §4)
+                      │  AGENTS.md assembly (Extras: AgentsMd, §6.1)
+                      │  slash commands + registry + dispatch (§6.2)
+                      │  tool roster: config sections → real tools (§7)
+                      │  transcript location policy (§5)
+                      │  HarnessACPAgent: the Agent conformance (§9.1)
+                      │  the wire target: types/connections/ndJSON (§9.2)
+                      ▼
+        FoundationModelsAgentHarness (the loop: tokens, compaction, events)
+                      ▼
+        FoundationModelsRouter (models, sessions, recording, restore, compact)
+                      ▼
+        FoundationModelsExtras (stack, templating, SlashCommand, AgentsMd)
+```
+
+Two targets:
+
+- **`FoundationModelsACP`** (the wire) — generated schema types, `Agent`/
+  `Client` role protocols, connections, ndJSON framing. **Zero dependencies**
+  (§9.2), exactly as specced when it was to be inlined; it is simply this
+  package's first target again.
+- **`FoundationModelsACPAgent`** (the composition) — depends on the wire
+  target, the harness, Router, Extras, and the tool packages the roster
+  names (`FoundationModelsFileTool`, `FoundationModelsShelltool`, … — §7).
+  Naming tool packages is *this* package's job precisely because the harness
+  may not: nothing cycles, since no tool package (and not the agents tool)
+  ever depends on ACP.
+
+The composition, end to end:
+
+```
+config  (dotfolder stack, §4)
+  → ProfileDefinition → Router.resolve → resident profile
+  → tools         (roster §7: config sections → constructed, confined tools)
+  → instructions  (builtin prompt + AGENTS.md §6.1 + config replace/append)
+  → compaction    (coding-tuned CompactionPrompt + TokenBudget)
+  → Harness(router:tools:instructions:compaction:)      ← the reusable loop
+  → HarnessACPAgent(harness:commands:)                  ← §9.1, + registry §6.2
+```
+
+## Decisions made at rebirth
+
+- **ACP is the composition layer** — supersedes both "the product layer
+  awaits a home" and the interim idea of a raw adapter directly over Router.
+  The noun test lands three ways now: session storage/restore nouns are
+  Router's, turn/loop nouns are the harness's, and commands + configuration
+  + the wire are this package's. The conformance composes `Harness`/
+  `HarnessSession`, so every loop behavior (auto-compaction, budgets, retry,
+  events with correlation ids) works over ACP with zero wire-specific code.
+- **Slash-command dispatch lives at the prompt owner.** The old "dispatch
+  lives in `run()`" died with the harness re-scope (the loop no longer knows
+  commands exist). The prompt owners are this package's `prompt()` handler
+  and the frontends' composers; each routes a leading `/name` through the
+  registry before anything reaches the model. A `/compact` typed in an
+  editor must **never** become a model prompt. Registry mechanics (merge,
+  precedence, near-miss matching, `commandUpdates` re-publication) live in
+  this package; the cross-package *vocabulary* (`SlashCommand`/
+  `SlashCommandProviding`) stays in Extras where conformers can reach it.
+- **Builtin commands bind to session surface, not harness internals**:
+  `/compact` → `session.compact()`, `/context` → usage/fill, `/status` →
+  session id/cwd/model, `/help` → the registry. Dotfolder template commands
+  (`commands/*.md`) are loaded here (Extras stack + untrusted Stencil) as
+  `.prompt`-only; `.action` still requires linked Swift — the trust boundary
+  travels intact.
+- **Configuration is this package's** (§4): the dotfolder name, the YAML
+  schema (`AgentConfiguration`: `profile` with standard/flash/**embedding**
+  slots, `tools` built-in + `mcp`, `instructions`, `recording`,
+  `transcripts`, `compaction`), defaults directory, template-first
+  rendering, and the mapping onto Router types. The harness never sees any
+  of it — it receives values.
+- **Loading is Extras' (decision 1b).** Yams fights its way into Extras: a
+  `LayeredYAMLDocument` beside the stack loads → renders (trusted defaults,
+  untrusted user/project) → **merges with the family's one rule** (scalars
+  and arrays replace wholesale, sections merge by key) → returns a value
+  tree with per-key source tracking; this package decodes it via `Codable`.
+  Merge semantics live with the thing that defines the layers, written once
+  for ACP config, Shelltool's `ShellPolicy`, and future Skills use.
+- **The built-in roster is linked packages under well-known names.** ACP
+  links the family's tool packages and reserves one config section per tool:
+  `files:` (FoundationModelsFileTool), `shell:` (FoundationModelsShelltool),
+  later `codeContext:`, `multitool:`, `skills:`, `agents:`. Presence
+  enables; the section body decodes as **that package's own option type**.
+  Unknown top-level sections warn (forward compatibility); MCP is the
+  escape hatch for tools we don't link. This is the pre-pivot `ToolCatalog`
+  "add tools here and only here" location, relocated to the one package
+  allowed to name tool packages.
+- **MCP transport is FoundationModelsMCP's job, not ours.** Config's `mcp:`
+  entries carry either `command` (+args/env — the MCP package spawns and
+  owns the stdio subprocess) or `url` (http/s client connect); ACP passes
+  the entry through to `MCPToolProvider` and receives `[any Tool]`. Process
+  lifecycle, reconnects, and pooling across sessions are upstream asks on
+  FoundationModelsMCP — recorded there, not reimplemented here.
 
 ---
 
-## 1. Why a Swift package
+> The sections below were extracted from the pre-pivot harness plan (via its
+> interim `product_plan.md`) and keep their original numbering (§4–§10.1)
+> for traceability; renumber in a later editing pass. Where prose says "the
+> harness" doing composition-flavored work, read "this package" — the
+> highest-value corrections are already applied inline (§6.2 dispatch, §9.1
+> framing).
 
-ACP is JSON-RPC over stdio at the app/editor surface, and it's **full-duplex and notification-first**
-— a prompt turn is a long-lived request during which the agent streams many `session/update`
-notifications and calls back into the client (files, permission, terminals), all concurrently. That
-streaming, bidirectional surface belongs in Swift with the app, not marshaled across UniFFI per
-message. **Rust is the source of truth** — the official SDKs (Rust, TypeScript, Python, Kotlin, Java)
-are all generated from the Rust `agent-client-protocol-schema` crate's emitted JSON Schema. There is
-**no official Swift SDK**; the three community ones (`aptove/swift-sdk`, `wiedymi/swift-acp`,
-`rebornix/acp-swift-sdk`) are all pre-1.0, hand-write their types (so they lag the schema), and are
-partial — none covers both roles with generated types — so we build our own and steal their good ideas:
-actor-based connection, `AsyncStream` for `session/update`, and an in-memory test transport. We license
-**Apache-2.0** to match the spec and every reference SDK. Our data types are generated from ACP's
-published JSON schema (the `schema/v1/schema.json` + `meta.json` artifacts attached to the
-`agentclientprotocol` org's schema releases — the project relocated there from `zed-industries`, which
-now hosts only the schema crate) so they track the spec automatically; the connection, role protocols,
-and transport are hand-written, **porting the classic Rust async-trait connection design** (faithful
-through `rust-sdk` v0.10.4 — symmetric `*SideConnection` objects, oneshot + pending-map JSON-RPC
-engine), not the heavier `Role`/`Builder`/actor rewrite in runtime 1.0.0, which is more machinery than
-Swift's native concurrency needs.
+## 4. Configuration
 
-**Scope.** One target: both roles (`Agent` and `Client`), the full v1 type surface, stdio transport, a
-build-time codegen step (incremental; output checked in, §6), and the FoundationModels bridge (§7).
-macOS 27, so FoundationModels is always available — no reason to split it out.
+### The pluggable dotfolder
 
----
+The frontend passes a bare name (no dot). `DotfolderStack` — **Extras'** type
+now (moved out of this package so the whole family layers files one way;
+Shelltool's stacked `ShellPolicy` is the candidate second adopter). Shipped as
+`init(name:workingDirectory:defaultsDirectory:userDirectory:environment:)` —
+`userDirectory` and `environment` are injectable so tests and demos never
+touch the real home — it derives the locations and the precedence order:
 
-## 2. Type-mapping rules (schema → Swift)
+1. **Builtin defaults** — a *directory of real files*, never compiled-in
+   content (the swissarmyhammer lesson: embedded builtins meant a recompile to
+   edit markdown — Extras plan §1). A curated coding-model profile that works
+   out of the box on a 16 GB machine (`recording.level: full`,
+   `transcripts.location: home`), materialized on first run, with a
+   `<NAME>_DEFAULTS_DIR` override so development edits never involve a build.
+2. **User layer** — XDG, as Extras shipped it: `$XDG_CONFIG_HOME/<name>/config.yaml`
+   when that variable is set and absolute, else `~/.config/<name>/config.yaml`
+   (machine-wide preferences; bare `<name>` under a config dir — the
+   hidden-file dot convention doesn't apply there).
+3. **Project layer** — `$CWD/.<name>/config.yaml` (per-repo overrides; `$CWD` here is
+   the agent's working directory, not the process cwd).
 
-The generator turns the ACP JSON schema into idiomatic Swift, not a literal transliteration:
+Missing files are fine; a present-but-malformed file is a hard, early error naming the
+file and line (never silently fall back over a typo'd config). Merge semantics are
+**key-level override**: scalars and arrays replace wholesale when the later layer
+defines them; sections merge by key. Wholesale array replacement matches the family's
+full-replace override rule (Skills' `FolderStack`) and keeps "which models am I
+running?" answerable by reading one file.
 
-- **Tagged unions** (`oneOf` with a discriminator: `type`, `kind`, `sessionUpdate`) → Swift `enum`
-  with associated values + hand-rolled `Codable` keyed on the discriminator.
-- **Objects** → `struct` with `Codable` and explicit `CodingKeys` (wire is camelCase: `sessionId`,
-  `toolCallId`).
-- **String enums** (`ToolKind`, `ToolCallStatus`, `StopReason`, permission kinds) → a Swift `enum`
-  with **hand-rolled `Codable`** that maps the known wire strings and routes anything unrecognized to
-  an `unknown(String)` case, so a newer peer's value can't crash decoding. (A raw-value `enum: String`
-  can't carry that payload, so these are hand-rolled rather than raw-value enums.)
-- **ID newtypes** (`SessionId`, `ToolCallId`, `PermissionOptionId`, …) → distinct
-  `RawRepresentable` Swift structs, never bare `String` — the type system prevents mixing IDs.
-- **`_meta` and free-form fields** (`rawInput`, `rawOutput`, MCP server env) → `JSONValue`, a small
-  enum over arbitrary JSON. `_meta` is preserved round-trip and never interpreted.
-- **Capability-gated optional fields** → Swift optionals; absence = unsupported.
-- **Forgiving decoding for negotiated/optional surfaces.** Capability and `info` objects decode with
-  defaults-on-error (the Rust SDK uses `serde_as` `DefaultOnError` / `VecSkipError`): an unknown or
-  malformed capability field must degrade to "unsupported", never fail the `initialize` handshake. On
-  encode, omit `nil` (the equivalent of `skip_serializing_none`) — don't emit `null` for absent fields.
-- **`protocolVersion` is a wire integer, not a string.** Model it as a `ProtocolVersion` newtype over
-  `UInt16` that encodes/decodes as the bare integer `1` (`.v1 = 1`, `.latest = .v1`); it must **reject**
-  `"v1"` / `"1.0.0"`. The doc set and schema dir are *labelled* v1, but the value on the wire is `1`.
-- **Versioning** — target ACP **v1** (`protocolVersion == 1`); the version bumps only for breaking
-  changes, while everything else grows via capabilities + `_meta`. Generated code is checked in and
-  regenerated on a schema bump, not on every build.
+**Every dotfolder document is a template first.** Before decoding, each file
+renders through Extras' Stencil-backed `TemplateEngine`: `{{ variables }}`
+from a provided `TemplateContext`, env vars, and well-known values (dotfolder
+name, cwd, date) on the swissarmyhammer ladder (context > env > well-known),
+plus `{% include %}` partials from the stack's `_partials/` (nearest layer
+wins). Defaults render *trusted*; user/project layers *untrusted* (validated,
+side-effect-free — no filesystem or exec capability — and metered, as built:
+include-depth, loop-iteration, and output-size budgets). One rule
+for every format — config YAML, command templates and frontmatter (§6.2),
+instructions and memory (§6.1): **render the whole file, then parse**, so
+even frontmatter values can be templated.
 
----
+### Schema (v1)
 
-## 3. Core type analogs
+```yaml
+# ~/.config/<name>/config.yaml  or  <project>/.<name>/config.yaml
+profile:
+  name: coding                    # optional; defaults to the dotfolder name
+  standard:                       # candidate lists, biggest-first, "org/repo@rev"
+    - mlx-community/Qwen2.5-Coder-32B-Instruct-4bit
+    - mlx-community/Qwen2.5-Coder-14B-Instruct-4bit
+    - mlx-community/Qwen2.5-Coder-7B-Instruct-4bit
+  flash:
+    - mlx-community/Qwen2.5-Coder-3B-Instruct-4bit
+  embedding:
+    - mlx-community/bge-small-en-v1.5-4bit
 
-Representative — the generator emits the full set; these are the load-bearing ones.
+tools:
+  files: {}                       # well-known built-ins (§7): presence enables;
+  shell:                          #   the body decodes as that tool package's
+    policy: strict                #   own option type
+  mcp:                            # MCP servers — FoundationModelsMCP owns the
+    - name: github                #   transport: `command` spawns a stdio
+      command: ["npx", "-y", "@modelcontextprotocol/server-github"]
+      env: { GITHUB_TOKEN: "{{ env.GITHUB_TOKEN }}" }   # templated (untrusted layers)
+    - name: internal-docs
+      url: https://mcp.example.com/sse                  # http/s client connect
+
+recording:
+  level: full                     # off | metadata | full → Router's RecordingLevel
+
+transcripts:
+  location: home                  # home | project | /absolute/path   (§5)
+
+instructions:
+  replace: |                      # optional: swap out the builtin system prompt
+    You are a code-review assistant. # entirely — this text becomes the base
+  append: |                       # optional: extra text appended after the base
+    Prefer swift-testing over XCTest.   # (the builtin prompt, or replace: if set)
+```
+
+Everything maps 1:1 onto existing Router types (`ProfileDefinition`, `ModelRef`'s
+`"org/repo@rev"` Codable form, `RecordingLevel`) — the config layer is a codec, not a
+model. Unknown top-level keys warn (forward compatibility for tool sections, §7.3);
+unknown keys *inside* known sections are errors (typo protection).
+
+**System prompt: a clear, published artifact.** The builtin coding instructions are
+not a hidden string — and not a compiled-in one either: they ship as
+`Instructions.md` in the defaults directory (layer 1 above; editable like any
+file), reproduced verbatim in DocC/README, and surfaced at runtime
+(`Harness.instructions` exposes the fully assembled prompt; the CLI prints it with a
+flag) — so users always know exactly what `replace:` is replacing. Assembly is:
+base = `instructions.replace` if set, else the builtin prompt; then the
+session's memory files (user then project — §6.1); then `instructions.append`
+last. Each config key follows the normal layer rules independently — a
+project-layer `replace` overrides a home-layer `replace` wholesale, and
+`append` composes with whichever base won.
+
+**Context size is deliberately not configurable.** It is derived from the model
+automatically: Router already fetches each candidate's HF `config.json` during
+sizing, which carries the model's native maximum (`max_position_embeddings`), and its
+joint-fit already prices KV-cache-per-context against the host budget. Deriving
+context where that metadata already lives is a small upstream change (§8, item 2);
+users pick models, the system picks the context they can afford.
+
+`AgentConfiguration` is `Codable + Sendable + Equatable`, constructible in
+tests without any file I/O. Loading is Extras' `LayeredYAMLDocument` over the
+stack (decision 1b, head): locate → render → merge with the family's one
+rule, per-key source tracking — Extras remains the only thing that touches
+disk, and merge semantics are written exactly once family-wide.
+
+## 5. Transcripts: where recordings live
+
+**Decision: home, keyed by project — `~/.config/<name>/transcripts/<project-slug>/`,
+under the stack's user-layer root (XDG-derived, §4) — with a
+config escape hatch.** Consulting Router settled it:
+
+- Router's layout is `<recordingsDir>/<routerId ULID>/…` with a fresh router id per
+  run. In a *project-local* dotfolder that means an ever-growing pile of opaque ULID
+  directories accumulating in every repo you ever pointed the agent at, each needing
+  `.gitignore` protection. In one home location it's just history.
+- The stated requirement is that the Mac app and the CLI **share** transcript
+  recording. The app's session browser wants to enumerate *all* projects' sessions
+  from one root ("what was I doing in repo X last week?"). One home root makes that a
+  directory walk; per-project storage makes it a filesystem-wide hunt.
+- Transcripts at `RecordingLevel.full` contain complete prompts, file contents fed to
+  tools, and model output. That is exactly the class of artifact that must never ride
+  along in a repo — gitignored or not (archives, `git add -f`, backup tools).
+- Transcripts must survive the repo. Deleting a checkout shouldn't delete the record
+  of what the agent did to it.
+
+Layout — the harness owns the two segments above Router's root, Router owns everything
+below, unchanged:
+
+```
+~/.config/<name>/transcripts/
+    -Users-wballard-github-swissarmyhammer-FoundationModelsRanker/    # project slug (see below)
+        01K3F.../                                      # routerId — Router's layout from here
+            manifest.json
+            sessions.jsonl
+            01K3G.../transcript.jsonl
+```
+
+The **project slug** is the agent's working-directory absolute path with `/` → `-`
+(the Claude Code projects convention): human-readable, collision-free in practice,
+reversible enough for a browser UI to show real paths.
+
+`transcripts.location` overrides: `project` puts the same layout under
+`<project>/.<name>/transcripts/` (no slug segment; the harness then writes a
+`.gitignore` of `*` + `!.gitignore` into the dotfolder, the Shelltool/CodeContext
+convention) for users who want self-contained repos; an absolute path wins outright.
+
+`TranscriptStore` also exposes the read side both frontends need:
+`sessions(inProject:)` / `allProjects()` returning lightweight `Codable` summaries
+(built from `sessions.jsonl` + `manifest.json`), and
+`transcript(for sessionID:) -> [Transcript.Entry]` via Router's `TranscriptTree`
+reconstruction. Session *restoration* into a live session already exists upstream
+(`RoutedLLM.restoreSessionTree`) — the store just locates the directory to feed it.
+
+The ownership boundary, stated plainly: **`TranscriptStore` never records and
+never restores.** It owns exactly three things — the root location policy, the
+project slug scheme, and lightweight browse summaries (read via Router's own
+readers). Everything that gives a `transcript.jsonl` its meaning — writing
+events, reconstructing entries, applying compaction checkpoints, rebuilding a
+live session — is Router's, and the harness calls Router to do it.
+
+
+### 6.1 Agent-instructions files — AGENTS.md via Extras' `AgentsMd`
+
+*(Reframed 2026-07-21: these are **not memory files** — per
+[agents.md](https://agents.md/), `AGENTS.md` is "a README for agents,"
+context and instructions. Nothing here remembers anything across sessions.
+The discovery walk itself is now Extras' fourth pillar, `AgentsMd` — Extras
+plan §10 — because FoundationModelsAgents needs the identical walk for
+sub-agent instructions; this layer just consumes it.)*
+
+The single highest-leverage feature of the tools this product emulates is an
+agent-instructions file read before doing anything. Resolution is **per
+session, relative to its working directory** — never per process — so ACP's
+`session/new(cwd)` and a multi-window app get the right context per
+conversation automatically.
+
+At session creation, this layer assembles two sources:
+
+1. **User-level** — `~/.config/<name>/AGENTS.md` via
+   `DotfolderStack.content("AGENTS.md")` (machine-wide; our extension — the
+   spec itself has no home-directory concept), prepended most-general-first.
+2. **Project-level** — `AgentsMd.documents(from: cwd)`: the walk from the
+   repository root down to the session's cwd, reading at each directory the
+   first of `AGENTS.md`, `AGENT.md` (the spec's migration alias),
+   `CLAUDE.md` (ecosystem-compatibility alias), one file per directory,
+   outermost-first so nearest-to-cwd lands last — the spec's "closest one
+   takes precedence."
+
+Assembly order (completing §4's picture): base prompt (builtin or
+`instructions.replace`) → user-level file → project-level documents
+(root → cwd) → config `instructions.append`. Each file is delimited by a
+header naming its absolute path, so both the model and anyone reading the
+session's `instructions` (the published-artifact contract, §4) can attribute
+every line. Missing files are simply absent; a present-but-unreadable file is
+a logged warning, not the hard error config files get — this is content, not
+configuration. Each document renders through Extras' template engine
+(untrusted, §4) before assembly, so partials and env vars work in AGENTS.md
+exactly as they do in command templates.
+
+The assembled text is read once at session creation, folded into the
+`instructions` value handed to the harness constructor, and pinned for the
+session's lifetime — a new session picks up edits. Instructions are never
+folded by compaction (Router compaction plan §1.3 invariants), so this
+context survives every fold by construction. The harness never knows any of
+this happened; it just receives longer instructions.
+
+### 6.2 Slash commands — one registry, three sources
+
+Slash commands are a session-level noun: `/compact` acts on *this* session,
+and a skill discovered in *this* repo becomes a command in *this* session
+only. So the registry lives on `HarnessSession`, assembled at session
+creation like tools and memory, and re-published when a source changes.
+
+**The cross-package currency is Extras' `SlashCommand`**: `name` /
+`description` / `argumentHint` plus a two-kind `Body` — `.prompt(template:)`
+expands into an ordinary model turn; `.action` runs code and streams text,
+never touching the model. Contributors implement `SlashCommandProviding`
+(`commands(workingDirectory:)` + optional `commandUpdates` stream) against
+the leaf, never the harness — the dependency diamond keeps arrows pointing
+only downward.
+
+Three sources, merged in precedence order (later wins on name collision,
+logged; builtin names are reserved and never overridden):
+
+1. **Builtins** — harness `.action` closures capturing the session:
+   `/compact` (force compaction now), `/context` (fill, tokens, resolved
+   context), `/memory` (print `Harness.instructions` with source headers —
+   §4's published artifact, interactive), `/status` (session id, cwd,
+   model/profile, transcript path), `/help`. Frontend verbs (`/quit`,
+   clear-as-new) stay out — composer affordances, same rule as queueing.
+2. **Linked providers** — `SlashCommandProviding` conformers registered by
+   catalog roster entries (§7.1): the *code-backed* lane. Only linked Swift
+   can construct `.action` — the trust boundary; in-process code is already
+   trusted as tools. Skills is the flagship future conformer (one `.prompt`
+   command per discovered skill, pushed via `commandUpdates` as files
+   change). Day one ships the seam, not a conformer.
+3. **Dotfolder templates** — the *data* lane: frontmatter markdown in
+   `~/.config/<name>/commands/*.md` and `<project>/.<name>/commands/*.md`, rendered
+   whole through Extras' Stencil engine (untrusted — §4) and parsed into
+   `.prompt`-only commands. Data can never become `.action`: a broken or
+   malicious template at worst yields a bad prompt under normal tool
+   confinement. Layers user < project, like config. (MCP prompts are the
+   reserved fourth source: `prompts/list` + `listChanged` feed this same
+   registry when the MCP roster entry lands — finally consuming ACP's
+   `mcpServers`.)
+
+**Dispatch lives at the prompt owner** — this package's `prompt()` handler
+for the wire, and the frontends' composers for direct consumption (the old
+"dispatch lives in `run()`" died with the harness re-scope: the loop no
+longer knows commands exist, and a `/compact` typed in an editor must never
+reach the model as a prompt). A leading `/name` routes through the registry
+*before* anything touches the session: `.prompt` expands (template +
+arguments) into a normal recorded turn; `.action` streams output with **no
+model turn and no transcript entries** beyond what the action itself records
+(`/compact` its `CompactionSegment`; `/help` nothing). Unknown `/name`
+errors with near-matches — never a model turn; frontends escape a literal
+leading slash. Registry mechanics (merge, precedence, near-miss matching,
+`commandUpdates` re-publication) are this package's; the vocabulary is
+Extras'.
+
+On every registry change: `HarnessState.availableCommands` updates (CLI
+autocomplete, app palette) and the ACP conformance fires
+`available_commands_update` (§9.1) — the protocol noun this registry peers
+with.
+
+
+## 7. Tools
+
+### 7.1 The catalog — the well-marked follow-up location
+
+`Sources/FoundationModelsACPAgent/Tools/ToolCatalog.swift` is the single
+place tools are registered — the well-known names for our well-known tools
+(head decision): each linked package gets one reserved config section, and
+adding a tool is a dependency plus one catalog line:
 
 ```swift
-// IDs — distinct types, not String
+/// The harness tool catalog.
+///
+/// ══════════════════════════════════════════════════════════════════
+///   ADD NEW TOOLS HERE — and only here.
+///   1. Put the implementation in Tools/<Name>/.
+///   2. Append its constructor to `builtin(context:)` below.
+///   3. Add a row to the table in README.md § Tools.
+///   Nothing else in the harness needs to change.
+/// ══════════════════════════════════════════════════════════════════
+public enum ToolCatalog {
+    public static func builtin(context: ToolContext) -> [any FoundationModels.Tool]
+}
+```
+
+`ToolContext` carries what every tool needs (working directory, the event-emitter for
+`ObservedTool`, the flash handle) so tool constructors stay uniform. Frontends may
+append their own tools: `Harness(..., extraTools: [any Tool])`.
+
+Catalog entries are also where slash-command providers register (§6.2): an
+entry may pair its tool with a `SlashCommandProviding` conformer (from
+`FoundationModelsExtras`) and the catalog feeds it into the session's command
+registry. The direction rule is absolute — tool packages conform to the
+*leaf's* protocol; nothing outside this package ever names a harness type.
+
+
+### 7.3 The tool roster (composed as each package ships)
+
+Each tool is one catalog entry plus (usually) one dependency. Reserved config
+section names keep the schema forward-compatible (§4):
+
+| Tool | Source | Blocked on | Config section |
+|---|---|---|---|
+| `files` | `FoundationModelsFileTool` (**built**) — first builtin entry, in v1 | nothing | `files:` |
+| `shell` | `FoundationModelsShelltool` (**built**) — second builtin entry, in v1 | nothing | `shell:` |
+| code-context ops (`searchSymbol`, `callGraph`, `blastRadius`, …) | thin `Tool` shim over `CodeContext` — explicitly left to consumers | nothing; first follow-up | `codeContext:` |
+| MCP servers | `MCPToolProvider` | nothing; needs config for server commands | `mcp:` |
+| `runCode` | `MultiTool` (JS composition over the catalog) | nothing | `multitool:` |
+| skills / sub-agents | FoundationModelsSkills / FoundationModelsAgents | those packages (plan-only) | `skills:` / `agents:` — Skills also contributes dynamic `/skill-name` slash commands via `SlashCommandProviding` (§6.2) |
+
+
+## 9. Frontends: the shared-consumption contract
+
+Three consumers share the harness: the Mac app, the CLI, and **any ACP client**
+(Zed, editors — §9.1). The app and CLI are out of scope to *build* here, but every
+contract is in scope to *prove*:
+
+- Both construct **this package's composed agent** with the **same dotfolder
+  name** — that single string is what makes config and transcripts shared.
+  The name is chosen by the frontend, not baked into any layer below.
+- The CLI is a thin ArgumentParser wrapper: parse args → construct agent → render the
+  `HarnessEvent` stream to the terminal. `Examples/HarnessDemo` *is* this CLI in
+  miniature and doubles as the living contract test; the production CLI likely grows
+  in its own repo from a copy of it.
+- The Mac app binds `HarnessState` and `ResolutionProgress` to SwiftUI and uses
+  `TranscriptStore.allProjects()`/`sessions(inProject:)` for its history browser.
+- **Sandboxing decision:** sharing `~/.config/<name>` and `$CWD/<anywhere>` is incompatible
+  with the App Sandbox. Recommendation: the Mac app ships **non-sandboxed** (a
+  developer tool operating on arbitrary repos — the norm for this product class; it
+  can still be notarized and hardened-runtime). If sandboxing ever becomes mandatory,
+  the fallback is security-scoped bookmarks per project plus moving the home layer to
+  `~/Library/Application Support/<name>/` with the CLI honoring the same path — the
+  `DotfolderStack` seam localizes that change. Decide before the app ships; nothing in
+  the harness blocks on it.
+
+### 9.1 ACP: this package's agent composes the harness
+
+`HarnessACPAgent` — this package's `Agent` conformance — composes `Harness`/
+`HarnessSession` with the config, roster, and command registry from §§4–7.
+ACP is an **application protocol** — its nouns (cwd sessions, prompt turns,
+visible tool calls, stop reasons, session management, available commands)
+are owned across the stack this package assembles, and a wire protocol
+attaches at the layer that owns its nouns (a language *server* speaks LSP; a
+parser doesn't). The lower layers never pretend to be agents: the harness
+stays a wire-free loop, `RoutedSession` stays Router's session surface,
+`LanguageModelSession` stays Apple's conversation primitive.
+
+**The wire layer is this package's first target** (`FoundationModelsACP`):
+generated schema types (vendored v1.19.x), the `Agent`/`Client` role
+protocols, the `*SideConnection` full-duplex runtime, ndJSON framing — zero
+dependencies, spec'd in §9.2.
+
+**Explicit peering — harness nouns ↔ ACP nouns.** The conformance
+(`HarnessACPAgent`, in this package's agent target) is a
+*translation, not a construction*: every ACP concept names its harness peer,
+and anything with no peer is a capability switched off honestly, never faked.
+
+| ACP noun | Harness peer |
+|---|---|
+| the agent behind the connection | `Harness` — `initialize` reports its capabilities: text prompts, session management on; the harness never issues `terminal/*` or `fs/*` in v1 (tools run in-process, below; terminals are a *client* capability the harness simply never exercises) |
+| session (`sessionId`, cwd, `mcpServers`) | `HarnessSession` — `session/new(cwd)` ⇒ `harness.newSession(cwd:)`; project config layer, §6.1 memory, tool confinement, and transcript slug are already keyed off that cwd; `mcpServers` is accepted-and-ignored in v1 (logged, documented) |
+| `session/prompt` (long-lived request) | `HarnessSession.run(prompt)` — one turn; the pending request resolves at turn end with a `StopReason` |
+| `session/update` notification stream | the `HarnessEvent` stream, mapped 1:1: `textDelta` → `agent_message_chunk`, `reasoningDelta` → `agent_thought_chunk`, `toolCall(id:)` → `tool_call`, `toolStatus(id:)` → `tool_call_update` — `ToolCallID` *is* the wire `toolCallId` (§6) |
+| `StopReason` | the turn's disposition: completed → `end_turn`, guardrail refusal → `refusal`, `cancel()` → `cancelled` |
+| `available_commands_update` | the session's slash-command registry (§6.2) — published at session start and re-published whenever a source changes (skill discovered, template edited); invoked commands arrive as `session/prompt` text and dispatch inside `run()` like every frontend's |
+| `session/cancel` (notification) | `HarnessSession.cancel()` — the still-open prompt request resolves with `cancelled`, possibly after final updates |
+| `session/list` / `load` / `resume` / `delete` | `TranscriptStore.sessions(inProject:)` + Router restore. **Replay comes from Router's full recorded history** (the conversation the user actually had); **the live session is constructed from the newest compaction checkpoint** (the model's working transcript) — two different transcripts, deliberately. Restore reassembles the harness side (config layer, memory, confinement) from the cwd recorded at handle minting (§8) |
+| `session/close` | `Harness` drops the `HarnessSession` from its bookkeeping — recording handle closed, transcript retained on disk (the v2 RFDs make this baseline alongside list/resume, below) |
+| `authenticate` / `logout` | no peer — a local on-device agent has no auth; capability off, method-not-found, and the `authRequired` error (-32000) is never raised |
+| session config options | no peer in v1 — capability off (may earn a peer later; typed config values are v2-baseline material) |
+| session modes (`session/set_mode`) | never — deprecated wire-side in favor of `set_config_option`; the conformance answers method-not-found and no mode support is planned |
+| `fs/*`, `terminal/*`, `session/request_permission` | no peer in v1 — tools run in-process (below) |
+
+Because ACP turns go through `run()`, everything §6 owns works over ACP with
+zero ACP-specific code: compaction (proactive and reactive), recording sync,
+memory, confinement, the context meter. `HarnessState` has no peer — a
+frontend affordance ACP clients replace with their own UI — and queueing stays
+composer-owned (§6). (Name note: the inlined target declares the protocol-role
+`Agent`; Harness-first naming means nothing else is named `Agent`, so
+`HarnessACPAgent: Agent` reads unambiguously.)
+
+Practical decisions:
+
+- **The production CLI and the ACP agent are the same binary** — `<cli> acp` speaks
+  ndJSON over stdio (stdout sacred, logs to stderr — §9.2's framing rules). One more
+  reason the CLI stays thin: all three frontends are renderers over the same engine.
+- **v1 supports multiple concurrent ACP sessions.** One-resident-profile
+  constrains *loaded models*, not session count: `HarnessSession`s keyed by
+  `sessionId`, each with its own cwd-derived config layer, memory,
+  confinement, and slug; turns serialize at the model's `serialGate`;
+  recording stays per-session via per-session handles (§8).
+  **Profile-collision policy:** a project layer naming a different model than
+  the resident profile logs a warning and keeps the resident model; the rest
+  of the layer is honored. Gate waits are `Task`-cancellation-aware, so a
+  queued session's `session/cancel` never outwaits another session's turn.
+- **Tools stay in-process in v1 — an accepted, visible risk.** ACP routes file
+  access through the client (`fs/*`, `session/request_permission`); ours hit
+  the local filesystem directly — workable while agent and client share a
+  machine, but unusual for an in-editor ACP agent, so recorded as an accepted
+  risk (PathGuard/ShellPolicy confine the blast radius). The seam is
+  `ToolContext`, which can later carry an ACP-backed filesystem/permission
+  environment — a follow-up, gated on need.
+- **stdout purity is tested, not assumed.** The `shell` tool runs subprocesses
+  in-process while stdout must carry nothing but ACP frames; a gated integration
+  test runs `<cli> acp`, executes a real shell-tool turn, and asserts every stdout
+  byte parses as ndJSON (§10).
+
+**Superseded: the `SessionProvider` design** — an external bridge driving the
+inner bare session through a provider (factory + store hooks + `onTurnEnded`
+sync). It failed on four counts, all symptoms of attaching an application
+protocol at the model layer: a **stale session** after every compaction swap
+(the session was handed over by value, once); **compaction never triggering**
+on ACP turns (fill check and retry live in `run()`); a bolt-on turn-end
+recording hook; and `session/load` **replaying the compacted transcript**
+instead of the user's real history. All four dissolve with the agent-level
+conformance; none of the provider machinery gets built.
+
+Tailwind worth noting: the **ACP v2 RFDs** (active as of 2026-07-02) make
+`session/list` / `resume` / `close` *baseline* and fold `session/load` into
+`session/resume` with `replayFrom` cursors — i.e., the protocol is converging on
+exactly the session model the peering table already provides (`TranscriptStore` +
+Router's checkpoint-aware restore), so the conformance is an investment in the v2
+direction, not v1-only plumbing.
+
+### 9.2 The wire target — `FoundationModelsACP` spec
+
+The wire-layer spec — home again after a round trip (planned standalone →
+inlined into the harness → back here at rebirth); its bridge/`SessionProvider`
+sections died in §9.1's Superseded note and are not reproduced.
+
+**Provenance.** ACP's **Rust schema crate is the source of truth** — every
+official SDK is generated from its emitted JSON Schema. There is **no official
+Swift SDK**, and the three community ones (`aptove/swift-sdk`,
+`wiedymi/swift-acp`, `rebornix/acp-swift-sdk`) are pre-1.0, hand-typed (so
+they lag the schema), and partial — so we build our own, stealing their good
+ideas: actor connection, `AsyncStream` for `session/update`, in-memory test
+transport. License **Apache-2.0**, matching the spec and every reference SDK.
+Data types are **generated** from the published schema
+(`schema/v1/schema.json` + `meta.json`, from the `agentclientprotocol` org's
+releases); connection, role protocols, and transport are **hand-written**,
+porting the classic Rust async-trait design (rust-sdk v0.10.4: symmetric
+`*SideConnection`s, oneshot + pending-map JSON-RPC engine), not the heavier
+`Role`/`Builder` rewrite in runtime 1.0.0.
+
+**Type-mapping rules (schema → Swift).** Idiomatic, not a transliteration:
+
+- **Tagged unions** (`oneOf` + discriminator) → `enum` with associated values,
+  hand-rolled `Codable` keyed on the discriminator.
+- **Objects** → `struct` with explicit `CodingKeys` (wire is camelCase).
+- **String enums** (`ToolKind`, `ToolCallStatus`, `StopReason`, …) →
+  hand-rolled `Codable` routing unknown wire strings to `unknown(String)` — a
+  newer peer's value can't crash decoding.
+- **ID newtypes** (`SessionId`, `ToolCallId`, …) → distinct `RawRepresentable`
+  structs, never bare `String`.
+- **`_meta`/free-form fields** (`rawInput`, `rawOutput`, MCP env) →
+  `JSONValue`; `_meta` round-trips uninterpreted.
+- **Capability-gated optionals** — absence = unsupported. Negotiated surfaces
+  decode defaults-on-error (a malformed capability degrades to "unsupported",
+  never fails `initialize`); on encode, omit `nil`, never emit `null`.
+- **`protocolVersion` is a wire integer**: a `UInt16` newtype encoding bare
+  `1` (`.v1 = 1`, `.latest = .v1`), rejecting `"v1"`/`"1.0.0"`.
+- **Versioning**: target v1; growth via capabilities + `_meta`; generated code
+  checked in, regenerated on schema bump only.
+
+**Core type analogs** (representative; the generator emits the full set):
+
+```swift
 public struct SessionId: RawRepresentable, Codable, Hashable, Sendable { public let rawValue: String }
 public struct ToolCallId: RawRepresentable, Codable, Hashable, Sendable { public let rawValue: String }
-public struct TerminalId: RawRepresentable, Codable, Hashable, Sendable { public let rawValue: String }
 
-// ProtocolVersion — encodes/decodes as a bare integer (wire value 1), NOT "v1"/"1.0.0"
-public struct ProtocolVersion: RawRepresentable, Codable, Hashable, Sendable {
-    public let rawValue: UInt16
-    public static let v1 = ProtocolVersion(rawValue: 1)
-    public static let latest = v1
-}
-
-// ContentBlock — baseline Text + ResourceLink; others gated by PromptCapabilities
-public enum ContentBlock: Codable, Sendable {
-    case text(TextContent)
-    case image(ImageContent)
-    case audio(AudioContent)
-    case resource(EmbeddedResource)
-    case resourceLink(ResourceLink)
-}
-
-// SessionUpdate — the streaming notification payload (discriminator: `sessionUpdate`)
+// The streaming notification payload (discriminator: `sessionUpdate`)
 public enum SessionUpdate: Codable, Sendable {
     case userMessageChunk(ContentBlock)
     case agentMessageChunk(ContentBlock)
@@ -106,27 +609,13 @@ public enum SessionUpdate: Codable, Sendable {
     case toolCallUpdate(ToolCallUpdate)
     case plan(Plan)
     case availableCommandsUpdate([AvailableCommand])
-    case usageUpdate(UsageUpdate)              // token/usage accounting for the turn
-    case currentModeUpdate(SessionModeId)      // agent switched the active session mode
+    case usageUpdate(UsageUpdate)
+    case currentModeUpdate(SessionModeId)
 }
 
-// JSON-RPC errors — standard codes plus ACP's two custom ones; carry structured `data`, never
-// smuggle JSON through the message string.
-public struct RequestError: Error, Codable, Sendable {
-    public var code: Int           // -32700 parse, -32600 invalid request, -32601 method-not-found,
-    public var message: String     // -32602 invalid params, -32603 internal,
-    public var data: JSONValue?    // ACP: -32000 authRequired, -32002 resourceNotFound
-}
-
-// Tool calls — string enums carry unknown(String) for forward-compat; Codable is hand-rolled
-// (a raw-value enum can't hold the unknown payload), mapping wire strings like "in_progress".
-public enum ToolKind: Codable, Sendable, Hashable {
-    case read, edit, delete, move, search, execute, think, fetch, other
-    case unknown(String)
-}
 public enum ToolCallStatus: Codable, Sendable, Hashable {
     case pending, inProgress, completed, failed
-    case unknown(String)
+    case unknown(String)                    // forward-compat; hand-rolled Codable
 }
 public struct ToolCall: Codable, Sendable {
     public var toolCallId: ToolCallId
@@ -143,37 +632,20 @@ public struct ToolCallUpdate: Codable, Sendable {   // all optional → partial 
     public var content: [ToolCallContent]?
     public var rawOutput: JSONValue?
 }
-public enum ToolCallContent: Codable, Sendable {
-    case content(ContentBlock)
-    case diff(Diff)
-    case terminal(TerminalId)          // { type: "terminal", terminalId }
-}
 
-// Plan, stop reason
-public struct PlanEntry: Codable, Sendable { public var content: String; public var status: PlanEntryStatus; public var priority: PlanEntryPriority? }
-public struct Plan: Codable, Sendable { public var entries: [PlanEntry] }
-public enum StopReason: Codable, Sendable { case endTurn, maxTokens, refusal, cancelled; case unknown(String) }  // wire: end_turn, max_tokens, …
+public enum StopReason: Codable, Sendable { case endTurn, maxTokens, refusal, cancelled; case unknown(String) }
 
-// Permission
-public struct PermissionOption: Codable, Sendable { public var optionId: PermissionOptionId; public var name: String; public var kind: PermissionOptionKind }
-public enum PermissionOptionKind: Codable, Sendable { case allowOnce, allowAlways, rejectOnce, rejectAlways; case unknown(String) }  // wire: allow_once, …
-public enum RequestPermissionOutcome: Codable, Sendable { case selected(PermissionOptionId); case cancelled }
+// JSON-RPC errors: standard codes + ACP's -32000 authRequired / -32002 resourceNotFound,
+// structured `data`, never JSON smuggled through the message string.
+public struct RequestError: Error, Codable, Sendable { public var code: Int; public var message: String; public var data: JSONValue? }
 
-// Capabilities (negotiated in initialize)
-public struct PromptCapabilities: Codable, Sendable { public var image: Bool?; public var audio: Bool?; public var embeddedContext: Bool? }
-public struct AgentCapabilities: Codable, Sendable { public var promptCapabilities: PromptCapabilities?; public var loadSession: Bool? /* … */ }
-
-// Free-form JSON for _meta / rawInput / rawOutput
 public enum JSONValue: Codable, Sendable {
     case null, bool(Bool), number(Double), string(String), array([JSONValue]), object([String: JSONValue])
 }
 ```
 
----
-
-## 4. Role protocols
-
-Hand-written. Implement `Agent` to be driven by an editor; implement `Client` to drive an agent.
+**Role protocols** (hand-written; implement `Agent` to be driven by an editor,
+`Client` to drive an agent):
 
 ```swift
 public protocol Agent: Sendable {
@@ -183,10 +655,10 @@ public protocol Agent: Sendable {
     func prompt(_ p: PromptRequest) async throws -> PromptResponse                  // returns StopReason
     func cancel(_ p: CancelNotification) async                                       // notification
     func authenticate(_ p: AuthenticateRequest) async throws -> AuthenticateResponse // optional
-    func setSessionConfigOption(_ p: SetSessionConfigOptionRequest) async throws -> SetSessionConfigOptionResponse // optional; supersedes session/set_mode
-    @available(*, deprecated, message: "Use setSessionConfigOption; session/set_mode is being removed")
-    func setSessionMode(_ p: SetSessionModeRequest) async throws -> SetSessionModeResponse // deprecated
-    // Session management — stabilized in the current schema (newer than the published TS/Rust-classic SDKs)
+    func setSessionConfigOption(_ p: SetSessionConfigOptionRequest) async throws -> SetSessionConfigOptionResponse
+    @available(*, deprecated, message: "Use setSessionConfigOption")
+    func setSessionMode(_ p: SetSessionModeRequest) async throws -> SetSessionModeResponse
+    // Session management — stabilized in the current schema
     func listSessions(_ p: ListSessionsRequest) async throws -> ListSessionsResponse   // optional
     func resumeSession(_ p: ResumeSessionRequest) async throws -> ResumeSessionResponse // optional
     func deleteSession(_ p: DeleteSessionRequest) async throws                          // optional
@@ -195,332 +667,130 @@ public protocol Agent: Sendable {
 }
 
 public protocol Client: Sendable {
-    // Notification the agent FIRES at the client — no response. The dominant traffic.
-    func sessionUpdate(_ n: SessionNotification) async               // session/update (notification)
-    // Requests the agent makes back INTO the client, mid-turn:
+    func sessionUpdate(_ n: SessionNotification) async               // notification; the dominant traffic
     func requestPermission(_ p: RequestPermissionRequest) async throws -> RequestPermissionResponse
-    func readTextFile(_ p: ReadTextFileRequest) async throws -> ReadTextFileResponse   // fs/read_text_file
-    func writeTextFile(_ p: WriteTextFileRequest) async throws                         // fs/write_text_file
+    func readTextFile(_ p: ReadTextFileRequest) async throws -> ReadTextFileResponse
+    func writeTextFile(_ p: WriteTextFileRequest) async throws
     // Terminals — the client owns them; the agent drives them. Capability-gated.
-    func createTerminal(_ p: CreateTerminalRequest) async throws -> CreateTerminalResponse   // terminal/create → terminalId
-    func terminalOutput(_ p: TerminalOutputRequest) async throws -> TerminalOutputResponse   // snapshot: output + truncated + exitStatus?
-    func waitForTerminalExit(_ p: WaitForExitRequest) async throws -> WaitForExitResponse     // long-lived: resolves on process exit
-    func killTerminal(_ p: KillTerminalRequest) async throws                                  // terminal/kill
-    func releaseTerminal(_ p: ReleaseTerminalRequest) async throws                            // terminal/release
+    func createTerminal(_ p: CreateTerminalRequest) async throws -> CreateTerminalResponse
+    func terminalOutput(_ p: TerminalOutputRequest) async throws -> TerminalOutputResponse
+    func waitForTerminalExit(_ p: WaitForExitRequest) async throws -> WaitForExitResponse
+    func killTerminal(_ p: KillTerminalRequest) async throws
+    func releaseTerminal(_ p: ReleaseTerminalRequest) async throws
 }
 ```
 
-`session/prompt` is **long-lived**: it stays pending for the whole turn while the agent fires many
-`session/update` notifications and issues the reverse-direction requests above; its response (a
-`StopReason`) arrives only at turn end. `session/update` is a *notification the agent sends on the
-connection*, not a value returned from `prompt`. Terminals are the symmetric case in the other
-direction — the client runs the process and streams its output to its own UI, while the agent reads
-that stream via `terminalOutput` (snapshot, bounded by `outputByteLimit` + `truncated`) and
-`waitForTerminalExit` (blocks until exit), and embeds the `terminalId` in a `tool_call` so the client
-renders live output.
+Method-name mapping is internal (`session/new` → `newSession`); optional
+methods are capability-gated, unsupported calls return JSON-RPC
+method-not-found. **Connections** are two symmetric objects over one byte
+stream, each taking a **factory closure** so the handler can capture its own
+connection for reverse calls:
+`AgentSideConnection(stream:) { conn in HarnessACPAgent(conn, harness) }` /
+`ClientSideConnection(stream:) { agent in MyClient(agent) }`. **Wire
+invariants at the type boundary**: paths absolute, line numbers 1-based (an
+`AbsolutePath` newtype makes violations decode-time errors); chunks correlate
+by message id, tool calls by `toolCallId`
+(`pending → in_progress → completed/failed`), and the API surfaces those ids —
+consumers never infer ordering.
 
-Method-name mapping is internal: `session/new` → `newSession`, `fs/read_text_file` → `readTextFile`,
-`terminal/create` → `createTerminal`, etc. Optional methods are gated by advertised capabilities
-(`clientCapabilities.terminal`, `fileSystem`, …); unsupported calls return JSON-RPC
-method-not-found.
+**Connection model — two concurrent streams, not request/response.** ACP is
+full-duplex and notification-first: either peer sends requests and
+notifications at any time, many in flight both directions. `session/prompt`
+stays pending the whole turn while the agent fires `session/update`
+notifications and issues reverse-direction requests concurrently; it resolves
+only at turn end with a `StopReason` — the turn's content is the notification
+stream, the response just the terminator. The client side surfaces per-session
+`session/update` as an `AsyncStream<SessionUpdate>`; the agent side fires and
+forgets. Implementation: one read loop per connection; correlation via
+monotonic id + `[RequestID: CheckedContinuation]` inside the connection actor
+(which also serializes writes); **each inbound request dispatches as its own
+`Task`** — why a slow `session/prompt` can't head-of-line-block a
+`session/cancel` or callback; long-lived requests are suspended continuations
+that must never block the read loop. **Fail loud on disconnect** (a real
+TS-SDK gap): on EOF/error, reject every pending continuation and finish the
+streams; per-request timeouts; honor `Task` cancellation. **Tolerate
+late/out-of-order notifications**: a `tool_call_update` may arrive after the
+prompt response or a cancel — correlate to turn/session, drop or attribute
+deliberately. **Framing**: ndJSON — one UTF-8 JSON object per line, **no
+`Content-Length` headers** (not LSP; we own the codec); buffer partial lines,
+tolerate escaped slashes, log-and-skip bad lines. **stdout is sacred — the #1
+field failure**: nothing but ACP messages on stdout, logs to stderr; the
+target exposes a logger and never prints (tested, §9.1/§10).
 
-**Connections.** Two symmetric objects wrap one bidirectional byte stream. Each takes a **factory
-closure**, not a finished handler, so the handler can capture its own connection and issue the reverse
-calls (the pattern both reference SDKs use — without it an `Agent` has no handle to fire
-`sessionUpdate`/`requestPermission` back at the client):
-- `AgentSideConnection(stream:) { conn in MyAgent(conn) }` — dispatches incoming Client→Agent calls to
-  your `Agent`; the `conn` it hands you exposes the outbound calls the agent makes *into* the client
-  (`sessionUpdate`, `requestPermission`, `fs/*`, `terminal/*`).
-- `ClientSideConnection(stream:) { agent in MyClient(agent) }` — the editor/host side; drives an agent
-  and dispatches its Agent→Client calls/notifications to your `Client`.
+**Codegen — build-time, incremental, checked in.**
 
-Both sit on one shared full-duplex JSON-RPC `Connection` (§5).
+- **Vendored schema + routing manifest**: `schema/v1/schema.json` AND
+  `meta.json` (canonical artifacts on the `agentclientprotocol` org's
+  `schema-v*` releases) in `Schema/`; bumping ACP = dropping in a new pair.
+- **Routing table generated from `meta.json`** (`x-side`/`x-method`), never
+  hand-wired — structurally avoids the TS-SDK bug class (`setSessionModel`
+  wired to `session/set_mode`). Unstable methods generate from
+  `meta.unstable.json` into an `Unstable` namespace.
+- **No-op unless the schema changed** (content-hash stamp in the output).
+- **Generated code checked in** — consumers just compile source.
+- **A SwiftPM command plugin** (`swift package generate-acp`) writes the
+  files (command plugins may write to the package dir; build-tool plugins
+  can't); CI runs it and **fails on any diff**.
 
-**Wire invariants enforced at the type boundary.** All file paths crossing the protocol are
-**absolute** and all line numbers are **1-based** — encode these in the path/location types (e.g. an
-`AbsolutePath` newtype) so a relative path or 0-based line is a compile- or decode-time error, not a
-silent interop bug. Content chunks correlate by message id and tool calls by `toolCallId`
-(`pending → in_progress → completed/failed`); the public API surfaces those ids so consumers never
-have to infer ordering.
+Hand-written, never generated: transport, connections, role protocols,
+`JSONValue`, the `unknown` fallbacks.
 
----
+**Vendor schema v1.19.x** (checked 2026-07-14): request cancellation (v1.17)
+and boolean session config options (v1.18) stable; ID naming unified
+(regenerate, don't patch); elicitation still unstable. Keep the pipeline ready
+to vendor a v2 schema behind a labeled unstable namespace when the RFDs
+publish (§9.1 tailwind) — don't chase v2 into the stable surface.
 
-## 5. Connection model — two concurrent streams, not request/response
+**Wire-layer testing** (`FoundationModelsACPTests`, §10): ndJSON makes a
+session trivially recordable — tee the byte stream and you have a replayable
+script. `ReplayTransport` replays a recorded client→agent script against
+golden `session/update` fixtures (framing, ordering, tool-call pairing, late
+updates, `StopReason` — deterministic, no model); `InMemoryTransport` (paired
+in-process `AsyncStream`s) wires a `Client` and `Agent` back-to-back with no
+pipes. A captured run doubles as an eval case (§10.1).
 
-ACP is **full-duplex and notification-first**. A connection is two independent streams of JSON-RPC
-messages flowing at once; either peer may send **requests** (carry an `id`, expect a response) and
-**notifications** (no `id`, no response) at any time, with multiple requests in flight in both
-directions simultaneously. Designing this as request/response with streaming bolted on is the wrong
-shape — the dominant traffic is notifications, and long-lived requests overlap freely.
+**Open questions**: generator choice (custom SwiftSyntax vs off-the-shelf —
+the checked-in pipeline tilts custom); which stable methods surface
+first-class vs `Unstable` (terminals, `set_config_option`, `logout`, session
+management are stable as of v1.19); how aggressively to track point releases.
 
-**The shape of a prompt turn.** The client sends `session/prompt` (one request) and it stays pending
-for the entire turn. During that window the agent:
-- fires **many `session/update` notifications** — `agent_message_chunk`, `agent_thought_chunk`,
-  `tool_call`, `tool_call_update`, `plan`, `available_commands_update` (discriminator
-  `sessionUpdate`); none of these expect a response, and
-- concurrently issues **reverse-direction requests** into the client — `fs/read_text_file`,
-  `fs/write_text_file`, `session/request_permission`, `terminal/*` — each awaiting a response from
-  the client while the prompt request is still open.
+### 10.1 Evaluations — `PythonCLIEvaluation` (end-to-end coding agent)
 
-Only at turn end does the agent answer the original `session/prompt` with a `StopReason`. So the
-turn's content is a notification stream; the request's "response" is just the terminator.
+*(Moved here 2026-07-21 from the harness plan: this eval drives real `files`
++ `shell` tools, and no tool package may be referenced in the harness
+package — the harness keeps a compaction-focused eval over sample tools
+instead. This one belongs to the layer that composes the roster.)*
 
-**The dominant stream → `AsyncStream`.** The client side surfaces per-session `session/update` as an
-`AsyncStream<SessionUpdate>` — the bridge AgentViewKit's `AgentViewSession` adapter consumes. The
-agent side simply *fires* these (no await). This is the primary API, not an edge case.
+**`PythonCLIEvaluation` (files + shell, end to end).** Drives both core
+tools through a real multi-turn build task, on Apple's Evaluations framework
+(swift-testing native), gated on Apple silicon + real models + network:
 
-**Terminals are the mirror stream.** `terminal/create` returns a `terminalId`; the **client** runs
-the process and streams output to its own UI; the **agent** consumes that stream by polling
-`terminal/output` (a bounded snapshot) and/or awaiting `terminal/wait_for_exit` (a long-lived
-request that resolves on exit), then `terminal/release`. Output is bounded by `outputByteLimit` with
-a `truncated` flag. So the client produces a stream the agent reads, mirroring how the agent produces
-the `session/update` stream the client reads — two streams, opposite directions.
+1. **Subject**: `subject(from sample:)` creates a **fresh temp workspace** —
+   the session's `workingDirectory` and the tools' confinement root — wires
+   recording into a temp location, constructs the composed agent with real
+   `files`/`shell` tools and the coding instructions, runs it to completion
+   on the sample's prompt, and returns a result carrying the workspace path,
+   the transcript, and run stats.
+2. **Dataset**: `ArrayLoader` of `ModelSample`s — each prompt a variant of
+   "build a small Python CLI" (`pyproject.toml`, at least one third-party
+   package such as `click`, the CLI, pytest tests, a project-local venv,
+   pytest green, then run it), with `expected` carrying the fixed
+   input/output pair the finished CLI must satisfy. Start with 20–30
+   hand-written samples per Apple's guidance; scale later with
+   `SampleGenerator`.
+3. **Quantitative `Evaluator`s — mechanical, re-verified outside the agent**
+   (never trusting the transcript's claims), one `Metric` each, returning
+   `.passing()`/`.failing()` with rationales: `PytestGreen` (the evaluator
+   re-runs `pytest` in the venv itself, exit 0), `CLIRuns` (executes the CLI
+   itself against `sample.expected`'s fixed input and checks the output),
+   `FilesPresent` (expected files exist), and `ToolTraffic` (the transcript
+   contains both `files` and `shell` tool calls).
+4. **Aggregation and target**: `MetricsAggregator.computeMean` per metric;
+   the `@Test` asserts mean pass rates against thresholds. Turn count,
+   tool-call counts, and token usage ride along as scored values, keyed by
+   the resolved model from `manifest.json`.
 
-**Implementation.** One read loop per connection dispatches each inbound message by kind:
-request → role handler → send a response keyed by `id`; notification → route to the handler /
-per-session `AsyncStream`; response → resolve the pending continuation for that `id`. Correlation is a
-monotonic numeric id + a `[RequestID: CheckedContinuation]` map held inside the connection `actor`,
-which also serializes writes (no separate write queue needed). **Each inbound request is dispatched as
-its own `Task`** — this is *why* a slow `session/prompt` doesn't head-of-line-block an incoming
-`session/cancel`, `request_permission`, or `fs/*` callback; cancellation only works because requests
-run concurrently. **Long-lived requests** (`session/prompt`, `terminal/wait_for_exit`) are just
-suspended continuations — they must never block the read loop or other in-flight traffic.
+Isolation rules: everything happens inside the temp workspace — venv within
+it, no system-Python mutation, no network beyond package install; the
+workspace is deleted after grading (transcripts retained for failed runs).
 
-**Fail loud on disconnect, never hang (a real TS-SDK gap).** When the read loop hits EOF or the stream
-errors, **reject every pending continuation** with a connection-closed error and finish the
-`AsyncStream`s — the published TS SDK leaves outstanding callers hung forever on disconnect, which we
-must not reproduce. Add a **per-request timeout** and honor Swift `Task` cancellation so a stuck peer
-can't wedge a caller. Reap the child process on the client side when driving an external agent.
-
-**Tolerate late and out-of-order notifications.** A `tool_call_update` can arrive *after* the prompt
-response, or after a `session/cancel`, because the agent may emit final updates before terminating
-the turn — clients SHOULD keep accepting them. The consumer must correlate every notification to the
-current turn/session and drop or attribute stragglers deliberately (a real interop hazard, not
-theoretical). `session/cancel` is itself a **notification**; the turn still ends through the prompt
-response with `StopReason.cancelled`, possibly after more updates land.
-
-**Framing & errors.** Newline-delimited JSON over stdio (the `ndJsonStream` framing ACP uses — this
-settles the earlier framing question). **One JSON object per `\n`-delimited line, UTF-8, no embedded
-newlines, and crucially NO `Content-Length` headers** — this is *not* LSP framing, so we own the codec
-rather than reusing an LSP `JSONRPC` library. The read side buffers and retains a trailing partial line
-across reads, and tolerates a JSON-escaped slash in method names (`session\/update`). A line that
-fails to parse is logged and skipped, not fatal. JSON-RPC errors map to typed `RequestError`s (§3);
-`_meta` is preserved on every message.
-
-**stdout is sacred — the #1 field failure.** The agent MUST write nothing to stdout but valid ACP
-messages; **all logging goes to stderr.** A stray `print`, a banner, a `dotenv` line, or a progress bar
-on stdout corrupts framing and drops frames. The package exposes a logger/delegate and never prints to
-stdout itself, and we document this loudly for agent authors.
-
----
-
-## 6. Codegen pipeline — build-time, incremental, checked-in
-
-- **Vendored schema + routing manifest.** Drop BOTH `schema/v1/schema.json` and `schema/v1/meta.json`
-  into the repo (e.g. `Schema/acp-v1.json`, `Schema/acp-v1.meta.json`) — these are the canonical
-  artifacts attached to the `agentclientprotocol` org's `schema-v*` GitHub releases (Rust-sourced via
-  schemars), **not** a pinned SDK, which is how we pick up the full current method set (the published TS
-  0.4.5 / Rust-classic SDKs lag it). Bumping ACP = dropping in the new pair; nothing else changes by
-  hand.
-- **Generate the method-routing table from `meta.json`, never hand-wire it.** `meta.json` carries each
-  method's `x-side`/`x-method` routing, so the dispatch table is derived, not typed by hand — this
-  structurally avoids the class of bug in the TS SDK where `setSessionModel` was wired to
-  `session/set_mode`. Generate `unstable` methods from `meta.unstable.json` into a separate namespace.
-- **Build-time, but a no-op unless the schema changed.** The generator stamps the schema's content
-  hash into the generated output; on each run it compares the current schema hash to the stamp and
-  exits immediately when unchanged. So a normal build does zero codegen work — real generation fires
-  only when a new schema is dropped in.
-- **Generated code is checked in.** `Sources/.../Generated/*.swift` plus the hash stamp are
-  committed, so consumers just compile source — no plugin or tool needed to build the package. The
-  committed output *is* the cache that makes "don't regenerate unless needed" free.
-- **Wiring.** Generation runs as a SwiftPM **command plugin** (`swift package generate-acp`) that
-  writes the checked-in files — command plugins can write to the package directory with explicit
-  permission, whereas build-tool plugins are sandboxed out of the source tree. CI runs it and
-  **fails on any diff**, guaranteeing the committed code always matches the vendored schema.
-
-Hand-written, never generated: transport, connections, role protocols, `JSONValue`, the `unknown`
-fallbacks, and conveniences.
-
----
-
-## 7. FoundationModels bridge — Apple-native → ACP for free
-
-The flagship use: expose anything that speaks the WWDC 2026 **`LanguageModel`** interface as an ACP
-agent, so an Apple-native `LanguageModelSession` is drivable by any ACP client (Zed, our runtime, an
-editor) with no glue. It's part of the package — on macOS 27 FoundationModels is always present, so
-there's nothing to split out.
-
-```swift
-// One wrapper turns a FoundationModels session into an ACP Agent.
-// The factory hands the agent its connection so it can fire session/update + reverse calls (§4).
-try await AgentSideConnection(stream: .stdio) { conn in
-    FoundationModelsAgent(
-        connection: conn,
-        session: LanguageModelSession(model: SystemLanguageModel.default, tools: myTools))
-}.run()
-```
-
-`FoundationModelsAgent` conforms to `Agent` (§4) and maps the two models onto each other:
-
-- **`prompt` → generation.** An ACP `session/prompt` drives `session.streamResponse(to:)`; the
-  long-lived request stays open for the turn and returns a `StopReason` at the end (`.endTurn`,
-  `.maxTokens`, `.refusal`, `.cancelled`).
-- **`Transcript`/stream → `session/update` notifications.** As the response streams, the bridge fires
-  notifications off the growing FM `Transcript`: `.response` text segments → `agent_message_chunk`;
-  reasoning → `agent_thought_chunk`; `.toolCalls` → `tool_call` then `tool_call_update` as it runs →
-  completes, paired with the following `.toolOutput`; a `.structure` segment / Dynamic-Profile plan →
-  `plan`. This is the exact inverse of AgentViewKit's mapping (§9 there) — a Transcript becomes a
-  `SessionUpdate` stream where AgentViewKit turns a `SessionUpdate` stream back into a Transcript — so
-  a turn round-trips FM → ACP → FM losslessly.
-- **FM tools ↔ ACP client capabilities.** A FoundationModels `Tool` runs in-process; when its work
-  needs the *client's* environment — read/write a file, run a command, ask permission — the bridge
-  issues the reverse-direction ACP requests (`fs/*`, `terminal/*`, `session/request_permission`)
-  rather than touching the host directly, so an FM tool transparently uses the editor's filesystem and
-  consent.
-- **Any conformer, not just the system model.** Because it wraps the `LanguageModel` protocol, one
-  bridge exposes Apple's on-device model, PCC, or a conforming Claude / Gemini / MLX / llama as an ACP
-  agent — the runtime's whole backend set (runtime-spec §4.1) reachable over ACP through a single
-  wrapper.
-
-`cancel` maps to FM session cancellation; the turn still terminates through the prompt response with
-`StopReason.cancelled` (§5).
-
-### 7.1 One execution path: the bridge drives only `LanguageModelSession`
-
-There is deliberately **no engine protocol**. `FoundationModelsAgent` always drives a real
-`LanguageModelSession` — the identical code path for the one-liner above and for a full product like
-**`FoundationModelsAgentHarness`** (its plan §8 moves recording/gating into a `LanguageModel`
-*handle*, so its sessions are ordinary Apple sessions with nothing to hide). What varies is only
-*where sessions come from*, expressed as a small provider the constructor takes:
-
-```swift
-public struct SessionProvider: Sendable {
-    // Required. The cwd arrives in session/new; the provider builds the session for it
-    // (config, tools, instructions) and names it.
-    public var makeSession: @Sendable (AbsolutePath, [MCPServerConfig]) async throws
-        -> (SessionId, LanguageModelSession)
-    // Optional store hooks — presence gates the session-management capabilities.
-    public var listSessions: (@Sendable () async throws -> [SessionSummary])?
-    public var restoreSession: (@Sendable (SessionId) async throws -> LanguageModelSession)?
-        // typically LanguageModelSession(model:tools:transcript:)
-    public var deleteSession: (@Sendable (SessionId) async throws -> Void)?
-
-    // Optional. Invoked by the bridge when a prompt turn completes, with the
-    // session's final Transcript. Providers use it for turn-boundary work the
-    // bridge can see but they cannot — e.g. the harness syncs Router's recording
-    // model handle so the turn-final response is durably recorded (channel
-    // events are write-only at the LanguageModel boundary; see the harness
-    // plan §8). Absence changes nothing.
-    public var onTurnEnded: (@Sendable (SessionId, Transcript) async -> Void)?
-}
-```
-
-- **The one-liner stays.** `FoundationModelsAgent(connection:session:)` is sugar for a provider
-  whose `makeSession` returns that session and whose hooks are nil — the flagship
-  "Apple-native → ACP for free" story is unchanged on the wire and in code.
-- **Overlapping `session/prompt` requests serialize naturally** on the bridge actor — a
-  `LanguageModelSession` runs one turn at a time; each pending request resolves at its own turn's
-  end. No queue abstraction leaks into this package.
-- **Session management forwards to the hooks**; absent hooks → capability off / method-not-found
-  (§4). Consumers with a durable store (the harness's `TranscriptStore`) get full `session/list` /
-  `load` / `resume` / `delete`; the bare one-liner doesn't pretend to.
-- **Recording is invisible here.** The harness's recording happens inside the `LanguageModel` its
-  sessions are built over; this package neither knows nor cares.
-
-This supersedes an earlier `ACPTurnEngine` draft of this section: a protocol over "turn engines"
-created a second execution path through the bridge, while a session *provider* keeps exactly one.
-Dependency direction is unchanged: this package keeps zero family dependencies — the provider's
-currency is `LanguageModelSession` itself; consumers (the harness, the runtime) depend on this
-package.
-
-### 7.2 Spec drift since v0.5 (checked 2026-07-14)
-
-The schema moved after this plan's 2026-06-28 draft; vendor **schema v1.19.x** and note:
-
-- **Stabilized since:** request cancellation (v1.17.0), boolean session config options (v1.18.0);
-  ID naming conventions unified across the schema (affects generated newtypes — regenerate, don't
-  patch). Elicitation gained option descriptions but remains unstable (v1.19.0).
-- **ACP v2 is in active RFD** (collection went Active 2026-07-02): `session/resume` (with
-  `replayFrom` cursors) **replaces** `session/load`; `session/list` / `resume` / `close` become
-  **baseline** whenever sessions are supported; permission requests gain required titles +
-  structured subjects; typed config values; Content types align with MCP. Consequence for this
-  package: the §7.1 session-management seam is not optional polish — it is the v2 baseline shape —
-  and the codegen pipeline (§6) should be ready to vendor a second (v2) schema behind a clearly
-  labeled unstable namespace when it publishes. Do not chase v2 RFDs into the stable surface yet.
-
----
-
-## 8. Testing & evaluation — recorded transcripts + local-model evals
-
-Two layers, both runnable in CI on Apple Silicon with no API keys or billing, because the model under
-test is the on-device **`SystemLanguageModel`**. Swift Testing throughout (XCTest is legacy as of
-WWDC 2026).
-
-- **Recorded transcripts → deterministic wire tests.** The ndJSON framing (§5) makes a session
-  trivially recordable: tee the byte stream to a fixture while it runs and you have a replayable script
-  of the exact request/notification sequence. A `ReplayTransport` feeds a recorded client→agent script
-  and asserts the agent's emitted `session/update` sequence against a golden fixture — no live model
-  needed — so protocol-layer correctness (framing, ordering, tool-call pairing, late
-  `tool_call_update`, `StopReason`) is tested deterministically. Capture a real run once, replay it
-  forever. Alongside `ReplayTransport`, ship an **`InMemoryTransport`** (a pair of in-process
-  `AsyncStream`s, as `rebornix/acp-swift-sdk` does) so a `Client` and `Agent` can be wired
-  back-to-back in a single test with no pipes or subprocess — the fastest way to exercise the full
-  bidirectional handshake.
-- **Evaluations framework → behavioral quality.** WWDC 2026's **Evaluations framework** quantifies the
-  quality of model-driven behavior as prompts change. Pointed at the `FoundationModelsAgent` over the
-  local model, it answers what golden fixtures can't: does this prompt reliably produce a well-formed
-  `tool_call`, the right tool, a correct structured result — and does a prompt tweak help or hurt,
-  measured statistically across cases. The local model is the basis precisely because it's free,
-  on-device, and reproducible enough to gate CI.
-- **The two compose.** A captured run is *both* a golden fixture (deterministic replay) and an eval
-  case (feed the same prompts to the live local model and score the result). One transcript tests the
-  wire and seeds the eval set; the `fm` CLI plus the local model make capturing new fixtures a
-  one-liner.
-
----
-
-## 9. Integration
-
-- **Runtime agent surface (runtime-spec §4.3).** The runtime's `Agent` is the `FoundationModelsAgent`
-  bridge (§7): `newSession` runs cwd + two-scope discovery and returns a `SessionId`; `prompt` runs a
-  long-lived turn that drives a `LanguageModelSession` and fires `agent_message_chunk` / `tool_call` /
-  `tool_call_update` / `plan` off the Transcript, calling back into the client for `requestPermission`
-  (the permission gate) and, when a tool runs a command, `terminal/*`; it returns a `StopReason` only
-  at turn end. The runtime calls the Rust core (UniFFI) for registry/dispatch only.
-- **AgentViewKit.** AgentViewKit observes a FoundationModels `Transcript` directly (its native binding).
-  For an ACP-driven agent, the client-side `AsyncStream<SessionUpdate>` is mapped *into* a `Transcript`
-  — `agent_message_chunk` → `.response` text, `tool_call`/`tool_call_update` → `.toolCalls`/`.toolOutput`
-  — with `agent_thought_chunk`/`plan`/`requestPermission` arriving as custom `.structure` segments. So
-  the ACP client is just another producer of the same Transcript the kit already renders (the inverse of
-  §7's bridge).
-- **Driving other ACP agents.** The `Client` side lets the runtime *drive* an external ACP agent —
-  e.g. Gemini CLI's `--experimental-acp` mode — reusing the same package from the other role.
-
----
-
-## 10. Open questions
-
-- **Generator choice:** a custom SwiftSyntax generator vs an off-the-shelf JSON-schema→Swift tool
-  (e.g. quicktype) vs generating from the Rust schemars output. Custom gives the cleanest enums +
-  ID newtypes + `unknown` fallbacks; off-the-shelf is less code to own. The checked-in pipeline (§6)
-  tilts toward custom — it runs only on a schema change, its output is reviewed as a normal diff, and
-  consumers never run it.
-- **Stable vs unstable (updated to schema v1.19, 2026-07-14):** **stable** and first-class here are
-  terminals (gated by `clientCapabilities.terminal`), `session/set_config_option`, `logout`, the
-  session-management methods (`session/list`, `session/resume`, `session/delete`, `session/close`),
-  **request cancellation** (v1.17.0), and **boolean session config options** (v1.18.0);
-  `session/set_mode` is **deprecated** in favor of `set_config_option`. What remains **unstable**
-  (only in `meta.unstable.json`) is **elicitation** (`elicitation/*` — gained option descriptions in
-  v1.19.0, still unstable), **providers/\***, **`session/fork`**, **`nes/*`**
-  (next-edit-suggestions), **`mcp/*`**, and **`document/did*`**. Generate the unstable set behind an
-  `Unstable` namespace, gate behind capability flags, and mark clearly — don't expose them as if
-  settled. See §7.2 for the v2 RFD trajectory.
-- **Versioning policy:** how aggressively to track ACP point releases, and whether to vendor multiple
-  schema versions or pin one.
-- **Reasoning representation (bridge):** FM's `Transcript` models prompt/response/tools but reasoning
-  isn't a first-class entry — does WWDC 2026 expose a thought stream the bridge maps to
-  `agent_thought_chunk`, or does the bridge synthesize it from a `.structure` reasoning segment? Affects
-  the FM→ACP mapping (§7) and the inverse in §9.
-- **ACP→Transcript as a shipped utility:** the client-side mapping in §9 (a `SessionUpdate` stream into a
-  `Transcript` + custom segments) is the natural symmetric half of the bridge — ship it in the package so
-  AgentViewKit consumes any ACP agent uniformly, or leave it to the runtime?
