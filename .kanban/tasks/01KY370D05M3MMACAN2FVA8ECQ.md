@@ -47,8 +47,12 @@ comments:
   id: 01ky3desrm1ar7wffq1q674kt2
   text: 'really-done complete. Verification: swift test exit 0 — 187+3+116 tests pass, 0 warnings on a forced clean recompile of the test target. Adversarial double-check verdict: PASS — confirmed no Bridge file deletions, ported files reference zero Bridge-defined symbols, Bridge tests still green via delegating bridgeNewSessionRequest and module-wide moved helpers, fixture diff is exactly the one message-string line, all original coverage mapped 1:1 (incl. 100x determinism loop and trailing-update-after-cancel), and ScriptedAgent''s cancel semantics match spec (always resolves cancelled on session/cancel). Work done and green; leaving task in doing for /review.'
   timestamp: 2026-07-21T22:41:31.412465+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01ky3e8622rh6p3c5q82g44sey
+  text: 'Review pass (2026-07-21, scope HEAD~2..HEAD): engine returned 4 candidate findings; all dropped under the review skill''s existing-test exception. (1) BridgeTestSupport makeBridgeAgent/makeWiredBridgeAgent dedup — both pre-existed at HEAD~2; Bridge test support is slated for deletion in the blocked follow-up task. (2) TurnRecorder.events() and (3) TurnGate flagged as dead code — refuted: both are used by pre-existing Bridge tests (PromptSerializationTests.swift:14,15,40,47,62; StopReasonTests.swift:112) in the same test target; this task explicitly forbids touching Bridge tests. (4) TurnGate enum-state restyle — pre-existing helper ported verbatim; restyling existing test code is out of scope. Net recordable findings: 0 → task advanced to done.'
+  timestamp: 2026-07-21T22:55:23.202075+00:00
+position_column: done
+position_ordinal: '9980'
 title: Port end-to-end and golden-replay tests off the bridge onto a scripted wire Agent
 ---
 ## What

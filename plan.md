@@ -8,6 +8,10 @@
 > commands, `HarnessACPAgent` over the harness) briefly lived in this plan and
 > is now its own package:
 > [`../FoundationModelsACPAgent`](../FoundationModelsACPAgent/plan.md).
+> Accordingly (decided 2026-07-21), the in-repo bridge — `FoundationModelsAgent`,
+> `SessionProvider`, `TranscriptBuilder`, `ClientEnvironment` — and the
+> model-driven Evals target are removed from this repo, executing the
+> composition plan's §9.1 Superseded note; the docs present only the wire.
 > History for the curious: planned standalone → wire inlined into the harness →
 > reborn here carrying the composition → split; each move followed the
 > noun-ownership test, and this is the stable shape: the wire's consumers
