@@ -173,22 +173,6 @@ func jsonValue(_ string: String) throws -> JSONValue {
     try JSONDecoder().decode(JSONValue.self, from: Data(string.utf8))
 }
 
-/// Wraps text as an agent-message-chunk update, matching the mapper's output.
-///
-/// - Parameter text: The chunk text.
-/// - Returns: The message-chunk update.
-func messageChunkUpdate(_ text: String) -> SessionUpdate {
-    .agentMessageChunk(ContentChunk(content: .text(TextContent(text: text))))
-}
-
-/// Wraps text as an agent-thought-chunk update, matching the mapper's output.
-///
-/// - Parameter text: The chunk text.
-/// - Returns: The thought-chunk update.
-func thoughtChunkUpdate(_ text: String) -> SessionUpdate {
-    .agentThoughtChunk(ContentChunk(content: .text(TextContent(text: text))))
-}
-
 // MARK: - Canonical requests
 
 /// A canonical initialize request at the latest protocol version.
@@ -196,81 +180,11 @@ func bridgeInitializeRequest() -> InitializeRequest {
     InitializeRequest(protocolVersion: .latest)
 }
 
-/// A canonical new-session request rooted at the shared test cwd.
+/// A canonical new-session request rooted at the shared test cwd — the
+/// bridge-named alias of the wire helper ``newSessionRequest(mcpServers:)``.
 ///
 /// - Parameter mcpServers: The MCP configs to carry; empty by default.
 /// - Returns: A new-session request.
 func bridgeNewSessionRequest(mcpServers: [MCPServerConfig] = []) -> NewSessionRequest {
-    NewSessionRequest(cwd: testCwd, mcpServers: mcpServers)
-}
-
-// MARK: - Turn instrumentation
-
-/// Records an ordered log of turn events so a test can assert the exact
-/// interleaving of concurrent turns.
-actor TurnRecorder {
-    /// The events recorded so far, in order.
-    private var log: [String] = []
-
-    /// Appends one event to the log.
-    ///
-    /// - Parameter event: The event name to record.
-    func record(_ event: String) {
-        log.append(event)
-    }
-
-    /// The ordered events recorded so far.
-    func events() -> [String] {
-        log
-    }
-
-    /// Whether the given event has been recorded.
-    ///
-    /// - Parameter event: The event name to look for.
-    /// - Returns: `true` once the event has been recorded.
-    func contains(_ event: String) -> Bool {
-        log.contains(event)
-    }
-}
-
-/// A one-shot gate a test opens to release turns it is holding mid-body,
-/// letting the test control exactly when a turn completes.
-actor TurnGate {
-    /// Whether the gate has been opened.
-    private var isOpen = false
-
-    /// Continuations parked in ``wait()`` until the gate opens.
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    /// Opens the gate, resuming every parked waiter.
-    func open() {
-        isOpen = true
-        let parked = waiters
-        waiters.removeAll()
-        for waiter in parked {
-            waiter.resume()
-        }
-    }
-
-    /// Suspends until the gate is open.
-    func wait() async {
-        if isOpen {
-            return
-        }
-        await withCheckedContinuation { waiters.append($0) }
-    }
-}
-
-/// Spins until the recorder has seen `event`, yielding between checks.
-///
-/// Deterministic because the awaited event is one a turn body always records;
-/// bounded by the test's time limit.
-///
-/// - Parameters:
-///   - recorder: The recorder to poll.
-///   - event: The event to wait for.
-func waitUntil(_ recorder: TurnRecorder, records event: String) async {
-    while await !recorder.contains(event) {
-        await Task.yield()
-    }
+    newSessionRequest(mcpServers: mcpServers)
 }

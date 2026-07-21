@@ -1,5 +1,4 @@
 import Foundation
-import FoundationModels
 import Testing
 
 @testable import FoundationModelsACP
@@ -17,21 +16,31 @@ import Testing
 @Test("a recorded session replays to the golden agent byte stream", .timeLimit(.minutes(1)))
 func goldenSessionReplayMatchesFixture() async throws {
     let sessionId = SessionId(rawValue: "golden-session")
-    let reasoning = reasoningEntry("planning the reply")
-    let message = responseEntry("Hello from the bridge.")
-    let toolCall = try toolCallEntry(id: "call-1", name: "reader", argumentsJSON: "{\"path\":\"/tmp/notes.txt\"}")
-    let toolOutput = toolOutputEntry(id: "call-1", name: "reader", text: "file body")
-    let transcript = [reasoning, message, toolCall, toolOutput]
+    let updates: [SessionUpdate] = [
+        thoughtChunkUpdate("planning the reply"),
+        messageChunkUpdate("Hello from the agent."),
+        .toolCall(
+            ToolCall(
+                title: "reader",
+                toolCallId: ToolCallId(rawValue: "call-1"),
+                rawInput: .object(["path": .string("/tmp/notes.txt")]),
+                status: .pending
+            )
+        ),
+        .toolCallUpdate(
+            ToolCallUpdate(
+                toolCallId: ToolCallId(rawValue: "call-1"),
+                content: [.content(Content(content: .text(TextContent(text: "file body"))))],
+                status: .completed
+            )
+        ),
+    ]
 
-    let (driver, connection) = await makeGoldenDriver(
-        sessionId: sessionId,
-        provider: singleSessionProvider(sessionId: sessionId)
-    ) { deliver in
-        await deliver([reasoning])
-        await deliver([reasoning, message])
-        await deliver([reasoning, message, toolCall])
-        await deliver(transcript)
-        return Transcript(entries: transcript)
+    let (driver, connection) = await makeGoldenDriver(sessionId: sessionId) { context in
+        for update in updates {
+            try await context.update(update)
+        }
+        return .endTurn
     }
 
     let initFrames = try await driver.request(
@@ -42,7 +51,7 @@ func goldenSessionReplayMatchesFixture() async throws {
     let newFrames = try await driver.request(
         id: "req-new",
         method: "session/new",
-        params: bridgeNewSessionRequest()
+        params: newSessionRequest()
     )
     let promptFrames = try await driver.request(
         id: "req-prompt",
@@ -75,17 +84,13 @@ func goldenSessionReplayMatchesFixture() async throws {
 @Test("the agent tolerates garbage, interleaving, cancel, and stragglers", .timeLimit(.minutes(1)))
 func adversarialWireInputIsTolerated() async throws {
     let sessionId = SessionId(rawValue: "adversarial-session")
-    let (driver, connection) = await makeGoldenDriver(
-        sessionId: sessionId,
-        provider: singleSessionProvider(sessionId: sessionId)
-    ) { deliver in
-        await deliver([reasoningEntry("thinking")])
+    let (driver, connection) = await makeGoldenDriver(sessionId: sessionId) { context in
+        try await context.update(thoughtChunkUpdate("thinking"))
         while !Task.isCancelled {
             await Task.yield()
         }
-        let entries = [reasoningEntry("thinking"), responseEntry("stopped")]
-        await deliver(entries)
-        return Transcript(entries: entries)
+        try await context.update(messageChunkUpdate("stopped"))
+        return .endTurn
     }
 
     // A garbage line is skipped by the codec and produces no frame.
@@ -94,7 +99,7 @@ func adversarialWireInputIsTolerated() async throws {
     // Interleaved concurrent requests: sent back-to-back, each response
     // correlates to its own id regardless of completion order.
     try await driver.send(requestEnvelope(id: "req-init", method: "initialize", params: endToEndInitializeRequest()))
-    try await driver.send(requestEnvelope(id: "req-new", method: "session/new", params: bridgeNewSessionRequest()))
+    try await driver.send(requestEnvelope(id: "req-new", method: "session/new", params: newSessionRequest()))
     let handshake = try await driver.collectResponses(ids: ["req-init", "req-new"])
     #expect(handshake["req-init"].map { isResponse($0, forId: .string("req-init")) } == true)
     #expect(handshake["req-new"].map { isResponse($0, forId: .string("req-new")) } == true)

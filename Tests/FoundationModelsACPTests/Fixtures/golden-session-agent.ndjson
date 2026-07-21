@@ -1,7 +1,7 @@
 {"id":"req-init","jsonrpc":"2.0","result":{"agentCapabilities":{"auth":{},"loadSession":false,"mcpCapabilities":{"http":false,"sse":false},"promptCapabilities":{"audio":false,"embeddedContext":true,"image":false},"sessionCapabilities":{}},"agentInfo":{"name":"FoundationModelsACP","version":"0.1.0"},"authMethods":[],"protocolVersion":1}}
 {"id":"req-new","jsonrpc":"2.0","result":{"sessionId":"golden-session"}}
 {"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"content":{"text":"planning the reply","type":"text"},"sessionUpdate":"agent_thought_chunk"}}}
-{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"content":{"text":"Hello from the bridge.","type":"text"},"sessionUpdate":"agent_message_chunk"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"content":{"text":"Hello from the agent.","type":"text"},"sessionUpdate":"agent_message_chunk"}}}
 {"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"rawInput":{"path":"/tmp/notes.txt"},"sessionUpdate":"tool_call","status":"pending","title":"reader","toolCallId":"call-1"}}}
 {"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"content":[{"content":{"text":"file body","type":"text"},"type":"content"}],"sessionUpdate":"tool_call_update","status":"completed","toolCallId":"call-1"}}}
 {"id":"req-prompt","jsonrpc":"2.0","result":{"stopReason":"end_turn"}}

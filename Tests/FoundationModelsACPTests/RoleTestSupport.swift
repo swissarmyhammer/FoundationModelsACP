@@ -231,3 +231,24 @@ let testSessionId = SessionId(rawValue: "session-1")
 
 /// A canonical terminal id used across role tests.
 let testTerminalId = TerminalId(rawValue: "terminal-1")
+
+/// A canonical new-session request rooted at the shared test cwd.
+///
+/// - Parameter mcpServers: The MCP configs to carry; empty by default.
+/// - Returns: A new-session request.
+func newSessionRequest(mcpServers: [MCPServerConfig] = []) -> NewSessionRequest {
+    NewSessionRequest(cwd: testCwd, mcpServers: mcpServers)
+}
+
+// MARK: - Capability fixtures
+
+extension ClientCapabilities {
+    /// Advertises only `fs.readTextFile`.
+    static let readOnly = ClientCapabilities(fs: FileSystemCapabilities(readTextFile: true))
+
+    /// Advertises only `fs.writeTextFile`.
+    static let writeOnly = ClientCapabilities(fs: FileSystemCapabilities(writeTextFile: true))
+
+    /// Advertises only the `terminal/*` methods.
+    static let terminalOnly = ClientCapabilities(terminal: true)
+}

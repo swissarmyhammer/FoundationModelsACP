@@ -217,16 +217,3 @@ func makeWiredEnvironment(
         clientConnection: clientConnection
     )
 }
-
-// MARK: - Capability fixtures
-
-extension ClientCapabilities {
-    /// Advertises only `fs.readTextFile`.
-    static let readOnly = ClientCapabilities(fs: FileSystemCapabilities(readTextFile: true))
-
-    /// Advertises only `fs.writeTextFile`.
-    static let writeOnly = ClientCapabilities(fs: FileSystemCapabilities(writeTextFile: true))
-
-    /// Advertises only the `terminal/*` methods.
-    static let terminalOnly = ClientCapabilities(terminal: true)
-}

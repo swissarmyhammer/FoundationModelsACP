@@ -1,5 +1,4 @@
 import Foundation
-import FoundationModels
 import Testing
 
 @testable import FoundationModelsACP
@@ -10,43 +9,38 @@ import Testing
 /// free of timing flakiness (spec §8).
 private let fullDuplexRepeatCount = 100
 
-/// Drives a real client and the bridge agent back-to-back through an in-memory
-/// transport: the full initialize handshake, `session/new`, and a
-/// `session/prompt` turn whose scripted "tool" reaches `ClientEnvironment.current`
-/// to issue reverse `fs/read_text_file` and `session/request_permission` calls
-/// mid-turn, ending in a ``StopReason``.
+/// Drives a real client and a scripted wire agent back-to-back through an
+/// in-memory transport: the full initialize handshake, `session/new`, and a
+/// `session/prompt` turn whose scripted "tool" issues reverse
+/// `fs/read_text_file` and `session/request_permission` calls mid-turn,
+/// ending in a ``StopReason``.
 ///
-/// This confirms the ambient ``ClientEnvironment/current`` injection end-to-end:
-/// code the turn generator runs reaches the handle bound for the turn and its
-/// reverse requests land on the real served client over the wire, while the
-/// `session/prompt` request is still open. The scenario is fully awaited at
-/// every step — no sleeps, no races — so repeating it proves determinism.
+/// This confirms the full bidirectional surface end-to-end: the turn's reverse
+/// requests go out through the serving ``AgentSideConnection`` and land on the
+/// real served client over the wire, while the `session/prompt` request is
+/// still open. The scenario is fully awaited at every step — no sleeps, no
+/// races — so repeating it proves determinism.
 ///
 /// - Parameter sessionId: The session the scenario runs against.
 private func runFullDuplexTurn(sessionId: SessionId) async throws {
-    let recording = RecordingEnvironmentClient(
-        configuration: RecordingEnvironmentClient.Configuration(
-            fileContent: "file body",
-            permissionOutcome: grantedPermissionOutcome(optionId: "allow")
-        )
-    )
+    let recorder = RoleRecorder()
     let pair = await makeEndToEndPair(
-        provider: singleSessionProvider(sessionId: sessionId),
-        client: { _ in recording }
+        sessionId: sessionId,
+        client: { _ in SpyClient(recorder: recorder) }
     )
-    pair.agent.enqueueScriptedTurn(for: sessionId, reverseCallScriptedTurn())
+    pair.agent.enqueueTurn(reverseCallScriptedTurn())
 
     let initialized = try await pair.client.initialize(endToEndInitializeRequest())
     #expect(initialized.agentCapabilities.promptCapabilities.embeddedContext)
-    let created = try await pair.client.newSession(bridgeNewSessionRequest())
+    let created = try await pair.client.newSession(newSessionRequest())
     #expect(created.sessionId == sessionId)
 
     var updates = pair.client.updates(for: sessionId).makeAsyncIterator()
     let response = try await pair.client.prompt(endToEndPromptRequest(text: "hello", sessionId: sessionId))
 
     #expect(response.stopReason == .endTurn)
-    #expect(recording.recordedCalls.contains("readTextFile"))
-    #expect(recording.recordedCalls.contains("requestPermission"))
+    #expect(recorder.recorded("readTextFile") != nil)
+    #expect(recorder.recorded("requestPermission") != nil)
     #expect(await updates.next() == messageChunkUpdate("working"))
     #expect(await updates.next() == toolCallCompletedUpdate(id: "call-1", text: "done"))
 
@@ -55,26 +49,29 @@ private func runFullDuplexTurn(sessionId: SessionId) async throws {
 }
 
 /// A scripted turn that emits a message chunk, drives two reverse client calls
-/// through the ambient environment, then completes a tool call.
+/// through the serving connection, then completes a tool call.
 ///
-/// - Returns: The scripted turn generator.
-private func reverseCallScriptedTurn() -> TurnGenerator {
-    { deliver in
-        await deliver([responseEntry("working")])
-        let environment = ClientEnvironment.current!
-        _ = try await environment.readTextFile(path: AbsolutePath(rawValue: "/tmp/input.txt")!)
-        _ = try await environment.requestPermission(
-            toolCall: ToolCallUpdate(toolCallId: ToolCallId(rawValue: "call-1"), status: .pending),
-            options: [allowOnceOption(optionId: "allow")]
+/// - Returns: The scripted turn.
+private func reverseCallScriptedTurn() -> ScriptedTurn {
+    { context in
+        try await context.update(messageChunkUpdate("working"))
+        _ = try await context.connection.readTextFile(
+            ReadTextFileRequest(path: AbsolutePath(rawValue: "/tmp/input.txt")!, sessionId: context.sessionId)
         )
-        let entries = [responseEntry("working"), toolOutputEntry(id: "call-1", name: "reader", text: "done")]
-        await deliver(entries)
-        return Transcript(entries: entries)
+        _ = try await context.connection.requestPermission(
+            RequestPermissionRequest(
+                options: [allowOnceOption(optionId: "allow")],
+                sessionId: context.sessionId,
+                toolCall: ToolCallUpdate(toolCallId: ToolCallId(rawValue: "call-1"), status: .pending)
+            )
+        )
+        try await context.update(toolCallCompletedUpdate(id: "call-1", text: "done"))
+        return .endTurn
     }
 }
 
-/// The completed `tool_call_update` the mapper emits for a tool output, for
-/// asserting the turn's second update.
+/// The completed `tool_call_update` the scripted turn emits for a tool output,
+/// for asserting the turn's second update.
 ///
 /// - Parameters:
 ///   - id: The answered tool call's id.
@@ -103,23 +100,22 @@ func backToBackFullDuplexIsDeterministic() async throws {
 func cancelDuringOpenPromptYieldsCancelled() async throws {
     let sessionId = SessionId(rawValue: "e2e-cancel")
     let pair = await makeEndToEndPair(
-        provider: singleSessionProvider(sessionId: sessionId),
-        client: { _ in RecordingEnvironmentClient() }
+        sessionId: sessionId,
+        client: { _ in MinimalClient() }
     )
     let progress = TurnRecorder()
-    pair.agent.enqueueScriptedTurn(for: sessionId) { deliver in
-        await deliver([reasoningEntry("thinking")])
+    pair.agent.enqueueTurn { context in
+        try await context.update(thoughtChunkUpdate("thinking"))
         await progress.record("delivered")
         while !Task.isCancelled {
             await Task.yield()
         }
-        let entries = [reasoningEntry("thinking"), responseEntry("stopped")]
-        await deliver(entries)
-        return Transcript(entries: entries)
+        try await context.update(messageChunkUpdate("stopped"))
+        return .endTurn
     }
 
     _ = try await pair.client.initialize(endToEndInitializeRequest())
-    _ = try await pair.client.newSession(bridgeNewSessionRequest())
+    _ = try await pair.client.newSession(newSessionRequest())
     var updates = pair.client.updates(for: sessionId).makeAsyncIterator()
 
     let turn = Task {
@@ -143,13 +139,12 @@ func cancelDuringOpenPromptYieldsCancelled() async throws {
 func lateUpdateAfterResponseReachesClient() async throws {
     let sessionId = SessionId(rawValue: "e2e-straggler")
     let pair = await makeEndToEndPair(
-        provider: singleSessionProvider(sessionId: sessionId),
-        client: { _ in RecordingEnvironmentClient() }
+        sessionId: sessionId,
+        client: { _ in MinimalClient() }
     )
-    pair.agent.enqueueScriptedTurn(for: sessionId) { _ in Transcript(entries: []) }
 
     _ = try await pair.client.initialize(endToEndInitializeRequest())
-    _ = try await pair.client.newSession(bridgeNewSessionRequest())
+    _ = try await pair.client.newSession(newSessionRequest())
     var updates = pair.client.updates(for: sessionId).makeAsyncIterator()
     let response = try await pair.client.prompt(endToEndPromptRequest(text: "hi", sessionId: sessionId))
     #expect(response.stopReason == .endTurn)

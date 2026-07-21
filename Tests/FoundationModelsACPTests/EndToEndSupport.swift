@@ -1,5 +1,4 @@
 import Foundation
-import FoundationModels
 import Synchronization
 import Testing
 
@@ -7,9 +6,8 @@ import Testing
 
 // MARK: - Back-to-back wiring
 
-/// A real ``Client`` and the concrete ``FoundationModelsAgent`` wired
-/// back-to-back over an in-memory transport, plus the connections keeping the
-/// pair alive.
+/// A real ``Client`` and a scripted wire ``Agent`` wired back-to-back over an
+/// in-memory transport, plus the connections keeping the pair alive.
 ///
 /// The client drives the agent through ``ClientSideConnection``'s outbound
 /// methods exactly as a host would, while the agent's reverse Agent→Client
@@ -19,28 +17,28 @@ struct EndToEndPair {
     /// The client connection a test drives the agent through.
     let client: ClientSideConnection
 
-    /// The agent connection serving the bridge; kept alive by the caller.
+    /// The agent connection serving the agent; kept alive by the caller.
     let agentConnection: AgentSideConnection
 
-    /// The concrete bridge agent, so a test can enqueue scripted turns on it.
-    let agent: FoundationModelsAgent
+    /// The concrete scripted agent, so a test can enqueue scripted turns on it.
+    let agent: ScriptedAgent
 }
 
-/// Wires a bridge agent and a given client back-to-back over an in-memory
+/// Wires a scripted agent and a given client back-to-back over an in-memory
 /// transport.
 ///
 /// - Parameters:
-///   - provider: The session provider the agent is built from.
+///   - sessionId: The identity the agent's `session/new` returns.
 ///   - client: Builds the served client from its connection.
 /// - Returns: The wired client, agent connection, and concrete agent.
 func makeEndToEndPair(
-    provider: SessionProvider,
+    sessionId: SessionId,
     client: @escaping @Sendable (ClientSideConnection) -> any Client
 ) async -> EndToEndPair {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
-    let box = Mutex<FoundationModelsAgent?>(nil)
+    let box = Mutex<ScriptedAgent?>(nil)
     let agentConnection = await AgentSideConnection(stream: agentEnd) { connection in
-        let agent = FoundationModelsAgent(connection: connection, provider: provider)
+        let agent = ScriptedAgent(connection: connection, sessionId: sessionId)
         box.withLock { $0 = agent }
         return agent
     }
@@ -73,14 +71,6 @@ func endToEndInitializeRequest(
 /// - Returns: A single-text-block prompt request.
 func endToEndPromptRequest(text: String, sessionId: SessionId) -> PromptRequest {
     PromptRequest(prompt: [.text(TextContent(text: text))], sessionId: sessionId)
-}
-
-/// A permission outcome that grants an option by id, for a scripted grant.
-///
-/// - Parameter optionId: The allowing option's id the client selects.
-/// - Returns: A selected outcome naming the option.
-func grantedPermissionOutcome(optionId: String) -> RequestPermissionOutcome {
-    .selected(SelectedPermissionOutcome(optionId: PermissionOptionId(rawValue: optionId)))
 }
 
 /// A single allow-once permission option a scripted tool offers.
@@ -413,25 +403,23 @@ func result(of frame: JSONValue) -> JSONValue? {
     return fields["result"]
 }
 
-/// Wires the bridge agent behind a raw-wire golden driver, enqueuing the
+/// Wires a scripted agent behind a raw-wire golden driver, enqueuing the
 /// session's scripted turn in the connection factory so it is present before
 /// the read loop can dispatch a prompt.
 ///
 /// - Parameters:
 ///   - sessionId: The session the scripted turn belongs to.
-///   - provider: The session provider the agent is built from.
-///   - scriptedTurn: The scripted turn `prompt` runs in place of the model.
+///   - scriptedTurn: The scripted turn `prompt` runs.
 /// - Returns: The driver over the client end and the agent connection, which
 ///   the caller keeps alive and may use to emit late updates.
 func makeGoldenDriver(
     sessionId: SessionId,
-    provider: SessionProvider,
-    scriptedTurn: @escaping TurnGenerator
+    scriptedTurn: @escaping ScriptedTurn
 ) async -> (driver: GoldenWireDriver, connection: AgentSideConnection) {
     let (driverEnd, agentEnd) = InMemoryTransport.pair()
     let connection = await AgentSideConnection(stream: agentEnd) { connection in
-        let agent = FoundationModelsAgent(connection: connection, provider: provider)
-        agent.enqueueScriptedTurn(for: sessionId, scriptedTurn)
+        let agent = ScriptedAgent(connection: connection, sessionId: sessionId)
+        agent.enqueueTurn(scriptedTurn)
         return agent
     }
     return (GoldenWireDriver(driverEnd), connection)
