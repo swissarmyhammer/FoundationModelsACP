@@ -29,8 +29,8 @@ comments:
 depends_on:
 - 01KY370D05M3MMACAN2FVA8ECQ
 - 01KY370WD1N9HSYKNG480ETHT1
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: 9b80
 title: Delete the superseded Bridge, its tests, and the model-driven Evals target; enforce wire purity
 ---
 ## What
