@@ -14,8 +14,8 @@ comments:
   id: 01ky3f0npcea0tjxthe2v0wrej
   text: 'really-done complete: verification commands green (swift test exit 0 — 187+3+116 tests across 3 runs; DocC --warnings-as-errors exit 0; both grep ACs empty) and adversarial double-check verdict PASS. Double-check confirmed: EchoAgent byte-identical between README and test; every GUIDE technical claim verified against source (methodNotFound defaults, requestTimeout nil default, ConnectionError.closed/.timedOut, per-request Task dispatch, garbage-line skip, SubprocessTransport stderr forwarding/one-shot reap, ReplayTransport(script:), .stdio leading-dot); all cross-references resolve; "zero library dependencies" holds (only swift-docc-plugin, a docs plugin). Bridge sources intentionally left in place for the follow-on deletion task. All description checkboxes ticked. Task left in doing for /review per the finish pipeline (no commit made — orchestrator handles checkpoint commits).'
   timestamp: 2026-07-21T23:08:45.644184+00:00
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: 9a80
 title: Rewrite README and GUIDE to the wire-only story; record the scoping decision in plan.md
 ---
 ## What

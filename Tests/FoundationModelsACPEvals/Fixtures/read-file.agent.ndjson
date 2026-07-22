@@ -1,5 +1,0 @@
-{"id":"init","jsonrpc":"2.0","result":{"agentCapabilities":{"promptCapabilities":{"audio":false,"embeddedContext":true,"image":false}},"agentInfo":{"name":"FoundationModelsACP","version":"0.1.0"},"protocolVersion":1}}
-{"id":"new","jsonrpc":"2.0","result":{"sessionId":"eval-read-file"}}
-{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"eval-read-file","update":{"rawInput":{"path":"/tmp/notes.txt"},"sessionUpdate":"tool_call","status":"pending","title":"reader","toolCallId":"call-1"}}}
-{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"eval-read-file","update":{"content":[{"content":{"text":"This file contains the project notes.","type":"text"},"type":"content"}],"sessionUpdate":"tool_call_update","status":"completed","toolCallId":"call-1"}}}
-{"id":"prompt","jsonrpc":"2.0","result":{"stopReason":"end_turn"}}

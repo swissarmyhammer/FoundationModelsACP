@@ -236,7 +236,7 @@ let testTerminalId = TerminalId(rawValue: "terminal-1")
 ///
 /// - Parameter mcpServers: The MCP configs to carry; empty by default.
 /// - Returns: A new-session request.
-func newSessionRequest(mcpServers: [MCPServerConfig] = []) -> NewSessionRequest {
+func newSessionRequest(mcpServers: [McpServer] = []) -> NewSessionRequest {
     NewSessionRequest(cwd: testCwd, mcpServers: mcpServers)
 }
 

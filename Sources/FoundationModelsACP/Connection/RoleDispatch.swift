@@ -1,7 +1,7 @@
 import Foundation
 import Synchronization
 
-// MARK: - Typed coding bridge
+// MARK: - Typed coding helpers
 
 extension JSONValue {
     /// Decodes call parameters into a handler's typed model.

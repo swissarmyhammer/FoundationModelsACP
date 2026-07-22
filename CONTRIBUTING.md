@@ -10,4 +10,4 @@ The protocol types under `Sources/FoundationModelsACP/Generated/` are generated 
 
 ## Tests
 
-`swift test` runs the deterministic suite (no live model). The `FoundationModelsACPEvals` target drives the on-device `SystemLanguageModel` and is gated behind `RUN_EVALS=1`; run it with `RUN_EVALS=1 swift test --filter FoundationModelsACPEvals` on Apple Silicon.
+`swift test` runs the full deterministic suite — no live model, no network, no gated targets.

@@ -12,16 +12,12 @@ concurrency:
 
 jobs:
   # Shared Swift CI on the self-hosted macOS runner (Swift 6.4 toolchain):
-  # build --build-tests, swift test (the eval target self-skips without
-  # RUN_EVALS), and the DocC build gate with --warnings-as-errors. The gated
-  # behavioral-eval suite drives the live on-device SystemLanguageModel and
-  # runs only on manual workflow_dispatch.
+  # build --build-tests, swift test, and the DocC build gate with
+  # --warnings-as-errors.
   ci:
     uses: swissarmyhammer/workflows/.github/workflows/swift-ci.yaml@main
     with:
       docc-target: FoundationModelsACP
-      integration-gate-env: RUN_EVALS
-      integration-xctest-glob: "*PackageTests.xctest"
 
   # Repo-specific: regenerate the ACP types from the vendored schema and fail if
   # the checked-in output drifts. Needs the Swift 6.4 toolchain to build the

@@ -1,5 +1,0 @@
-{"id":"init","jsonrpc":"2.0","result":{"agentCapabilities":{"promptCapabilities":{"audio":false,"embeddedContext":true,"image":false}},"agentInfo":{"name":"FoundationModelsACP","version":"0.1.0"},"protocolVersion":1}}
-{"id":"new","jsonrpc":"2.0","result":{"sessionId":"eval-weather-paris"}}
-{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"eval-weather-paris","update":{"rawInput":{"city":"Paris"},"sessionUpdate":"tool_call","status":"pending","title":"getWeather","toolCallId":"call-1"}}}
-{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"eval-weather-paris","update":{"content":[{"content":{"text":"It is 20C and sunny in Paris.","type":"text"},"type":"content"}],"sessionUpdate":"tool_call_update","status":"completed","toolCallId":"call-1"}}}
-{"id":"prompt","jsonrpc":"2.0","result":{"stopReason":"end_turn"}}

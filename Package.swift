@@ -1,9 +1,9 @@
 // swift-tools-version: 6.4
 import PackageDescription
 
-// The test targets that carry ndJSON transcript fixtures load them via
-// #filePath, not as bundle resources, so each excludes its `Fixtures`
-// directory. (ACPGenerateTests has none and needs no exclude.)
+// The FoundationModelsACPTests target carries ndJSON transcript fixtures
+// loaded via #filePath, not as bundle resources, so it excludes its
+// `Fixtures` directory. (ACPGenerateTests has none and needs no exclude.)
 let fixturesExclude = ["Fixtures"]
 
 let package = Package(
@@ -31,7 +31,6 @@ let package = Package(
                 "Generated/.gitkeep",
                 "Transport/.gitkeep",
                 "Connection/.gitkeep",
-                "Bridge/.gitkeep",
             ]
         ),
         .target(
@@ -75,12 +74,6 @@ let package = Package(
             name: "ACPGenerateTests",
             dependencies: ["ACPGenerateCore", "FoundationModelsACP"],
             path: "Tests/ACPGenerateTests"
-        ),
-        .testTarget(
-            name: "FoundationModelsACPEvals",
-            dependencies: ["FoundationModelsACP"],
-            path: "Tests/FoundationModelsACPEvals",
-            exclude: fixturesExclude
         ),
     ]
 )
