@@ -122,9 +122,10 @@ enum RoleDispatch {
         as requestType: Request.Type,
         _ body: (Request) async throws -> Response
     ) async throws -> JSONValue {
-        let request = try JSONValue.decodeParams(Request.self, from: params)
-        let response = try await body(request)
-        return try JSONValue.encode(result: response)
+        try await serve(params, as: requestType) { request in
+            let response = try await body(request)
+            return try JSONValue.encode(result: response)
+        }
     }
 
     /// Serves a request whose handler returns no value, answering `{}`.
@@ -141,9 +142,30 @@ enum RoleDispatch {
         as requestType: Request.Type,
         _ body: (Request) async throws -> Void
     ) async throws -> JSONValue {
-        let request = try JSONValue.decodeParams(Request.self, from: params)
-        try await body(request)
-        return emptyResult
+        try await serve(params, as: requestType) { request in
+            try await body(request)
+            return emptyResult
+        }
+    }
+
+    /// The single decode-then-invoke path behind `serveResult` and
+    /// `serveEmpty`, which differ only in how they turn the handler's outcome
+    /// into a wire response.
+    ///
+    /// - Parameters:
+    ///   - params: The raw request parameters.
+    ///   - requestType: The parameters' model type.
+    ///   - respond: Invokes the role handler with the decoded parameters and
+    ///     produces the encoded response value.
+    /// - Returns: The encoded response value.
+    /// - Throws: `RequestError.invalidParams` on a decode failure, or any
+    ///   error the handler throws.
+    private static func serve<Request: Decodable>(
+        _ params: JSONValue?,
+        as requestType: Request.Type,
+        _ respond: (Request) async throws -> JSONValue
+    ) async throws -> JSONValue {
+        try await respond(JSONValue.decodeParams(Request.self, from: params))
     }
 
     /// Issues an outbound request and decodes its typed response.
@@ -164,11 +186,7 @@ enum RoleDispatch {
         _ params: Request,
         returning responseType: Response.Type
     ) async throws -> Response {
-        let result = try await connection.request(
-            method: RoleRouting.wire(handler: handler, on: side),
-            params: JSONValue.encode(result: params)
-        )
-        return try result.decoded(as: Response.self)
+        try await call(connection, handler: handler, on: side, params).decoded(as: Response.self)
     }
 
     /// Issues an outbound request whose response carries no value of interest.
@@ -186,7 +204,27 @@ enum RoleDispatch {
         on side: MethodSide,
         _ params: Request
     ) async throws {
-        _ = try await connection.request(
+        _ = try await call(connection, handler: handler, on: side, params)
+    }
+
+    /// The single encode-resolve-request path behind `callResult` and
+    /// `callEmpty`, which differ only in whether they decode the raw result.
+    ///
+    /// - Parameters:
+    ///   - connection: The underlying full-duplex connection.
+    ///   - handler: The Swift handler name to resolve to a wire method.
+    ///   - side: The serving side of the target method.
+    ///   - params: The typed request parameters.
+    /// - Returns: The response's raw `result` value.
+    /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
+    ///   disconnect.
+    private static func call<Request: Encodable>(
+        _ connection: Connection,
+        handler: String,
+        on side: MethodSide,
+        _ params: Request
+    ) async throws -> JSONValue {
+        try await connection.request(
             method: RoleRouting.wire(handler: handler, on: side),
             params: JSONValue.encode(result: params)
         )
