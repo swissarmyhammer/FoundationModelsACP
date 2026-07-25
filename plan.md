@@ -1,22 +1,18 @@
 # Plan: FoundationModelsACP — the ACP wire for Swift
 
-> **Scope (settled 2026-07-21, after a brief same-day detour).** This package
-> is the **pure ACP wire**: generated schema types, the `Agent`/`Client` role
-> protocols, the `*SideConnection` runtime, ndJSON framing. **Zero
-> dependencies** — no family imports, no Yams, no models; anyone can build an
-> ACP agent or client on it. The composed agent (config, tool roster, slash
-> commands, `HarnessACPAgent` over the harness) briefly lived in this plan and
-> is now its own package:
+> **Scope.** This package is the **pure ACP wire**: generated schema types,
+> the `Agent`/`Client` role protocols, the `*SideConnection` runtime, ndJSON
+> framing. **Zero dependencies** — no family imports, no Yams, no models;
+> anyone can build an ACP agent or client on it. The composed agent (config,
+> tool roster, slash commands, `RoutedACPAgent` over the Router runtime) is
+> its own package:
 > [`../FoundationModelsACPAgent`](../FoundationModelsACPAgent/plan.md).
-> Accordingly (decided 2026-07-21), the in-repo bridge — `FoundationModelsAgent`,
+> Accordingly, the in-repo bridge — `FoundationModelsAgent`,
 > `SessionProvider`, `TranscriptBuilder`, `ClientEnvironment` — and the
-> model-driven Evals target are removed from this repo, executing the
-> composition plan's §9.1 Superseded note; the docs present only the wire.
-> History for the curious: planned standalone → wire inlined into the harness →
-> reborn here carrying the composition → split; each move followed the
-> noun-ownership test, and this is the stable shape: the wire's consumers
-> should never drag in MLX, Yams, Stencil, or tool packages to decode a
-> `SessionUpdate`.
+> model-driven Evals target are removed from this repo (superseded designs;
+> see the composition plan); the package and docs present only the wire.
+> The dividing rule: the wire's consumers should never drag in MLX, Yams,
+> Stencil, or tool packages to decode a `SessionUpdate`.
 
 Consumers: `FoundationModelsACPAgent` (the family's agent, primary), any
 Swift ACP client (an editor side, a test harness), and
