@@ -23,18 +23,17 @@ Swift ACP client (an editor side, a test harness), and
 `FoundationModelsACPAgent`'s golden tests via `ReplayTransport` /
 `InMemoryTransport`. This package never names a consumer.
 
-Section-reference note: the spec below is carried verbatim from its previous
-homes; `§9.1`/`§10`/`§10.1` references point at the composition and testing
-sections now living in `../FoundationModelsACPAgent/plan.md`; `§6` (event
-correlation ids) is the harness plan's.
+Section-reference note: `§9.1`/`§10`/`§10.1` references point at the
+composition and testing sections in `../FoundationModelsACPAgent/plan.md`;
+`§6` (event correlation ids) is the Router runtime's session event stream
+(Router board 46adpch).
 
 ---
 
 ## The wire specification
 
-The wire-layer spec — home again after its round trip; the old
-bridge/`SessionProvider` sections died in the composition plan's Superseded
-note and are not reproduced.
+The wire-layer spec. (Bridge/`SessionProvider` designs are superseded — see
+the composition plan's note — and not reproduced.)
 
 **Provenance.** ACP's **Rust schema crate is the source of truth** — every
 official SDK is generated from its emitted JSON Schema. There is **no official
@@ -160,7 +159,7 @@ methods are capability-gated, unsupported calls return JSON-RPC
 method-not-found. **Connections** are two symmetric objects over one byte
 stream, each taking a **factory closure** so the handler can capture its own
 connection for reverse calls:
-`AgentSideConnection(stream:) { conn in HarnessACPAgent(conn, harness) }` /
+`AgentSideConnection(stream:) { conn in RoutedACPAgent(conn, router) }` /
 `ClientSideConnection(stream:) { agent in MyClient(agent) }`. **Wire
 invariants at the type boundary**: paths absolute, line numbers 1-based (an
 `AbsolutePath` newtype makes violations decode-time errors); chunks correlate
