@@ -59,6 +59,7 @@ Implementation:
 - [ ] Disconnect rejects all pending continuations and finishes all streams -- no hangs.
 - [ ] Per-request timeouts and `Task` cancellation honored.
 - [ ] Batch JSON-RPC messages supported (v2 states batch support).
+- [ ] `$/cancel_request` is served at the connection layer on both sides, not on either role protocol.
 - [ ] The connection and transport test suites listed above exist again, retargeted to v2.
 
 ## Tests

@@ -931,7 +931,48 @@ comments:
 
     The stale worktree at `.claude/worktrees/agent-a2d06964f1ff9da62` (detached at `95f8d3c`) is removed and pruned — it had no uncommitted work, and it was reclaiming 16 GB. It was a live hazard, not just clutter: the `files` MCP tool silently resolved reads and edits against it while `grep files` on the same absolute path returned `HEAD` content. Any agent that had edited through that path would have written to a detached tree and seen its change vanish.
   timestamp: 2026-07-26T18:24:11.182689+00:00
-position_column: review
+- actor: claude-code
+  id: 01kyfvg6wfy5t24mw6ax9ef9jn
+  text: |-
+    ## Round 6 (closing) — clean, scope `HEAD~1..HEAD` (`3d3b2b1`)
+
+    Engine: `review sha HEAD~1..HEAD`, 16 validator/file pairs attempted, 0 failed, **0 findings**.
+
+    ### Directed verification of the two corrected comments
+
+    Round 5's two substantive items were comment corrections. Each new claim was checked against the source and the vendored schema rather than against the commit message.
+
+    1. **`classifyOneOf` has no fallback guard.** True. Its body is: empty guard, all variants `type == "string"` to `.stringEnum`, all `type == "object"` to `.taggedUnion`, else throw. No `not` filter, no `isUnknownFallbackVariant` call, no deferral branch.
+
+    2. **A `oneOf` catch-all reaches `discriminatorTag`.** True, and the mechanism is exactly as described. `taggedUnionModel` takes `unionVariants(of:)`, which drops only variants where `isUnknownFallbackVariant` is `true`. That predicate returns `false` for a `not` variant that pins a `const` of its own (`guard variant[notKey] != nil, !hasConstDiscriminator(variant)`), so such a variant survives the filter and is passed to `discriminatorTag` in the per-variant map. Both stated outcomes are reachable: an extra case when the variant is single-property, const-pinned and `required == [key]`, or a thrown `unsupportedShape` from either of `discriminatorTag`'s two guards.
+
+    3. **The vendored schema has zero definition-level `oneOf`.** True, and stronger than claimed: across all three vendored files there are **zero `"oneOf"` occurrences anywhere**, at any nesting depth, over 146 definitions. The "unreached today" caveat holds.
+
+    4. **`classifyAnyOf`'s fallback guard is filter-invariant.** True, verified empirically over all 31 `anyOf` definitions by replicating the classifier and running it on the raw list and on `unionVariants(of:)` output. The guard outcome is identical for all 31. The `pinned` set is also identical for all 31 (a true fallback pins no `const`, so it contributes nothing to `pinnedDiscriminators`), as are `modeled` and the `variants.contains(where: hasConstDiscriminator)` test on the line below. So the comment's "it is the only line here that depends on the unfiltered count" is accurate for every other filter-sensitive expression in the function.
+
+    5. **`modeled.count < variants.count` is the load-bearing line, and 8 definitions reach `.taggedUnion` today.** True on both halves. Over the raw list the classification is 11 `stringEnum`, 8 `taggedUnion`, 12 `deferred`. Over a pre-filtered list the same 8 fall through to the branch below and come out `discriminatedUnion`, and `taggedUnion` drops to zero, which is precisely what the comment predicts. Corroborated against the checked-in output: `Unions.generated.swift` carries 19 enums with a synthesized `unknown(String)`, and they partition exactly 11 string enums plus the 8 named tagged unions (`AvailableCommandInput`, `ContentBlock`, `McpServer`, `RequestPermissionOutcome`, `RequestPermissionSubject`, `SessionUpdate`, `StateUpdate`, `ToolCallContent`).
+
+    No new false claim was substituted for the old one. Both corrections are accurate.
+
+    ### Diff hygiene
+
+    Comment text and kanban state only, confirmed two independent ways. Every added and removed line in `Sources/` begins with `//` once leading whitespace is stripped, and the two files compared with comment lines and blank lines removed are byte identical, so no code token moved. `Sources/FoundationModelsACP/Generated` and `Schema` are untouched by the range.
+
+    ### Verification run
+
+    `swift build` clean. `swift test`: 64 tests in 9 suites, all passed.
+
+    ### Scope note
+
+    Per the precedent set in rounds 3 and 5, no generic refactoring suggestions were raised against pre existing code this commit does not touch, and the deleted catch rate measurement was not reopened.
+
+    ### Carried forward, not blocking
+
+    The round 5 findings comment still shows its 14 checkboxes unflipped. They are resolved in prose by the round 5 disposition comment (2 fixed here, 10 dropped as out of scope, 2 unfixable in committed history), and checkbox marks are the implementer's to set, so they were left as is rather than flipped by the reviewer. The deferred follow ups recorded across rounds 3 through 5 (the tidy up pass on `SchemaGenerator.swift`, pinning the consolidated `GeneratorError` detail strings, adding the fallback guard to `classifyOneOf` before the `oneOf` path is relied on, and assigning `$/cancel_request` to a milestone) remain unowned and want their own cards.
+
+    Moving to `done`.
+  timestamp: 2026-07-26T18:37:50.863345+00:00
+position_column: done
 position_ordinal: '80'
 title: M0 Vendor the v2 schema, re-point the generator, verify the inventory
 ---
