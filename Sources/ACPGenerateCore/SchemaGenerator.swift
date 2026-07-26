@@ -513,20 +513,8 @@ public struct SchemaGenerator: Sendable {
         let cases = try variants.enumerated().map { index, variant in
             let context = "\(name) variant \(index)"
             let (key, tag) = try discriminatorTag(of: variant, context: context)
-            if let established = discriminator, established != key {
-                throw GeneratorError.unsupportedShape(
-                    context: context,
-                    detail: "variants disagree on the discriminator: \(established) vs \(key)"
-                )
-            }
-            discriminator = key
-            var payloadType: String?
-            if let allOf = variant[Self.allOfKey]?.arrayValue {
-                guard allOf.count == 1, let reference = allOf[0][Self.refKey]?.stringValue else {
-                    throw GeneratorError.unsupportedShape(context: context, detail: "expected \(Self.allOfKey) to be a single payload \(Self.refKey)")
-                }
-                payloadType = try referencedTypeName(reference: reference, context: context)
-            }
+            discriminator = try Self.agreedDiscriminator(discriminator, key, context: context)
+            let payloadType = try flattenedPayloadType(of: variant, context: context)
             return UnionCaseModel(
                 tag: tag,
                 swiftName: try swiftCaseName(fromWire: tag, context: context),
@@ -580,21 +568,72 @@ public struct SchemaGenerator: Sendable {
         return (key, tag)
     }
 
+    /// Folds one variant's discriminator member name into the name the union's
+    /// earlier variants already agreed on.
+    ///
+    /// Every union family requires a single shared discriminator, so this is
+    /// the one place that check and its message live.
+    ///
+    /// - Parameters:
+    ///   - established: The name agreed so far, `nil` before the first variant.
+    ///   - key: This variant's discriminator member name.
+    ///   - context: The variant's error context.
+    /// - Returns: The agreed discriminator name.
+    /// - Throws: `GeneratorError.unsupportedShape` when this variant names a
+    ///   different member.
+    private static func agreedDiscriminator(_ established: String?, _ key: String, context: String) throws -> String {
+        guard let established, established != key else { return key }
+        throw discriminatorDisagreement([established, key], context: context)
+    }
+
+    /// The error reporting that a union's variants key on different members.
+    ///
+    /// - Parameters:
+    ///   - names: The conflicting discriminator member names, in report order.
+    ///   - context: The error context.
+    /// - Returns: The `unsupportedShape` error naming the disagreement.
+    private static func discriminatorDisagreement(_ names: [String], context: String) -> GeneratorError {
+        GeneratorError.unsupportedShape(
+            context: context,
+            detail: "variants disagree on the discriminator: \(names.joined(separator: " vs "))"
+        )
+    }
+
+    /// Resolves the single `$ref` payload a union variant flattens via `allOf`.
+    ///
+    /// Tagged-union variants may flatten no payload at all; discriminated-union
+    /// variants must, which is what `discriminatedPayloadType` adds.
+    ///
+    /// - Parameters:
+    ///   - variant: The union variant fragment.
+    ///   - context: The variant's error context.
+    /// - Returns: The emitted payload type name, or `nil` when the variant
+    ///   declares no `allOf`.
+    /// - Throws: `GeneratorError.unsupportedShape` when `allOf` is present but
+    ///   is not exactly one payload `$ref`.
+    private func flattenedPayloadType(of variant: JSONValue, context: String) throws -> String? {
+        guard let allOf = variant[Self.allOfKey] else { return nil }
+        guard let entries = allOf.arrayValue, entries.count == 1,
+            let reference = entries[0][Self.refKey]?.stringValue
+        else {
+            throw GeneratorError.unsupportedShape(context: context, detail: "expected \(Self.allOfKey) to be a single payload \(Self.refKey)")
+        }
+        return try referencedTypeName(reference: reference, context: context)
+    }
+
     /// Resolves the single `$ref` payload a discriminated variant flattens.
     ///
     /// - Parameters:
     ///   - variant: The `anyOf` variant fragment.
     ///   - context: The variant's error context.
     /// - Returns: The emitted payload type name.
-    /// - Throws: `GeneratorError.unsupportedShape` unless `allOf` is a single
-    ///   payload `$ref`.
+    /// - Throws: `GeneratorError.unsupportedShape` when the variant flattens no
+    ///   payload, or `allOf` is not a single payload `$ref`.
     private func discriminatedPayloadType(of variant: JSONValue, context: String) throws -> String {
-        guard let allOf = variant[Self.allOfKey]?.arrayValue, allOf.count == 1,
-            let reference = allOf[0][Self.refKey]?.stringValue
-        else {
-            throw GeneratorError.unsupportedShape(context: context, detail: "expected \(Self.allOfKey) to be a single payload \(Self.refKey)")
+        guard let payloadType = try flattenedPayloadType(of: variant, context: context) else {
+            throw GeneratorError.unsupportedShape(context: context, detail: "expected an \(Self.allOfKey) payload \(Self.refKey)")
         }
-        return try referencedTypeName(reference: reference, context: context)
+        return payloadType
     }
 
     /// Builds the emission model for a discriminated `anyOf` union.
@@ -630,13 +669,7 @@ public struct SchemaGenerator: Sendable {
                 )
             }
             let (key, tag) = try discriminatorTag(of: variant, context: context)
-            if let established = discriminator, established != key {
-                throw GeneratorError.unsupportedShape(
-                    context: context,
-                    detail: "variants disagree on the discriminator: \(established) vs \(key)"
-                )
-            }
-            discriminator = key
+            discriminator = try Self.agreedDiscriminator(discriminator, key, context: context)
             return DiscriminatedCaseModel(
                 tag: tag,
                 swiftName: try swiftCaseName(fromWire: tag, context: context),
@@ -678,10 +711,15 @@ public struct SchemaGenerator: Sendable {
     /// Builds the emission model for an object definition with a value union.
     ///
     /// The base object properties are modeled as an ordinary struct. Each
-    /// top-level `anyOf` variant contributes a `value`-payload case: the
+    /// modeled `anyOf` variant contributes a `value`-payload case: the
     /// `const`-pinned variants are tagged, and the single variant that does not
     /// pin the discriminator is the default, selected when the discriminator is
     /// absent or unrecognized on the wire.
+    ///
+    /// Variants come from `unionVariants(of:)`, as they do for every other
+    /// union stage, so a catch-all declaring nothing beyond the pinned
+    /// discriminator is filtered out rather than searched for a `value` member
+    /// it does not have.
     ///
     /// No vendored v2 definition reaches this stage. v2's one
     /// object-plus-value union, `SetSessionConfigOptionRequest`, closes with a
@@ -703,7 +741,7 @@ public struct SchemaGenerator: Sendable {
     ///   the single-`value`-payload shape or there is not exactly one default.
     private func objectValueUnionModel(name: String, fragment: JSONValue) throws -> ObjectValueUnionModel {
         let base = try structModel(name: name, fragment: fragment)
-        let variants = fragment[Self.anyOfKey]?.arrayValue ?? []
+        let variants = unionVariants(of: fragment)
         let discriminator = try valueUnionDiscriminator(of: variants, context: name)
         var valueWireName: String?
         var defaultCount = 0
@@ -776,13 +814,14 @@ public struct SchemaGenerator: Sendable {
     ///   discriminator, or the variants pin different members.
     private func valueUnionDiscriminator(of variants: [JSONValue], context: String) throws -> String {
         let pinned = pinnedDiscriminators(of: variants)
-        guard let discriminator = pinned.first, pinned.count == 1 else {
+        guard let discriminator = pinned.first else {
             throw GeneratorError.unsupportedShape(
                 context: context,
-                detail: pinned.isEmpty
-                    ? "value union needs a \(Self.constKey) discriminator"
-                    : "variants disagree on the discriminator: \(pinned.sorted().joined(separator: " vs "))"
+                detail: "value union needs a \(Self.constKey) discriminator"
             )
+        }
+        guard pinned.count == 1 else {
+            throw Self.discriminatorDisagreement(pinned.sorted(), context: context)
         }
         return discriminator
     }
@@ -858,7 +897,7 @@ public struct SchemaGenerator: Sendable {
     ///   - context: The definition name for error messages.
     /// - Throws: `GeneratorError.unsupportedShape` on any collision.
     private func validateCaseNames(names: [String], context: String) throws {
-        var seen = Set<String>()
+        var seen: Set<String> = []
         for name in names {
             guard name != "unknown" else {
                 throw GeneratorError.unsupportedShape(context: context, detail: "case name collides with the unknown fallback")
@@ -1636,7 +1675,7 @@ extension SchemaGenerator {
         context: String
     ) throws -> [String: String] {
         var methods: [String: String] = [:]
-        var seenWires = Set<String>()
+        var seenWires: Set<String> = []
         for (routingKey, value) in Self.orderedEntries(of: group) {
             guard let wireMethod = value.stringValue else {
                 throw GeneratorError.invalidSchema("\(context) member \(key).\(routingKey) is not a string")
@@ -1700,10 +1739,10 @@ extension SchemaGenerator {
         manifest: RoutingManifest,
         routes: [SchemaRoute: [String]]
     ) throws -> [MethodModel] {
-        var consumed = Set<SchemaRoute>()
+        var consumed: Set<SchemaRoute> = []
         let models = try collectBySide { (side: MethodSide) -> [MethodModel] in
             let group = manifest.methodsBySide[side] ?? [:]
-            var handlerNames = Set<String>()
+            var handlerNames: Set<String> = []
             var sideModels: [MethodModel] = []
             for (routingKey, wireMethod) in Self.orderedByWireMethod(of: group) {
                 let route = SchemaRoute(side: side, wireMethod: wireMethod)
@@ -1829,7 +1868,7 @@ extension SchemaGenerator {
         try collectBySide { (side: MethodSide) -> [UnstableMethodModel] in
             let stableWires = Set((stable.methodsBySide[side] ?? [:]).values)
             let group = unstable.methodsBySide[side] ?? [:]
-            var handlerNames = Set<String>()
+            var handlerNames: Set<String> = []
             var sideModels: [UnstableMethodModel] = []
             for (routingKey, wireMethod) in Self.orderedByWireMethod(of: group)
             where !stableWires.contains(wireMethod) {

@@ -139,17 +139,36 @@ today. Rows 1 and 2 untype six more properties — `ACPError.code`,
 | Object plus a value union whose catch-all leaves the tag unpinned | `SetSessionConfigOptionRequest` → the entire `session/set_config_option` params object. `MethodTable.generated.swift` routes it as `paramsTypeName: "SetSessionConfigOptionRequest"`, which resolves to `JSONValue`, so `sessionId`, `configId`, `value`, and `_meta` are all untyped at the one routed stable method that has no typed params |
 | Pre-existing (also deferred under v1) | `AgentResponse`, `ClientResponse`, `EmbeddedResourceResource`, `ExtRequest`, `ExtResponse`, `ExtNotification`, `RequestID`, `SessionConfigSelectOptions` |
 
-Resolving the first four rows also makes **seven** already-emitted structs
-reachable that nothing currently references — `AuthMethodAgent`,
-`DiffPathChange`, `DiffPathPairChange`, `PlanItems`, `ReplayFromStart`,
-`SessionConfigBoolean`, `SessionConfigSelect` — so "these seven have callers" is
-M1's completion signal. Three more (`TextResourceContents`,
-`BlobResourceContents`, `SessionConfigSelectGroup`) hang off the fifth row's
-`EmbeddedResourceResource` and `SessionConfigSelectOptions`, so they stay
-orphaned past M1. Six others never will be reached by any row —
-`ACPError`, `AgentRequest`, `AgentNotification`, `ClientRequest`,
-`ClientNotification`, `ProtocolLevelNotification` are JSON-RPC envelope types
-the routing table supersedes; exclude them from the signal.
+The seam is also why so much of the generated surface is unreachable.
+`Sources/FoundationModelsACP/Generated/` holds **26** declarations that nothing
+else in the generated surface references. The triage below accounts for every
+one of the 26, so an M1 that satisfies it leaves no orphan behind:
+
+- **Ten are unlocked by rows 1-4 — this group is M1's completion signal.**
+  Eight structs (`AuthMethodAgent`, `DiffPathChange`, `DiffPathPairChange`,
+  `PlanItems`, `ReplayFromStart`, `SessionConfigBoolean`, `SessionConfigId`,
+  `SessionConfigSelect`) and two enums (`DiffFileType`,
+  `SessionConfigOptionCategory`). `SessionConfigId` is reached from two rows —
+  `SessionConfigOption` in row 2 and `SetSessionConfigOptionRequest` in row 4 —
+  and every other member from exactly one.
+- **Four hang off row 5 and stay orphaned past M1.** `TextResourceContents`
+  and `BlobResourceContents` are `$ref`'d only by `EmbeddedResourceResource`;
+  `SessionConfigSelectGroup` only by `SessionConfigSelectOptions`; and
+  `ACPError` only by `AgentResponse` and `ClientResponse`. The last is easy to
+  file under the envelope types below — it is not one. The schema does `$ref`
+  it, from two row-5 placeholders, so it is reachable in principle even though
+  nothing plans to resolve those rows.
+- **Five are row-5 placeholders that are themselves orphans** —
+  `AgentResponse`, `ClientResponse`, `ExtRequest`, `ExtResponse`,
+  `ExtNotification`. Row 5's other three (`EmbeddedResourceResource`,
+  `RequestID`, `SessionConfigSelectOptions`) are referenced, so they are not.
+- **Five are JSON-RPC envelope types no row will ever reach** — `AgentRequest`,
+  `AgentNotification`, `ClientRequest`, `ClientNotification`,
+  `ProtocolLevelNotification`. Unlike everything above, these have **zero**
+  `$ref`s anywhere in the schema. The routing table supersedes them; exclude
+  them from the signal or it can never go green.
+- **Two are the routing roots** — `ACPMethodTable` and `Unstable`. Nothing in
+  the generated surface references them by design; consumers do.
 
 ## What v2 is, in one page
 
@@ -417,7 +436,7 @@ replayable script.
   `additionalDirectories`), and `protocolVersion: 2`.
   *Blocked on the M1 seam:* `InitializeResponse.authMethods` is `[JSONValue]?`
   until `AuthMethod` resolves.
-- [ ] **M5 — Sessions.** `session/new` / `list` / `resume` / `close`, `mcpServers`
+- [ ] **M5 — Sessions.** `session/new` / `list` / `resume` / `close` / `delete`, `mcpServers`
   on new and resume, `replayFrom`, config options.
   *Blocked on the M1 seam:* `ResumeSessionRequest.replayFrom` is `JSONValue?`
   until `ReplayFrom` resolves, and config options are untyped end to end —

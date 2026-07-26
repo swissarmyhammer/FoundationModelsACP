@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import ACPGenerateCore
+import FoundationModelsACP
 
 /// Emission assertions driven by the **real vendored artifacts** under
 /// `Schema/`, not by a synthetic fixture.
@@ -25,6 +26,9 @@ import Testing
         .deletingLastPathComponent()  // Tests
         .deletingLastPathComponent()  // package root
 
+    /// The tree-relative directory holding the checked-in generated output.
+    private static let generatedDirectory = "Sources/FoundationModelsACP/Generated"
+
     /// Reads a tree-relative file from the package.
     ///
     /// - Parameter treeRelativePath: The path relative to the package root.
@@ -39,17 +43,38 @@ import Testing
 
     /// Generates from the vendored artifacts exactly as `acp-generate` does.
     ///
+    /// - Parameter reorderingMembers: When `true`, each artifact is
+    ///   re-serialized with its JSON object members in ascending key order
+    ///   before generation. The document's *value* is unchanged — JSON objects
+    ///   are unordered — but the generator's maps are then built by a different
+    ///   insertion sequence.
     /// - Returns: The generated files, keyed by file name.
     /// - Throws: `GeneratorError` when generation fails, or an error when an
     ///   artifact cannot be read.
-    private static func generateFromVendoredArtifacts() throws -> [String: String] {
+    private static func generateFromVendoredArtifacts(reorderingMembers: Bool = false) throws -> [String: String] {
+        func artifact(_ treeRelativePath: String) throws -> Data {
+            let bytes = try packageFile(treeRelativePath)
+            return reorderingMembers ? try memberSorted(bytes) : bytes
+        }
         let files = try SchemaGenerator(config: set.config).generate(
-            schemaJSON: try packageFile(set.schemaPath),
-            metaJSON: try packageFile(#require(set.metaPath)),
-            unstableMetaJSON: try packageFile(#require(set.unstableMetaPath)),
+            schemaJSON: try artifact(set.schemaPath),
+            metaJSON: try artifact(#require(set.metaPath)),
+            unstableMetaJSON: try artifact(#require(set.unstableMetaPath)),
             namespace: set.outputNamespace
         )
         return Dictionary(uniqueKeysWithValues: files.map { ($0.name, $0.contents) })
+    }
+
+    /// The same JSON document with every object's members re-emitted in
+    /// ascending key order.
+    ///
+    /// - Parameter document: The document's bytes.
+    /// - Returns: The re-serialized bytes.
+    /// - Throws: An error when the bytes are not JSON.
+    private static func memberSorted(_ document: Data) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(try JSONDecoder().decode(JSONValue.self, from: document))
     }
 
     @Test func primarySetIsTheTopLevelVendoredV2Artifacts() throws {
@@ -69,17 +94,28 @@ import Testing
         let generated = try Self.generateFromVendoredArtifacts()
         for (name, contents) in generated.sorted(by: { $0.key < $1.key }) {
             let checkedIn = try String(
-                decoding: Self.packageFile("Sources/FoundationModelsACP/Generated/\(name)"),
+                decoding: Self.packageFile("\(Self.generatedDirectory)/\(name)"),
                 as: UTF8.self
             )
             #expect(checkedIn == contents, "\(name) drifted from the vendored schema; run `swift package generate-acp`")
         }
+        // Comparing only the files the generator emits leaves a file it no
+        // longer emits invisible — and `acp-generate` writes but never deletes,
+        // so CI's `git diff` cannot see one either. The directory must hold
+        // exactly the emitted set.
+        let checkedInNames = try FileManager.default
+            .contentsOfDirectory(atPath: Self.packageRoot.appendingPathComponent(Self.generatedDirectory).path)
+            .filter { $0.hasSuffix(".swift") }
+        #expect(
+            Set(checkedInNames) == Set(generated.keys),
+            "\(Self.generatedDirectory) holds Swift files the generator no longer emits"
+        )
     }
 
     @Test func checkedInStampMatchesTheVendoredArtifactHash() throws {
         let stampName = SchemaGenerator.stampFileName(namespace: Self.set.outputNamespace)
         let recorded = try String(
-            decoding: Self.packageFile("Sources/FoundationModelsACP/Generated/\(stampName)"),
+            decoding: Self.packageFile("\(Self.generatedDirectory)/\(stampName)"),
             as: UTF8.self
         ).trimmingCharacters(in: .whitespacesAndNewlines)
         let outcome = try SchemaGenerator(config: Self.set.config).generateIfChanged(
@@ -139,12 +175,30 @@ import Testing
         }
     }
 
-    @Test func generatedSurfaceNamesNoSupersededProtocolVersion() throws {
-        // The package serves v2 only, and a hardcoded version in emitted DocC
-        // goes stale silently. Nothing generated may name v1.
-        for (name, contents) in try Self.generateFromVendoredArtifacts() {
-            #expect(!contents.contains("ACP v1"), "\(name) still names ACP v1")
-            #expect(!contents.contains("acp-v1"), "\(name) still names acp-v1")
+    @Test func generatedDocCNamesNoProtocolVersion() throws {
+        let generated = try Self.generateFromVendoredArtifacts()
+        // The regression behind this test was a literal: `methodTableDeclaration`
+        // hardcoded "the stable ACP v1 surface" and shipped it as public DocC
+        // atop the routing table, where it survived the whole v1→v2 rename. A
+        // negative assertion alone cannot catch that class — the v2 schema
+        // names no version either way — so pin the banner the emitter does
+        // write.
+        let table = try #require(generated["MethodTable.generated.swift"])
+        #expect(table.contains("/// The method-routing table for the stable ACP surface.\n"))
+        // Then sweep for the `ACP vN` / `acp-vN` spelling an emitter would
+        // reach for, since a hardcoded "ACP v2" goes stale on the next
+        // re-vendor exactly as "ACP v1" did. `Schema/README.md` records the
+        // vendored revision instead.
+        //
+        // Scope, stated precisely because the files are not version-free: the
+        // schema's own `description` text carries
+        // `https://agentclientprotocol.com/protocol/v2/…` doc links, which
+        // pass through into emitted DocC in the hundreds. Those are vendored
+        // content, not an emitter literal, and they are correct — the sweep
+        // exempts them by matching only the `ACP v`/`acp-v` spelling.
+        let versionToken = try Regex("acp[ -]v[0-9]").ignoresCase()
+        for (name, contents) in generated {
+            #expect(contents.firstMatch(of: versionToken) == nil, "\(name) hardcodes a protocol version in generated text")
         }
     }
 
@@ -153,21 +207,58 @@ import Testing
         let models = try #require(generated["Models.generated.swift"])
         // v2 models absolute paths as a schema definition, so the invariant
         // type follows the `$ref` — no per-field configuration.
-        #expect(models.contains("public var cwd: AbsolutePath"))
-        #expect(models.contains("public var additionalDirectories: [AbsolutePath]?"))
-        // …and the hand-written type is never re-emitted by the generator.
-        let identifiers = try #require(generated["Identifiers.generated.swift"])
-        #expect(!identifiers.contains("public struct AbsolutePath"))
+        //
+        // Pin the exact declarations rather than searching the file for a
+        // substring: `"public var cwd: AbsolutePath"` occurs inside
+        // `"public var cwd: AbsolutePath?"`, so an unscoped `contains` cannot
+        // tell a required path from an optional one, and one surviving
+        // declaration satisfies it while the others regress.
+        #expect(
+            Self.properties(ofType: "AbsolutePath", in: models) == [
+                "CommandPermissionSubject.cwd: AbsolutePath",
+                "DiffPathChange.path: AbsolutePath",
+                "DiffPathPairChange.oldPath: AbsolutePath",
+                "DiffPathPairChange.path: AbsolutePath",
+                "ListSessionsRequest.cwd: AbsolutePath?",
+                "McpServerStdio.command: AbsolutePath",
+                "NewSessionRequest.cwd: AbsolutePath",
+                "NewSessionRequest.additionalDirectories: [AbsolutePath]?",
+                "ResumeSessionRequest.cwd: AbsolutePath",
+                "ResumeSessionRequest.additionalDirectories: [AbsolutePath]?",
+                "SessionInfo.cwd: AbsolutePath",
+                "SessionInfo.additionalDirectories: [AbsolutePath]?",
+                "TerminalUpdate.cwd: AbsolutePath?",
+                "ToolCallLocation.path: AbsolutePath",
+            ]
+        )
+        // …and the hand-written type is never re-emitted, into any file.
+        for (name, contents) in generated {
+            #expect(!contents.contains("public struct AbsolutePath"), "\(name) re-emits the hand-written AbsolutePath")
+        }
     }
 
     @Test func stableMethodTableRoutesExactlyTheStableManifest() throws {
-        let stable = Self.stableSection(of: try Self.methodTable())
+        // Pinning wire names alone would leave the wiring unchecked, and the
+        // wiring is the whole reason this table is generated: the TS-SDK bug
+        // this replaces was `setSessionModel` bound to `session/set_mode` —
+        // a right name on the wrong handler. Side, kind, handler, params,
+        // result, and position are all part of the assertion.
         #expect(
-            Self.wireMethods(in: stable).sorted() == [
-                "$/cancel_request", "auth/login", "auth/logout", "initialize",
-                "session/cancel", "session/close", "session/delete", "session/list",
-                "session/new", "session/prompt", "session/request_permission",
-                "session/resume", "session/set_config_option", "session/update",
+            Self.routingEntries(in: Self.stableSection(of: try Self.methodTable())) == [
+                "agent request auth/login -> loginAuth(LoginAuthRequest) : LoginAuthResponse",
+                "agent request auth/logout -> logoutAuth(LogoutAuthRequest) : LogoutAuthResponse",
+                "agent request initialize -> initialize(InitializeRequest) : InitializeResponse",
+                "agent notification session/cancel -> sessionCancel(CancelSessionNotification) : nil",
+                "agent request session/close -> closeSession(CloseSessionRequest) : CloseSessionResponse",
+                "agent request session/delete -> deleteSession(DeleteSessionRequest) : DeleteSessionResponse",
+                "agent request session/list -> listSessions(ListSessionsRequest) : ListSessionsResponse",
+                "agent request session/new -> newSession(NewSessionRequest) : NewSessionResponse",
+                "agent request session/prompt -> prompt(PromptRequest) : PromptResponse",
+                "agent request session/resume -> resumeSession(ResumeSessionRequest) : ResumeSessionResponse",
+                "agent request session/set_config_option -> setSessionConfigOption(SetSessionConfigOptionRequest) : SetSessionConfigOptionResponse",
+                "client request session/request_permission -> requestPermission(RequestPermissionRequest) : RequestPermissionResponse",
+                "client notification session/update -> sessionUpdate(UpdateSessionNotification) : nil",
+                "protocolLevel notification $/cancel_request -> cancelRequest(CancelRequestNotification) : nil",
             ]
         )
     }
@@ -177,23 +268,95 @@ import Testing
         // v2 does publish an unstable routing manifest, so the generator's
         // `Unstable` namespace support is live, not dead code. The namespace
         // carries only what the stable table does not already route — and
-        // `mcp/message` is routed on both sides, so it appears twice.
+        // `mcp/message` is routed on both sides, which the pinned side on each
+        // of its two entries is what actually proves.
         #expect(table.contains("public enum Unstable {"))
-        let unstable = Self.unstableSection(of: table)
         #expect(
-            Self.wireMethods(in: unstable).sorted() == [
-                "document/didChange", "document/didClose", "document/didFocus",
-                "document/didOpen", "document/didSave", "elicitation/complete",
-                "elicitation/create", "mcp/connect", "mcp/disconnect", "mcp/message",
-                "mcp/message", "nes/accept", "nes/close", "nes/reject", "nes/start",
-                "nes/suggest", "providers/disable", "providers/list", "providers/set",
-                "session/fork",
+            Self.routingEntries(in: Self.unstableSection(of: table)) == [
+                "agent document/didChange -> documentDidChange",
+                "agent document/didClose -> documentDidClose",
+                "agent document/didFocus -> documentDidFocus",
+                "agent document/didOpen -> documentDidOpen",
+                "agent document/didSave -> documentDidSave",
+                "agent mcp/message -> mcpMessage",
+                "agent nes/accept -> nesAccept",
+                "agent nes/close -> nesClose",
+                "agent nes/reject -> nesReject",
+                "agent nes/start -> nesStart",
+                "agent nes/suggest -> nesSuggest",
+                "agent providers/disable -> providersDisable",
+                "agent providers/list -> providersList",
+                "agent providers/set -> providersSet",
+                "agent session/fork -> sessionFork",
+                "client elicitation/complete -> elicitationComplete",
+                "client elicitation/create -> elicitationCreate",
+                "client mcp/connect -> mcpConnect",
+                "client mcp/disconnect -> mcpDisconnect",
+                "client mcp/message -> mcpMessage",
             ]
         )
     }
 
-    @Test func generationIsDeterministic() throws {
-        #expect(try Self.generateFromVendoredArtifacts() == (try Self.generateFromVendoredArtifacts()))
+    @Test func declarationsAreEmittedInSortedSchemaNameOrder() throws {
+        // Emission order is an explicit sort over the schema's `$defs` map, and
+        // nothing downstream re-imposes it. Drop that sort and the order
+        // follows hash-seeded map iteration instead, so the checked-in output
+        // churns between runs for no reason — the classic codegen
+        // nondeterminism. Pinning the order is what turns that into a test
+        // failure with a name on it.
+        //
+        // Comparing two in-process runs cannot do this job: Swift seeds
+        // `Hasher` once per process, so both runs iterate identically and the
+        // dependence stays invisible.
+        //
+        // Names are compared as the *schema* spells them, since the emitter
+        // renames a few — `Error` sorts where `Error` sorts, not where
+        // `ACPError` would.
+        let schemaNames = Dictionary(uniqueKeysWithValues: Self.set.config.typeRenames.map { ($1, $0) })
+        let emitted = try Self.generateFromVendoredArtifacts().mapValues { contents in
+            Self.declaredTypeNames(in: contents).map { schemaNames[$0] ?? $0 }
+        }
+        for (file, names) in emitted {
+            #expect(names == names.sorted(), "\(file) emits declarations out of schema-name order")
+        }
+        // `[] == [].sorted()` is true, so the ordering assertion alone would go
+        // green the moment `declaredTypeName(on:)` stopped recognizing a
+        // declaration — an attribute line, an indent, or a non-`nil`
+        // `outputNamespace` nesting everything one level deeper. Pinning the
+        // counts keeps a parse that quietly stops seeing declarations from
+        // reading as success.
+        #expect(
+            emitted.mapValues(\.count) == [
+                "Identifiers.generated.swift": 12,
+                "MethodTable.generated.swift": 2,
+                "Models.generated.swift": 98,
+                "Unions.generated.swift": 19,
+                "Unresolved.generated.swift": 15,
+            ]
+        )
+    }
+
+    @Test func generationIgnoresSchemaMemberOrder() throws {
+        // The ordering pin above is the sharp instrument for declaration order;
+        // this is a broader smoke test over the whole output. Re-serializing
+        // the vendored documents with their object members in a different order
+        // feeds the generator the same values — JSON objects are unordered —
+        // built into its `[String: JSONValue]` maps by a different insertion
+        // sequence, so emitted content that follows map order rather than an
+        // explicit sort *may* diverge.
+        //
+        // Only *may*: `JSONValue.object` is an unordered `Dictionary`, so
+        // textual member order is already gone by the time the generator sees
+        // it, and the residual signal is bucket layout — which differs only
+        // where insertion order changes a collision probe sequence. Measured
+        // against a generator with its `$defs` sort removed, this catches the
+        // defect roughly half the time, where two identical in-process runs
+        // never catch it at all: same bytes, same process, same hash seed and
+        // insertion sequence give an identical bucket layout, so that form's
+        // catch rate is zero rather than merely low. It never fails on a
+        // correct generator, so a divergence here is always real; a pass is
+        // not a proof.
+        #expect(try Self.generateFromVendoredArtifacts() == (try Self.generateFromVendoredArtifacts(reorderingMembers: true)))
     }
 
     // MARK: - Source slicing helpers
@@ -227,22 +390,56 @@ import Testing
         return String(table[unstable.upperBound...])
     }
 
-    /// The wire method names a stretch of routing-table source declares, in
+    /// The routing entries a stretch of method-table source declares, in
     /// declaration order and with duplicates kept — a method routed on two
     /// sides is two entries.
     ///
+    /// Each entry is flattened to `side kind wire -> handler(params) : result`,
+    /// with `kind` and the type names omitted for the unstable table, which
+    /// routes by name and side only. Flattening the whole initializer rather
+    /// than the wire name alone is what makes a swapped handler or a
+    /// misassigned side fail the assertion.
+    ///
     /// - Parameter source: A stretch of generated method-table source.
-    /// - Returns: Every `wireMethod:` literal it declares.
-    private static func wireMethods(in source: String) -> [String] {
-        source.split(separator: "\n").compactMap { line in
-            let marker = "wireMethod: \""
-            guard let start = line.range(of: marker),
-                let end = line[start.upperBound...].firstIndex(of: "\"")
-            else {
-                return nil
+    /// - Returns: Every routing entry it declares.
+    private static func routingEntries(in source: String) -> [String] {
+        var entries: [String] = []
+        var fields: [String: String] = [:]
+        var inEntry = false
+        for line in source.split(separator: "\n") {
+            let text = line.trimmingCharacters(in: .whitespaces)
+            switch text {
+            case "MethodInfo(", "UnstableMethodInfo(":
+                inEntry = true
+                fields = [:]
+            case "),", ")":
+                guard inEntry else { continue }
+                inEntry = false
+                entries.append(routingEntry(from: fields))
+            default:
+                guard inEntry, let separator = text.range(of: ": ") else { continue }
+                let value = text[separator.upperBound...].trimmingCharacters(in: CharacterSet(charactersIn: ","))
+                fields[String(text[text.startIndex..<separator.lowerBound])] =
+                    value.trimmingCharacters(in: CharacterSet(charactersIn: "\"")).trimmingCharacters(in: CharacterSet(charactersIn: "."))
             }
-            return String(line[start.upperBound..<end])
         }
+        return entries
+    }
+
+    /// Renders one parsed routing entry's fields.
+    ///
+    /// - Parameter fields: The entry's initializer arguments, unquoted.
+    /// - Returns: The flattened entry.
+    private static func routingEntry(from fields: [String: String]) -> String {
+        let side = fields["side"] ?? "?"
+        let wire = fields["wireMethod"] ?? "?"
+        let handler = fields["handlerName"] ?? "?"
+        guard let kind = fields["kind"] else { return "\(side) \(wire) -> \(handler)" }
+        let entry = """
+            \(side) \(kind) \(wire) -> \(handler)(\(fields["paramsTypeName"] ?? "?")) : \(fields["resultTypeName"] ?? "?")
+            """
+        guard let deprecation = fields["deprecationMessage"], deprecation != "nil" else { return entry }
+        return "\(entry) [deprecated: \(deprecation)]"
     }
 
     /// Extracts one top-level `public enum` declaration from generated source:
@@ -277,5 +474,56 @@ import Testing
             guard line.hasPrefix("    case "), !line.hasPrefix("     ") else { return nil }
             return String(line.dropFirst("    case ".count).prefix { $0.isLetter || $0.isNumber || $0 == "_" })
         }
+    }
+
+    /// Every stored property in generated source whose declared type mentions a
+    /// given type name, rendered `Owner.property: Type` in declaration order.
+    ///
+    /// Scoping each property to its enclosing declaration and keeping the full
+    /// type is what separates a required property from an optional one: a bare
+    /// `contains("public var cwd: AbsolutePath")` over the whole file is
+    /// satisfied by `public var cwd: AbsolutePath?` too.
+    ///
+    /// - Parameters:
+    ///   - typeName: The type name to look for inside declared types.
+    ///   - source: The generated file's source text.
+    /// - Returns: The matching properties.
+    private static func properties(ofType typeName: String, in source: String) -> [String] {
+        let marker = "    public var "
+        var owner = ""
+        var matches: [String] = []
+        for line in source.split(separator: "\n", omittingEmptySubsequences: false) {
+            if let declared = declaredTypeName(on: line) {
+                owner = declared
+                continue
+            }
+            guard line.hasPrefix(marker), let separator = line.range(of: ": ") else { continue }
+            let type = String(line[separator.upperBound...])
+            guard type.contains(typeName) else { continue }
+            let property = line[line.index(line.startIndex, offsetBy: marker.count)..<separator.lowerBound]
+            matches.append("\(owner).\(property): \(type)")
+        }
+        return matches
+    }
+
+    /// The top-level declaration names a generated file declares, in emission
+    /// order.
+    ///
+    /// - Parameter source: The generated file's source text.
+    /// - Returns: The declared names.
+    private static func declaredTypeNames(in source: String) -> [String] {
+        source.split(separator: "\n", omittingEmptySubsequences: false).compactMap(declaredTypeName(on:))
+    }
+
+    /// The Swift name of the top-level declaration a line opens.
+    ///
+    /// - Parameter line: A line of generated source.
+    /// - Returns: The declared name, or `nil` when the line opens no top-level
+    ///   declaration.
+    private static func declaredTypeName(on line: Substring) -> String? {
+        for keyword in ["public struct ", "public enum ", "public typealias "] where line.hasPrefix(keyword) {
+            return String(line.dropFirst(keyword.count).prefix { $0.isLetter || $0.isNumber || $0 == "_" })
+        }
+        return nil
     }
 }

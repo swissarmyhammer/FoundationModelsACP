@@ -113,6 +113,24 @@ import Testing
         #expect(models.contains("public var id: String"))
     }
 
+    @Test func objectValueUnionFiltersTheBareUnknownFallback() throws {
+        // The string-enum and tagged-union stages read their variants through
+        // `unionVariants(of:)`, which drops the schema's explicit
+        // unknown-discriminator catch-all because each of those emitters
+        // synthesizes its own fallback. The value-union stage must read them
+        // the same way: a catch-all declaring nothing beyond the pinned
+        // discriminator has no `value` member, so reading raw `anyOf` here
+        // would reject a union its sibling stages accept.
+        let files = try SchemaGenerator().generate(schemaJSON: Self.objectValueUnionWithBareFallbackSchema)
+        let models = try #require(files.first { $0.name == "Models.generated.swift" }).contents
+        #expect(models.contains("public struct Choice: Codable, Hashable, Sendable"))
+        #expect(models.contains("public enum Value: Codable, Hashable, Sendable"))
+        #expect(models.contains("case boolean(Bool)"))
+        #expect(models.contains("case text(String)"))
+        // The catch-all is not a case of its own, under its title or otherwise.
+        #expect(!models.contains("case other"))
+    }
+
     @Test func discriminatedUnionWithoutDefaultFailsLoudly() throws {
         // Every variant is discriminated; there is no discriminator-less
         // default to select when `type` is absent.
@@ -332,6 +350,51 @@ import Testing
                         "type": "object",
                         "properties": { "operation": { "type": "string", "const": "add" } },
                         "required": ["operation"]
+                      }
+                    ]
+                  },
+                  "additionalProperties": true
+                }
+              ]
+            }
+          }
+        }
+        """.utf8)
+
+    /// The object-with-value-union shape closed by the schema's explicit
+    /// unknown-discriminator catch-all, which declares nothing beyond the
+    /// pinned discriminator and so carries no `value` member.
+    private static let objectValueUnionWithBareFallbackSchema = Data(
+        """
+        {
+          "$defs": {
+            "Choice": {
+              "type": "object",
+              "properties": { "id": { "type": "string" } },
+              "required": ["id"],
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": { "value": { "type": "boolean" }, "type": { "type": "string", "const": "boolean" } },
+                  "required": ["type", "value"]
+                },
+                {
+                  "title": "text",
+                  "type": "object",
+                  "properties": { "value": { "type": "string" } },
+                  "required": ["value"]
+                },
+                {
+                  "title": "other",
+                  "type": "object",
+                  "properties": { "type": { "type": "string" } },
+                  "required": ["type"],
+                  "not": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": { "type": { "type": "string", "const": "boolean" } },
+                        "required": ["type"]
                       }
                     ]
                   },

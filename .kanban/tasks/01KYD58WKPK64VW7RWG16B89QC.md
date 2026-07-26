@@ -435,6 +435,186 @@ comments:
     `swift build` clean, `swift test` 60 tests / 9 suites green after all of the
     above. Task still in `doing`, nothing committed.
   timestamp: 2026-07-26T14:56:15.104306+00:00
+- actor: claude-code
+  id: 01kyfh41v905s8n8sztrvqevs6
+  text: |-
+    ## Review Findings (2026-07-26 round 3) — scope `HEAD~1..HEAD` (`ed220ab`)
+
+    Engine run over the commit range: 10 findings, 10 confirmed, 6 refuted, 48 attempted, 0 failed. Two engine findings dropped as out of scope (dead `decode` helper and orphaned `encode` docstring at the tail of `UnknownFallbackTests.swift` — both present in `HEAD~1` and untouched by this commit, so they are pre-existing test code). Four near-identical empty-`Set` findings consolidated into one item.
+
+    Independently re-verified this round: `swift build` clean, `swift test` 60 tests / 9 suites green. Settled items from rounds 1 and 2 were not re-litigated.
+
+    Note on the engine's line numbers: every cited line was offset from the real location. The numbers below are corrected and verified against the current files.
+
+    ### Verified correct, no action (recorded so round 4 does not redo it)
+
+    Generated output was machine-compared against `Schema/acp-v2.json` directly rather than trusting the generator, and it is faithful. All 146 `$defs` accounted for (142 emitted, 2 hand-written, 2 renamed), 15 deferred typealiases, nothing silently dropped. All 19 unions: decode-switch literals equal the schema `const` list in schema order. All 98 structs: property sets identical and required-vs-optional exact with zero exceptions. `SessionUpdate`'s 16 discriminators in schema order, `ToolCallContent` carries `Terminal`, `ContentBlock` correctly has none. `PlanUpdate.plan` required, `InitializeResponse.authMethods` optional. The 14 placeholder-typed properties match the plan exactly.
+
+    The direction-of-loss for all four deferrals is now correct in `plan.md`, including the previously-inverted `SetSessionConfigOptionRequest` row — confirmed at the emitter, where the default case is built with `tag: nil` and encodes `value` unconditionally but the discriminator only when a tag exists. The M1 remediation recipe matches the real code paths.
+
+    `checkedInOutputMatchesAFreshRun` genuinely regenerates and is not gated by the stamp — proven empirically on a scratch copy: a hand-edit to a generated file and a generator-only change each fail it while `checkedInStampMatchesTheVendoredArtifactHash` still passes.
+
+    ### Findings
+
+    - [x] **`plan.md` (M1 completion signal) — the orphan accounting is incomplete by three types, and the count is stated as exhaustive.** The triage says rows 1-4 unlock "**seven**" already-emitted structs, names them, then accounts for three more from row 5 and six unreachable envelope types. That totals 16, but `Sources/FoundationModelsACP/Generated/` holds 26 orphan declarations; after subtracting the 5 orphan deferred typealiases and the 2 routing roots, **three are unaccounted**, and all three are orphaned for exactly the same reason as the named seven — a row 1-4 deferral. They are `DiffFileType` (sole referrer `DiffChange`, row 2), `SessionConfigOptionCategory` (sole referrer `SessionConfigOption`, row 2), and `SessionConfigId` (referrers `SessionConfigOption` and `SetSessionConfigOptionRequest`, rows 2 and 4). Verified two ways: the schema `$ref` reverse graph, and a grep of the whole `Generated/` tree where each appears only on its own declaration line. The word "structs" does not rescue the number — `SessionConfigId` is a `struct`, so the true struct count for rows 1-4 is **eight**, not seven. As written, an M1 that lands and checks the seven named types will leave three real orphans behind and still read as complete. This is the same block round-2 finding 2 asked to be made precise, and it is the document two downstream package plans get corrected from.
+    - [x] **`Sources/ACPGenerateCore/SchemaGenerator.swift:519` — the "variants disagree on the discriminator" message is written out three times and will drift.** Same validation failure at `:519` (`taggedUnionModel`), `:636` (`discriminatedUnionModel`), and a third formulation at `:784`. One of the three was introduced by this commit. Extract to a single named constant or a helper that throws it, so the wording changes in one place.
+    - [x] **`Sources/ACPGenerateCore/SchemaGenerator.swift:526` — the "expected allOf to be a single payload $ref" message is duplicated.** Identical text and identical validation at `:526` (`taggedUnionModel`) and `:595` (`discriminatedPayloadType`). Extract the single-payload check into one helper that performs the validation and throws.
+    - [x] **`Sources/ACPGenerateCore/SchemaGenerator.swift:706` — `objectValueUnionModel` is the only union stage that reads raw `anyOf` instead of `unionVariants(of:)`, so a bare unknown-fallback variant reaching it throws instead of being filtered.** `stringEnumModel` and `taggedUnionModel` both go through `unionVariants(of:)`, which drops the synthesized fallback; `objectValueUnionModel` takes `fragment[Self.anyOfKey]?.arrayValue ?? []` unfiltered, so a `not`-variant that declares nothing beyond the pinned discriminator has no `value` member and trips `valueMember`'s `unsupportedShape` throw. Not reachable from the vendored v2 schema today (no v2 definition reaches this stage at all), so this is latent rather than a live bug — but it is a genuine inconsistency between sibling stages. This does **not** conflict with the deliberate loud guard below it: that guard fires on a default declaring the discriminator *beyond* the pinned set, which `unionVariants(of:)` would not filter, so the guard still fires. Note the interaction with `valueUnionDiscriminator(of: variants,)` on the next line, which would also receive the filtered list.
+    - [x] **`Sources/ACPGenerateCore/SchemaGenerator.swift:861` — empty-`Set` variables use the constructor instead of a literal with a type annotation, at five sites.** Project idiom is `var items: Set<T> = []`, not `Set<T>()`. Sites: `:861` `var seen`, `:1639` `var seenWires`, `:1703` `var consumed`, `:1706` `var handlerNames`, `:1832` `var handlerNames`. The engine cited four and missed `:861`; fix all five so a re-review finds no recurrence. All five are pre-existing lines this commit did not touch, so this is a cheap whole-file idiom cleanup rather than a regression.
+    - [x] **`Tests/ACPGenerateTests/VendoredSchemaTests.swift:75` — `checkedInOutputMatchesAFreshRun` iterates only the generated set, so a stale generated file is invisible to it and to the CI gate.** The loop walks the files `generate()` returns and compares each to disk; a `.swift` file left in `Generated/` that the generator no longer emits is never examined. `Sources/acp-generate/main.swift` only writes (`for file in files { try write(file: file) }`) and never deletes, so `git diff` in CI does not catch it either. No such file exists today, which is exactly why this should be closed while it is free — assert the directory contents equal the emitted set.
+    - [x] **`Tests/ACPGenerateTests/VendoredSchemaTests.swift:146` — `generatedSurfaceNamesNoSupersededProtocolVersion` is true by construction and pins nothing the generator controls.** `!contents.contains("ACP v1")` and `!contents.contains("acp-v1")` hold because the v2 schema contains no such text and the emitter now writes no version literal at all. The regression it was written for (the hardcoded "the stable ACP v1 surface" DocC banner) was a literal in `methodTableDeclaration`; the assertion that would have caught it is a positive pin on the banner text the emitter *does* write. Either pin the banner positively or drop the test.
+    - [x] **`Tests/ACPGenerateTests/VendoredSchemaTests.swift:156` — `absolutePathDefinitionResolvesToTheHandWrittenInvariant` cannot detect the regression it names.** `#expect(models.contains("public var cwd: AbsolutePath"))` is an unscoped substring over a 241 KB file with six `cwd` declarations (one surviving declaration satisfies it while the other five regress silently), and it cannot distinguish required from optional because `"public var cwd: AbsolutePath?"` contains the asserted substring. Proven mechanically: rewriting every `public var cwd: AbsolutePath` to the optional form still passes, and two of the six declarations are already `AbsolutePath?`, so the optional form alone satisfies it. The companion negative at `:160` only inspects `Identifiers.generated.swift` while its comment claims the hand-written type is never re-emitted anywhere — re-emission into `Models.generated.swift` or `Unions.generated.swift` passes. Scope the assertion to named declarations the way `declaration(named:in:)` already does for the union tests.
+    - [x] **`Tests/ACPGenerateTests/VendoredSchemaTests.swift:196` — `generationIsDeterministic` is self-satisfying for the failure mode it targets.** It compares two `generateFromVendoredArtifacts()` calls in the same process; Swift seeds `Hasher` once per process, so two equal `Set`/`Dictionary` values built the same way iterate identically within one run, making the classic codegen nondeterminism (unordered-collection iteration order) invisible by construction. The determinism that actually holds comes from explicit sorting in the generator (`orderedByWireMethod`, and the required-then-optional-alphabetical property ordering), none of which this assertion exercises. Either pin the sorted orderings directly or compare across processes.
+    - [x] **`Tests/ACPGenerateTests/VendoredSchemaTests.swift:236` — the routing-table assertions pin wire-method names only, not the wiring the codegen exists to protect.** `wireMethods(in:)` extracts just the `wireMethod:` literal, so `stableMethodTableRoutesExactlyTheStableManifest` and `unstableNamespaceRoutesExactlyTheUnstableOnlyMethods` assert nothing about `side`, `kind`, `handlerName`, `paramsTypeName`, or `resultTypeName`. A generator bug that swapped two `handlerName`s, or moved `session/request_permission` to `.agent`, passes every new assertion — which is precisely the TS-SDK bug class (`setSessionModel` wired to `session/set_mode`) the plan says this codegen structurally prevents. Also, because the unstable list is `.sorted()`, the duplicated `mcp/message` is not verified to sit on two different sides, though the comment claims it does. The plan does defer the real guard to M2, so this is disclosed rather than hidden — but the new suite must not be read as covering it, and the round-2 sign-off that these are "real pins" holds for the union tests, not these two.
+
+    ### Housekeeping
+
+    `plan.md` has an uncommitted one-line working-tree edit adding `/ delete` to M5. Unrelated to the findings above, but it means the commit under review is not the whole story on disk.
+  timestamp: 2026-07-26T15:36:26.729172+00:00
+- actor: claude-code
+  id: 01kyfjd1dj8wg5rf84617xxd28
+  text: |-
+    ## Round-3 findings worked — all ten, plus the orphan count re-derived from scratch
+
+    `swift build` clean, `swift test` **62 tests / 9 suites** green (was 60; two new
+    tests). `swift package generate-acp` reports up to date and changes nothing.
+    `git diff HEAD -- Sources/FoundationModelsACP Schema` is **empty** — the
+    checked-in generated output and the vendored artifacts are byte-identical to
+    `ed220ab`, so none of this touched the wire surface. `swift format` was **not**
+    run.
+
+    ### Finding 1: the orphan triage was verified independently, and the finding is right
+
+    I did not take the three missing types on faith. Enumerated the orphans two
+    ways, both scripted against the tree rather than read off the finding:
+
+    1. **Reference scan.** For each of the 146 top-level `public struct` / `enum` /
+       `typealias` declarations in `Generated/`, search every generated file for the
+       name, excluding the declaration's own source span and excluding comment
+       lines. Exactly **26** have no reference.
+    2. **Schema `$ref` reverse graph** over `Schema/acp-v2.json`, to confirm *why*
+       each is orphaned and which seam row reaches it.
+
+    Both agree, and they reconcile to 26 exactly:
+
+    - **10 unlocked by rows 1-4** — eight structs (`AuthMethodAgent`,
+      `DiffPathChange`, `DiffPathPairChange`, `PlanItems`, `ReplayFromStart`,
+      `SessionConfigBoolean`, `SessionConfigId`, `SessionConfigSelect`) and two
+      enums (`DiffFileType`, `SessionConfigOptionCategory`). Referrers confirmed:
+      `DiffFileType` <- `DiffChange`; `SessionConfigOptionCategory` <-
+      `SessionConfigOption`; `SessionConfigId` <- `SessionConfigOption` **and**
+      `SetSessionConfigOptionRequest`. So the finding's three additions are real,
+      `SessionConfigId` is indeed a struct (in `Identifiers.generated.swift`), and
+      the struct count for rows 1-4 is **eight, not seven**.
+    - **3 hang off row 5** — `TextResourceContents` and `BlobResourceContents`
+      under `EmbeddedResourceResource`, `SessionConfigSelectGroup` under
+      `SessionConfigSelectOptions`.
+    - **5 row-5 placeholders that are themselves orphans** — `AgentResponse`,
+      `ClientResponse`, `ExtRequest`, `ExtResponse`, `ExtNotification`. Row 5's
+      other three (`EmbeddedResourceResource`, `RequestID`,
+      `SessionConfigSelectOptions`) *are* referenced, so they are not orphans — a
+      distinction the old text did not draw.
+    - **6 JSON-RPC envelope types** no row reaches.
+    - **2 routing roots** — `ACPMethodTable`, `Unstable`.
+
+    `plan.md`'s completion-signal paragraph is rewritten as that five-group triage,
+    stating the 26 total up front so the arithmetic is checkable rather than
+    asserted.
+
+    ### Findings 2, 3, 5: generator dedup and idiom
+
+    - One `discriminatorDisagreement(_:context:)` builds the message; a new
+      `agreedDiscriminator(_:_:context:)` folds a variant's discriminator into the
+      established one, collapsing the two identical six-line check blocks in
+      `taggedUnionModel` and `discriminatedUnionModel` as well as the message.
+      `valueUnionDiscriminator`'s ternary is split into two guards so it can throw
+      the shared error.
+    - `flattenedPayloadType(of:context:)` owns the single-payload-`$ref` validation
+      and returns `nil` when the variant declares no `allOf`;
+      `discriminatedPayloadType` is now a thin required-payload wrapper.
+      **One deliberate behavior change:** an `allOf` that is present but not an
+      array used to be silently ignored in `taggedUnionModel` (no payload, no
+      error) and now throws, like everywhere else. Nothing asserts the old
+      behavior and no vendored definition has that shape.
+    - All five `Set<T>()` sites are now `: Set<T> = []`.
+
+    ### Finding 4: `objectValueUnionModel` reads `unionVariants(of:)` — TDD'd
+
+    New synthetic fixture: an object-plus-value union with a v1-style
+    discriminator-less default *and* a bare `not` catch-all declaring only the
+    pinned discriminator. **RED first** — the test failed with exactly the error the
+    finding predicts, `unsupported schema shape at Choice value variant 2: expected
+    exactly one non-discriminator value member`. Then the one-line change to read
+    through `unionVariants(of:)`, and it emits. The loud guard is unaffected:
+    `valueUnionDefaultDeclaringTheDiscriminatorFailsLoudly` still throws, because a
+    catch-all declaring `value` beyond the discriminator is not filtered.
+
+    ### Findings 6-10: every test fix was proved to discriminate
+
+    Each was proved the way round 3 proved the originals were vacuous — break the
+    thing the test claims to pin, watch it fail, restore, watch it pass.
+
+    - **6, stale generated file.** Dropped a `Stale.generated.swift` into
+      `Generated/`. `checkedInOutputMatchesAFreshRun` fails on the new
+      directory-contents assertion; removing it goes green.
+    - **7, DocC banner.** Reintroduced the exact historical regression — the
+      emitter's banner back to `the stable ACP v1 surface`. **Both** halves fire:
+      the positive banner pin and the version sweep. Then a *version-neutral*
+      banner change (`/// Routing table.`): only the positive pin fires — the class
+      the old negative-only test could never catch. The sweep is now
+      `Regex("(ACP v|acp-v)[0-9]")`, so a hardcoded `ACP v2` is caught too; it
+      matches nothing in the current output, and the schema's `protocol/v2/…` doc
+      URLs do not trip it.
+    - **8, `AbsolutePath`.** Removed `cwd` from the `required` list of
+      `NewSessionRequest`, `ResumeSessionRequest`, `SessionInfo`, and
+      `CommandPermissionSubject` in the schema and regenerated. Result: **all six**
+      `cwd` declarations became `AbsolutePath?`, zero remained required — and
+      `contains("public var cwd: AbsolutePath")` was **still true**, so the old
+      assertion would still have passed. The new 14-entry inventory (every
+      `AbsolutePath`-typed property, scoped to its owning struct, with the full
+      type including `?`) fails. Schema and generated output restored and verified
+      byte-identical.
+    - **9, determinism.** Measured the old form rather than assuming: with
+      `orderedEntries`' sort removed, two identical in-process runs caught it
+      **3/12** — weak, but not literally self-satisfying as stated. Feeding the
+      second run a member-reordered document raised that to **7/12**: better, still
+      probabilistic, because Swift dictionaries with the same keys diverge in
+      iteration order only where insertion order changes collision placement. So
+      the primary fix is the finding's *other* option — a deterministic pin.
+      `declarationsAreEmittedInSortedSchemaNameOrder` asserts every file's
+      declarations are in ascending **schema** name order (mapping back through
+      `typeRenames`, since `Error` is emitted as `ACPError` and sorts where `Error`
+      sorts). With the sort removed it fails **12/12**. The member-reorder check
+      survives as `generationIgnoresSchemaMemberOrder`, covering map-order
+      dependence anywhere else in the output; it never false-fails.
+    - **10, routing wiring.** `routingEntries(in:)` now flattens each entry to
+      `side kind wire -> handler(params) : result` and both tests pin the exact
+      ordered list — 14 stable, 20 unstable — so side, kind, handler, params,
+      result, *and* position are all asserted, and `mcp/message`'s two entries are
+      pinned to different sides by position rather than lost to `.sorted()`.
+      Proved with the finding's own example: moved `session/request_permission` to
+      the agent side (schema `x-side` plus the manifest, since they must agree).
+      The old sorted-wire-name assertion **still held**; the new one fails. Then a
+      generator break that perturbs one derived handler name — also caught.
+
+    ### Discovery worth recording: the manifest cannot express the TS-SDK bug
+
+    My first attempt at proving finding 10 was to swap two handlers' wire methods in
+    `acp-v2.meta.json` — `session_close` -> `session/delete` and vice versa. **The
+    generated table came out identical**, because `handlerName` is derived from the
+    *wire method*, not from the manifest key. So the literal TS-SDK bug
+    (`setSessionModel` bound to `session/set_mode`) is not merely caught by these
+    tests, it is unrepresentable in the data. Separately, flipping only the schema's
+    `x-side` without the manifest is rejected outright: *"manifest routes
+    'session/request_permission' on the client side but the schema defines no types
+    for it."* Two structural guards nobody had written down.
+
+    ### Housekeeping
+
+    The working tree still carries the six corrected milestone cards under
+    `.kanban/` and the one-line `plan.md` M5 `/ delete` edit that predate this
+    round; both left in place. Task stays in `doing`; nothing committed.
+  timestamp: 2026-07-26T15:58:49.778295+00:00
 position_column: doing
 position_ordinal: '80'
 title: M0 Vendor the v2 schema, re-point the generator, verify the inventory
@@ -449,7 +629,7 @@ title: M0 Vendor the v2 schema, re-point the generator, verify the inventory
 - `Schema/` is empty; `Sources/FoundationModelsACP/` retains only `Core/{JSONValue, AbsolutePath, MethodInfo, WireRawValueCodable}.swift`.
 - `swift build` and `swift test` are green (43 generator tests).
 
-**Still standing, and yours to work with:** the codegen pipeline — `Sources/ACPGenerateCore/` (schema model, emitter, tagged/anyOf union stages, routing-table builder, hash stamp), `Sources/acp-generate/`, and the `GenerateACP` command plugin. It is schema-vocabulary-independent and does not need rewriting.
+**Still standing, and yours to work with:** the codegen pipeline — `Sources/ACPGenerateCore/` (schema model, emitter, tagged/anyOf union stages, routing-table builder, hash stamp), `Sources/acp-generate/`, and the `GenerateACP` command plugin. It is schema-vocabulary-independent and does not need rewriting. *(Implementation note: this turned out not to hold — v2 rewrote the union vocabulary and the generator needed three changes. See the comment thread.)*
 
 ## What
 
@@ -476,21 +656,21 @@ The reset dropped 44 tests that were pinned to the v1 vendored schema. This task
 
 ## Acceptance Criteria
 
-- [ ] `acp-v2.json` (+ meta) vendored, with SHA-256 and upstream source recorded in `Schema/README.md`.
-- [ ] `SchemaSet` and `GeneratorConfig` renamed off `acpV1` and re-pointed; `wireInvariantFields` rebuilt from the v2 schema.
-- [ ] `swift package generate-acp` produces the v2 surface; output checked in.
-- [ ] Content-hash no-op verified (second run changes nothing).
-- [ ] CI codegen diff gate green again.
-- [ ] Vendored-schema emission tests restored against v2.
-- [ ] `plan.md` corrected wherever the schema disagrees with it, including every known unknown above.
-- [ ] The `Unstable` namespace question answered explicitly.
-- [ ] README already states v2 is **draft** and that v1 is not served — confirm it still matches what the schema turned out to be.
+- [x] `acp-v2.json` (+ meta) vendored, with SHA-256 and upstream source recorded in `Schema/README.md`.
+- [x] `SchemaSet` and `GeneratorConfig` renamed off `acpV1` and re-pointed; `wireInvariantFields` rebuilt from the v2 schema.
+- [x] `swift package generate-acp` produces the v2 surface; output checked in.
+- [x] Content-hash no-op verified (second run changes nothing).
+- [x] CI codegen diff gate green again. *(The job also needed a fix to be meaningful — it now drops the checked-in content-hash stamp before regenerating, since otherwise a fresh checkout regenerates nothing and the diff passes trivially. Verified locally by running the job's exact steps; the CI run itself lands with the commit.)*
+- [x] Vendored-schema emission tests restored against v2 (`Tests/ACPGenerateTests/VendoredSchemaTests.swift`).
+- [x] `plan.md` corrected wherever the schema disagreed with it, including every known unknown above.
+- [x] The `Unstable` namespace question answered explicitly — v2 publishes an unstable manifest, so it is live code.
+- [x] README confirmed against what the schema turned out to be; its terminals bullet corrected.
 
 ## Tests
 
-- [ ] `swift build` and `swift test` green.
-- [ ] Regeneration is idempotent.
-- [ ] A deliberate hand-edit to a generated file is caught by the CI gate (verified, then reverted).
+- [x] `swift build` and `swift test` green (60 tests, 9 suites).
+- [x] Regeneration is idempotent.
+- [x] A deliberate hand-edit to a generated file is caught by the CI gate (verified, then reverted).
 
 ## Workflow
 
