@@ -10,44 +10,6 @@ import Testing
 /// `SetSessionConfigOptionRequest` becomes a struct with a nested value union.
 /// The remaining `anyOf` definitions stay deferred as placeholder seams.
 @Suite struct AnyOfUnionTests {
-    @Test func mcpServerEmitsDiscriminatedUnionWithStdioDefault() throws {
-        let source = try vendoredOutput(named: "Unions.generated.swift")
-        #expect(source.contains("public enum McpServer: Codable, Hashable, Sendable"))
-        #expect(source.contains("case http(McpServerHttp)"))
-        #expect(source.contains("case sse(McpServerSse)"))
-        #expect(source.contains("case stdio(McpServerStdio)"))
-        #expect(source.contains("case unknown(String)"))
-        // An absent discriminator decodes as the default `stdio` variant.
-        #expect(source.contains("switch try container.decodeIfPresent(String.self, forKey: .type)"))
-        #expect(source.contains("case nil:\n            self = .stdio(try McpServerStdio(from: decoder))"))
-        // The default variant re-encodes without a discriminator.
-        #expect(source.contains("case .stdio(let payload):\n            try payload.encode(to: encoder)"))
-    }
-
-    @Test func setSessionConfigOptionRequestEmitsStructWithNestedValueUnion() throws {
-        let source = try vendoredOutput(named: "Models.generated.swift")
-        #expect(source.contains("public struct SetSessionConfigOptionRequest: Codable, Hashable, Sendable"))
-        #expect(source.contains("public enum Value: Codable, Hashable, Sendable"))
-        #expect(source.contains("case boolean(Bool)"))
-        #expect(source.contains("case valueId(SessionConfigValueId)"))
-        #expect(source.contains("public var sessionId: SessionId"))
-        #expect(source.contains("public var configId: SessionConfigId"))
-        #expect(source.contains("public var value: Value"))
-        #expect(source.contains("self.value = try Value(from: decoder)"))
-        #expect(source.contains("try value.encode(to: encoder)"))
-        // The `value_id` default decodes on an absent or unknown discriminator.
-        #expect(source.contains("default:\n                self = .valueId(try container.decode(SessionConfigValueId.self, forKey: .value))"))
-    }
-
-    @Test func resolvedAnyOfSeamsLeaveUnresolved() throws {
-        let source = try vendoredOutput(named: "Unresolved.generated.swift")
-        #expect(!source.contains("typealias McpServer"))
-        #expect(!source.contains("typealias SetSessionConfigOptionRequest"))
-        // Sibling `anyOf` unions this stage does not model stay deferred.
-        #expect(source.contains("public typealias AuthMethod = JSONValue"))
-        #expect(source.contains("public typealias RequestID = JSONValue"))
-    }
-
     @Test func discriminatedUnionClassifiesAndEmits() throws {
         let schema = Data(
             """

@@ -10,12 +10,11 @@ import Testing
     /// A SHA-256 hex string that no real artifact set will hash to.
     private static let bogusHash = String(repeating: "0", count: 64)
 
-    /// The vendored artifact hash.
+    /// The synthetic artifact hash.
     ///
-    /// - Returns: The hash of the vendored schema and both manifests.
-    /// - Throws: A test failure when an artifact cannot be read.
-    private func vendoredHash() throws -> String {
-        let artifacts = try vendoredArtifacts()
+    /// - Returns: The hash of the synthetic schema and both manifests.
+    private func syntheticHash() -> String {
+        let artifacts = SyntheticArtifacts.all
         return SchemaGenerator.artifactHash(
             schemaJSON: artifacts.schema,
             metaJSON: artifacts.meta,
@@ -24,9 +23,9 @@ import Testing
     }
 
     @Test func matchingHashRegeneratesNothing() throws {
-        let artifacts = try vendoredArtifacts()
-        let hash = try vendoredHash()
-        let outcome = try SchemaGenerator().generateIfChanged(
+        let artifacts = SyntheticArtifacts.all
+        let hash = syntheticHash()
+        let outcome = try SchemaGenerator(config: GeneratorConfig()).generateIfChanged(
             schemaJSON: artifacts.schema,
             metaJSON: artifacts.meta,
             unstableMetaJSON: artifacts.unstableMeta,
@@ -36,8 +35,8 @@ import Testing
     }
 
     @Test func differingHashRegeneratesAndStamps() throws {
-        let artifacts = try vendoredArtifacts()
-        let outcome = try SchemaGenerator().generateIfChanged(
+        let artifacts = SyntheticArtifacts.all
+        let outcome = try SchemaGenerator(config: GeneratorConfig()).generateIfChanged(
             schemaJSON: artifacts.schema,
             metaJSON: artifacts.meta,
             unstableMetaJSON: artifacts.unstableMeta,
@@ -47,7 +46,7 @@ import Testing
             Issue.record("expected regeneration when the recorded hash differs")
             return
         }
-        #expect(hash == (try vendoredHash()))
+        #expect(hash == (syntheticHash()))
         let stamp = try #require(files.first { $0.name == SchemaGenerator.stampFileName(namespace: nil) })
         #expect(stamp.contents == "\(hash)\n")
         #expect(files.contains { $0.name == "Models.generated.swift" })
@@ -55,8 +54,8 @@ import Testing
     }
 
     @Test func noRecordedHashRegenerates() throws {
-        let artifacts = try vendoredArtifacts()
-        let outcome = try SchemaGenerator().generateIfChanged(
+        let artifacts = SyntheticArtifacts.all
+        let outcome = try SchemaGenerator(config: GeneratorConfig()).generateIfChanged(
             schemaJSON: artifacts.schema,
             metaJSON: artifacts.meta,
             unstableMetaJSON: artifacts.unstableMeta,
@@ -74,11 +73,11 @@ import Testing
     }
 
     @Test func hashIsStableAcrossCalls() throws {
-        #expect(try vendoredHash() == (try vendoredHash()))
+        #expect(syntheticHash() == (syntheticHash()))
     }
 
     @Test func hashChangesWhenSchemaBytesChange() throws {
-        let artifacts = try vendoredArtifacts()
+        let artifacts = SyntheticArtifacts.all
         var mutated = artifacts.schema
         mutated.append(0x20)  // A trailing space is enough to change the bytes.
         let changed = SchemaGenerator.artifactHash(
@@ -86,11 +85,11 @@ import Testing
             metaJSON: artifacts.meta,
             unstableMetaJSON: artifacts.unstableMeta
         )
-        #expect(changed != (try vendoredHash()))
+        #expect(changed != (syntheticHash()))
     }
 
     @Test func presentAndAbsentManifestsHashDifferently() throws {
-        let artifacts = try vendoredArtifacts()
+        let artifacts = SyntheticArtifacts.all
         let withMeta = SchemaGenerator.artifactHash(
             schemaJSON: artifacts.schema,
             metaJSON: artifacts.meta,

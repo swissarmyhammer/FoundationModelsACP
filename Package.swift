@@ -1,11 +1,6 @@
 // swift-tools-version: 6.4
 import PackageDescription
 
-// The FoundationModelsACPTests target carries ndJSON transcript fixtures
-// loaded via #filePath, not as bundle resources, so it excludes its
-// `Fixtures` directory. (ACPGenerateTests has none and needs no exclude.)
-let fixturesExclude = ["Fixtures"]
-
 let package = Package(
     name: "FoundationModelsACP",
     platforms: [
@@ -27,11 +22,7 @@ let package = Package(
         .target(
             name: "FoundationModelsACP",
             path: "Sources/FoundationModelsACP",
-            exclude: [
-                "Generated/.gitkeep",
-                "Transport/.gitkeep",
-                "Connection/.gitkeep",
-            ]
+            exclude: ["Generated/.gitkeep"]
         ),
         .target(
             name: "ACPGenerateCore",
@@ -42,11 +33,6 @@ let package = Package(
             name: "acp-generate",
             dependencies: ["ACPGenerateCore"],
             path: "Sources/acp-generate"
-        ),
-        .executableTarget(
-            name: "acp-test-agent",
-            dependencies: ["FoundationModelsACP"],
-            path: "Sources/acp-test-agent"
         ),
         .plugin(
             name: "GenerateACP",
@@ -65,14 +51,8 @@ let package = Package(
             path: "Plugins/GenerateACP"
         ),
         .testTarget(
-            name: "FoundationModelsACPTests",
-            dependencies: ["FoundationModelsACP", "acp-test-agent"],
-            path: "Tests/FoundationModelsACPTests",
-            exclude: fixturesExclude
-        ),
-        .testTarget(
             name: "ACPGenerateTests",
-            dependencies: ["ACPGenerateCore", "FoundationModelsACP"],
+            dependencies: ["ACPGenerateCore"],
             path: "Tests/ACPGenerateTests"
         ),
     ]

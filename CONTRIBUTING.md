@@ -2,6 +2,8 @@
 
 ## Regenerating the ACP types
 
+> **Pending M0:** no schema is vendored right now — `Schema/` is empty following the v2 reset, so `swift package generate-acp` and the CI codegen diff gate cannot succeed until milestone M0 vendors `acp-v2.json`. See [`Schema/README.md`](Schema/README.md).
+
 The protocol types under `Sources/FoundationModelsACP/Generated/` are generated from the vendored JSON schema in `Schema/` and checked in, so consumers just compile source — no plugin or tool needed to build the package.
 
 - **Regenerate:** `swift package generate-acp`. A build does zero codegen work unless the schema's content hash changed, so this is a no-op after a normal checkout.

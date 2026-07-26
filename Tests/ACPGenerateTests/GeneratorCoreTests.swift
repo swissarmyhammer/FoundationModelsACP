@@ -299,35 +299,5 @@ import Testing
         #expect(!source.contains(#"case aBC = "a"b\c""#))
     }
 
-    // MARK: - Full vendored schema
 
-    /// The package-root `Schema/acp-v1.json`, located relative to this file.
-    private static let vendoredSchemaURL = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()  // GeneratorCoreTests.swift
-        .deletingLastPathComponent()  // ACPGenerateTests
-        .deletingLastPathComponent()  // Tests
-        .appendingPathComponent("Schema")
-        .appendingPathComponent("acp-v1.json")
-
-    @Test func vendoredSchemaGeneratesExpectedDeclarations() throws {
-        let data = try Data(contentsOf: Self.vendoredSchemaURL)
-        let files = try SchemaGenerator().generate(schemaJSON: data)
-        let all = files.map(\.contents).joined()
-        #expect(all.contains("public struct InitializeResponse: Codable, Hashable, Sendable"))
-        #expect(all.contains("public struct ToolCallId: WireRawValueCodable, Hashable, Sendable"))
-        // `Error` collides with Swift.Error and is renamed via generator config.
-        #expect(all.contains("public struct ACPError"))
-        #expect(!all.contains("public struct Error"))
-        // `RequestId` is renamed `RequestID` (API Design Guidelines acronym
-        // casing) via generator config; def names never appear on the wire.
-        #expect(all.contains("public typealias RequestID = JSONValue"))
-        #expect(!all.contains("RequestId"))
-    }
-
-    @Test func vendoredSchemaGenerationIsDeterministic() throws {
-        let data = try Data(contentsOf: Self.vendoredSchemaURL)
-        let first = try SchemaGenerator().generate(schemaJSON: data)
-        let second = try SchemaGenerator().generate(schemaJSON: data)
-        #expect(first == second)
-    }
 }
