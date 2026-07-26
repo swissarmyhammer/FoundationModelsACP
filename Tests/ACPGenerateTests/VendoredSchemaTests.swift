@@ -305,9 +305,12 @@ import FoundationModelsACP
         // nondeterminism. Pinning the order is what turns that into a test
         // failure with a name on it.
         //
-        // Comparing two in-process runs cannot do this job: Swift seeds
-        // `Hasher` once per process, so both runs iterate identically and the
-        // dependence stays invisible.
+        // This is the deterministic instrument for that defect and the primary
+        // one. Remove the `$defs` sort and it fails on every run — 32 separate
+        // processes across two independent samples, never once observed to
+        // miss — where the whole-output smoke test below samples the same
+        // property and sometimes comes back clean. When either goes red, this
+        // is the one that says what broke.
         //
         // Names are compared as the *schema* spells them, since the emitter
         // renames a few — `Error` sorts where `Error` sorts, not where
@@ -348,14 +351,21 @@ import FoundationModelsACP
         // Only *may*: `JSONValue.object` is an unordered `Dictionary`, so
         // textual member order is already gone by the time the generator sees
         // it, and the residual signal is bucket layout — which differs only
-        // where insertion order changes a collision probe sequence. Measured
-        // against a generator with its `$defs` sort removed, this catches the
-        // defect roughly half the time, where two identical in-process runs
-        // never catch it at all: same bytes, same process, same hash seed and
-        // insertion sequence give an identical bucket layout, so that form's
-        // catch rate is zero rather than merely low. It never fails on a
-        // correct generator, so a divergence here is always real; a pass is
-        // not a proof.
+        // where insertion order changes a collision probe sequence. So this is
+        // a probabilistic detector: run against a generator with its `$defs`
+        // sort removed it comes back clean a good share of the time, which is
+        // why the ordering pin above is the primary instrument and this is a
+        // smoke test kept for its breadth — it compares whole emitted files,
+        // not declaration order alone.
+        //
+        // What holds whatever the sampling: this never fails on a correct
+        // generator, so a divergence here is always real and worth chasing,
+        // and a pass proves nothing. Do not restate that as a catch rate.
+        // Four successive attempts to put a number on how often this form
+        // beats a bare two-run in-process comparison have disagreed with each
+        // other — and so have two samples of the *identical* configuration —
+        // while nothing depends on the answer. Quoting a rate requires
+        // measuring it at n >= 30 and saying so.
         #expect(try Self.generateFromVendoredArtifacts() == (try Self.generateFromVendoredArtifacts(reorderingMembers: true)))
     }
 

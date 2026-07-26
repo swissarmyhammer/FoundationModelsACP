@@ -154,19 +154,27 @@ one of the 26, so an M1 that satisfies it leaves no orphan behind:
 - **Four hang off row 5 and stay orphaned past M1.** `TextResourceContents`
   and `BlobResourceContents` are `$ref`'d only by `EmbeddedResourceResource`;
   `SessionConfigSelectGroup` only by `SessionConfigSelectOptions`; and
-  `ACPError` only by `AgentResponse` and `ClientResponse`. The last is easy to
-  file under the envelope types below — it is not one. The schema does `$ref`
-  it, from two row-5 placeholders, so it is reachable in principle even though
-  nothing plans to resolve those rows.
+  `ACPError` by `AgentResponse` and `ClientResponse` — plus twice more from the
+  schema root's batch-response branches, four inbound `$ref`s in all. The last
+  is easy to file under the envelope types below — it is not one. The schema
+  does `$ref` it, from two row-5 placeholders, so it is reachable in principle
+  even though nothing plans to resolve those rows.
 - **Five are row-5 placeholders that are themselves orphans** —
   `AgentResponse`, `ClientResponse`, `ExtRequest`, `ExtResponse`,
   `ExtNotification`. Row 5's other three (`EmbeddedResourceResource`,
   `RequestID`, `SessionConfigSelectOptions`) are referenced, so they are not.
 - **Five are JSON-RPC envelope types no row will ever reach** — `AgentRequest`,
   `AgentNotification`, `ClientRequest`, `ClientNotification`,
-  `ProtocolLevelNotification`. Unlike everything above, these have **zero**
-  `$ref`s anywhere in the schema. The routing table supersedes them; exclude
-  them from the signal or it can never go green.
+  `ProtocolLevelNotification`. Each is `$ref`'d exactly twice and only from the
+  schema root's message envelope — the four request and notification types from
+  their side's single-message branch and its batch-call branch,
+  `ProtocolLevelNotification` from both batch-call branches — and by no other
+  definition. That position is not what distinguishes them: `AgentResponse` and
+  `ClientResponse`, in the group immediately above, are also referenced only
+  from the root and by no other definition — once each rather than twice, since
+  the batch-response branches reach `ACPError` directly instead of `$ref`ing
+  them. What distinguishes the five is that the routing table supersedes them;
+  exclude them from the signal or it can never go green.
 - **Two are the routing roots** — `ACPMethodTable` and `Unstable`. Nothing in
   the generated surface references them by design; consumers do.
 

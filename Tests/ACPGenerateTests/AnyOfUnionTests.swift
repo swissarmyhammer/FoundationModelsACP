@@ -13,6 +13,21 @@ import Testing
 /// becomes a struct with a nested value enum. No vendored v2 definition takes
 /// the value-union path — the schema's one object-plus-`anyOf` request defers
 /// to a placeholder seam instead, which `VendoredSchemaTests` pins.
+///
+/// **Where the cover lives in the catch-all filtering tests.** Each of them
+/// carries the schema's explicit unknown-discriminator variant, titled
+/// `other`, and asserts that generation accepts the union. The regression
+/// cover is the `try` performing generation, not the expectations after it:
+/// revert any stage to a raw `anyOf` read and generation throws at that
+/// stage's first use of the unfiltered catch-all, before an expectation is
+/// evaluated. The expectations are downstream shape pins on what the accepted
+/// union emits.
+///
+/// So none of these tests carries a `!contains("case other")` negative. Two
+/// did; both were vacuous, because every route to an emitted `case other`
+/// throws upstream, and each was reachable only behind several simultaneous
+/// production mutations. They are gone rather than reading as cover they never
+/// provided.
 @Suite struct AnyOfUnionTests {
     @Test func discriminatedUnionClassifiesAndEmits() throws {
         let schema = Data(
@@ -52,19 +67,54 @@ import Testing
         #expect(!unresolved.contains("typealias Thing"))
     }
 
+    @Test func discriminatedUnionFiltersTheBareUnknownFallback() throws {
+        // Every union stage reads its variants through `unionVariants(of:)`,
+        // which drops the schema's explicit unknown-discriminator catch-all.
+        // The discriminated stage needs that filtering as much as its
+        // siblings: the catch-all flattens no `$ref` payload, so reading raw
+        // `anyOf` here rejects — at `discriminatedPayloadType`, before the
+        // default-variant test is ever reached — a union whose modeled
+        // variants are perfectly well formed.
+        let files = try SchemaGenerator().generate(schemaJSON: Self.discriminatedUnionWithBareFallbackSchema)
+        let unions = try #require(files.first { $0.name == "Unions.generated.swift" }).contents
+        #expect(unions.contains("public enum Thing: Codable, Hashable, Sendable"))
+        #expect(unions.contains("case alpha(Alpha)"))
+        #expect(unions.contains("case beta(Beta)"))
+        let unresolved = try #require(files.first { $0.name == "Unresolved.generated.swift" }).contents
+        #expect(!unresolved.contains("typealias Thing"))
+    }
+
+    @Test func unknownVariantPinningItsOwnDiscriminatorStaysDeferred() throws {
+        // A catch-all is the variant that says "a tag this revision does not
+        // list", so it declares the discriminator *unpinned*. One that pins a
+        // `const` of its own is naming a tag, which contradicts its `not`, and
+        // it must not be mistaken for the bare catch-all: were it filtered
+        // away, the member it pins would leave the union's discriminator
+        // evidence with it, and a union whose variants key on two different
+        // members would be accepted with the second variant silently
+        // unmodeled. The whole definition defers to raw JSON instead, which is
+        // lossless.
+        let files = try SchemaGenerator().generate(schemaJSON: Self.valueUnionWithConstPinningFallbackSchema)
+        let unresolved = try #require(files.first { $0.name == "Unresolved.generated.swift" }).contents
+        #expect(unresolved.contains("public typealias Choice = JSONValue"))
+        let models = try #require(files.first { $0.name == "Models.generated.swift" }).contents
+        #expect(!models.contains("public struct Choice"))
+    }
+
     @Test func explicitUnknownVariantBecomesTheSynthesizedFallback() throws {
         // ACP v2 spells the unknown case out in the schema: a final variant
         // whose `not` excludes every known discriminator and which accepts
         // any additional properties. That is the `unknown(String)` case the
         // emitter already synthesizes, so it must not be modeled as a variant
         // of its own.
+        //
+        // Reverting `taggedUnionModel` to a raw `anyOf` read throws
+        // `discriminator type has no const value` at the catch-all.
         let files = try SchemaGenerator().generate(schemaJSON: Self.explicitUnknownVariantSchema)
         let unions = try #require(files.first { $0.name == "Unions.generated.swift" }).contents
         #expect(unions.contains("public enum Thing: Codable, Hashable, Sendable"))
         #expect(unions.contains("case alpha(Alpha)"))
         #expect(unions.contains("case unknown(String)"))
-        // The catch-all is not a case of its own, under its title or otherwise.
-        #expect(!unions.contains("case other"))
         let unresolved = try #require(files.first { $0.name == "Unresolved.generated.swift" }).contents
         #expect(!unresolved.contains("typealias Thing"))
     }
@@ -121,14 +171,15 @@ import Testing
         // the same way: a catch-all declaring nothing beyond the pinned
         // discriminator has no `value` member, so reading raw `anyOf` here
         // would reject a union its sibling stages accept.
+        //
+        // Reverting that filtering throws `expected exactly one
+        // non-discriminator value member` at the catch-all.
         let files = try SchemaGenerator().generate(schemaJSON: Self.objectValueUnionWithBareFallbackSchema)
         let models = try #require(files.first { $0.name == "Models.generated.swift" }).contents
         #expect(models.contains("public struct Choice: Codable, Hashable, Sendable"))
         #expect(models.contains("public enum Value: Codable, Hashable, Sendable"))
         #expect(models.contains("case boolean(Bool)"))
         #expect(models.contains("case text(String)"))
-        // The catch-all is not a case of its own, under its title or otherwise.
-        #expect(!models.contains("case other"))
     }
 
     @Test func discriminatedUnionWithoutDefaultFailsLoudly() throws {
@@ -230,6 +281,100 @@ import Testing
                       {
                         "type": "object",
                         "properties": { "type": { "type": "string", "const": "alpha" } },
+                        "required": ["type"]
+                      }
+                    ]
+                  },
+                  "additionalProperties": true
+                }
+              ]
+            }
+          }
+        }
+        """.utf8)
+
+    /// A discriminated `$ref`-payload union — one tagged variant plus a
+    /// discriminator-less default — closed by the schema's explicit
+    /// unknown-discriminator catch-all, which flattens no payload.
+    private static let discriminatedUnionWithBareFallbackSchema = Data(
+        """
+        {
+          "$defs": {
+            "Alpha": {
+              "type": "object",
+              "properties": { "x": { "type": "string" } },
+              "required": ["x"]
+            },
+            "Beta": {
+              "type": "object",
+              "properties": { "y": { "type": "string" } },
+              "required": ["y"]
+            },
+            "Thing": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": { "type": { "type": "string", "const": "alpha" } },
+                  "required": ["type"],
+                  "allOf": [{ "$ref": "#/$defs/Alpha" }]
+                },
+                { "title": "beta", "allOf": [{ "$ref": "#/$defs/Beta" }] },
+                {
+                  "title": "other",
+                  "type": "object",
+                  "properties": { "type": { "type": "string" } },
+                  "required": ["type"],
+                  "not": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": { "type": { "type": "string", "const": "alpha" } },
+                        "required": ["type"]
+                      }
+                    ]
+                  },
+                  "additionalProperties": true
+                }
+              ]
+            }
+          }
+        }
+        """.utf8)
+
+    /// A value union whose `not` variant pins a `const` of its own, on a
+    /// *different* member than the union's discriminator. Self-contradictory
+    /// as schema, and the one shape where mistaking it for the bare catch-all
+    /// would take the disagreeing member out of the discriminator evidence.
+    private static let valueUnionWithConstPinningFallbackSchema = Data(
+        """
+        {
+          "$defs": {
+            "Choice": {
+              "type": "object",
+              "properties": { "id": { "type": "string" } },
+              "required": ["id"],
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": { "value": { "type": "boolean" }, "type": { "type": "string", "const": "boolean" } },
+                  "required": ["type", "value"]
+                },
+                {
+                  "title": "text",
+                  "type": "object",
+                  "properties": { "value": { "type": "string" } },
+                  "required": ["value"]
+                },
+                {
+                  "title": "other",
+                  "type": "object",
+                  "properties": { "kind": { "type": "string", "const": "unrecognized" } },
+                  "required": ["kind"],
+                  "not": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": { "type": { "type": "string", "const": "boolean" } },
                         "required": ["type"]
                       }
                     ]

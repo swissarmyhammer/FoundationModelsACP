@@ -6,7 +6,7 @@ comments:
     Corrected against the vendored `Schema/acp-v2.json` + `acp-v2.meta.json` / `acp-v2.meta.unstable.json` (`schema-v2.0.0-alpha.2`, vendored in M0). The card predated the vendor and its counts were wrong.
 
     What changed:
-    - Title: "nine agent methods, four client entry points" -> "ten agent methods, two client entry points".
+    - Title: "nine agent methods, four client entry points" -> "eleven agent methods, two client entry points". (Retitled twice: it first read "ten", counting only the requests, which contradicted the eleven-method manifest count in the next bullet.)
     - `Agent` list gained `session/delete`. The stable manifest lists eleven agent methods: `initialize`, `auth/login`, `auth/logout`, `session/new`, `session/list`, `session/resume`, `session/close`, `session/delete`, `session/prompt`, `session/set_config_option`, and the `session/cancel` notification.
     - `Client` corrected from "four entry points" to two: `session/request_permission` and the `session/update` notification. That is the whole of `clientMethods` in the stable manifest.
     - `elicitation/create` / `elicitation/complete` removed from the stable `Client` surface. They appear only in `acp-v2.meta.unstable.json`; there are no stable request/response types to generate against. Recorded as deferred until a re-vendor promotes them rather than dropped.
@@ -19,7 +19,7 @@ depends_on:
 - 01KYD58WN4KFHR3TP9HQZHT036
 position_column: todo
 position_ordinal: '8280'
-title: 'M2 Role protocols: ten agent methods, two client entry points'
+title: 'M2 Role protocols: eleven agent methods, two client entry points'
 ---
 ## Starting point
 

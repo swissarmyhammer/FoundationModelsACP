@@ -437,13 +437,21 @@ public struct SchemaGenerator: Sendable {
     /// "preserve the raw payload when storing, replaying, proxying, or
     /// forwarding". Those are not this shape.
     ///
+    /// Nor is a variant that pins a `const` of its own: it *names* a tag, which
+    /// contradicts the `not` beside it, and it is the union's own evidence for
+    /// which member the discriminator is. Filtering it away would take that
+    /// evidence with it — a union whose variants keyed on two different members
+    /// would pass `valueUnionDiscriminator`'s agreement check with the odd
+    /// variant silently unmodeled — so it is not a fallback and the whole
+    /// definition defers to raw JSON instead, which is lossless.
+    ///
     /// - Parameters:
     ///   - variant: The union variant fragment.
     ///   - pinned: The union's discriminator member names.
-    /// - Returns: `true` when the variant negates the known discriminators and
-    ///   declares nothing besides them.
+    /// - Returns: `true` when the variant negates the known discriminators,
+    ///   pins none itself, and declares nothing besides them.
     private func isUnknownFallbackVariant(_ variant: JSONValue, pinned: Set<String>) -> Bool {
-        guard variant[Self.notKey] != nil else { return false }
+        guard variant[Self.notKey] != nil, !hasConstDiscriminator(variant) else { return false }
         return (variant[Self.propertiesKey]?.objectValue ?? [:]).keys.allSatisfy(pinned.contains)
     }
 
@@ -643,6 +651,13 @@ public struct SchemaGenerator: Sendable {
     /// discriminator-less variant becomes the default, selected when the
     /// discriminator is absent on the wire.
     ///
+    /// Variants come from `unionVariants(of:)`, as they do for every other
+    /// union stage, so a catch-all declaring nothing beyond the pinned
+    /// discriminator is filtered out rather than searched for the `allOf`
+    /// payload it does not carry — the default variant is what absorbs an
+    /// unrecognized tag here, and the catch-all names no payload to flatten
+    /// beside it.
+    ///
     /// - Parameters:
     ///   - name: The definition's schema name.
     ///   - fragment: The definition's schema fragment.
@@ -651,7 +666,7 @@ public struct SchemaGenerator: Sendable {
     ///   the payload-ref shape, the discriminators disagree, or there is not
     ///   exactly one default variant.
     private func discriminatedUnionModel(name: String, fragment: JSONValue) throws -> DiscriminatedUnionModel {
-        let variants = fragment[Self.anyOfKey]?.arrayValue ?? []
+        let variants = unionVariants(of: fragment)
         var discriminator: String?
         var defaultCount = 0
         let cases = try variants.enumerated().map { index, variant -> DiscriminatedCaseModel in
@@ -1572,9 +1587,15 @@ extension SchemaGenerator {
     /// A definition's modeled union variants, empty when absent.
     ///
     /// Reads whichever union keyword the definition uses, and drops the
-    /// explicit unknown-discriminator variant: the string-enum and tagged-union
-    /// emitters each synthesize an `unknown` case for it already, so modeling
-    /// it again would emit a duplicate.
+    /// explicit unknown-discriminator variant: every union family already
+    /// carries a fallback for an unrecognized tag — a synthesized `unknown`
+    /// case for the string-enum and tagged-union emitters, the
+    /// discriminator-less default variant for the discriminated and value
+    /// unions — so modeling the catch-all again would emit a duplicate, or
+    /// fail looking for a payload it does not declare.
+    ///
+    /// Every union stage reads its variants through here, so the catch-all is
+    /// recognized in exactly one place.
     ///
     /// - Parameter fragment: The definition's schema fragment.
     /// - Returns: The modeled variant fragments in schema order.
