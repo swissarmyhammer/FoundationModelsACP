@@ -301,15 +301,84 @@ enum Emitter {
 
     // MARK: - Unions
 
-    /// Renders a string enum with hand-rolled `Codable`.
+    /// The doc comment on the synthesized fallback case of a discriminated
+    /// enum.
     ///
-    /// Known snake_case wire strings map to camelCase cases, anything else
-    /// decodes to `unknown(String)`, and `.unknown` re-encodes its captured
-    /// string.
+    /// - Parameter discriminator: The union's discriminator wire name.
+    /// - Returns: The `///` lines, indented one level.
+    private static func unknownCaseDoc(discriminator: String) -> [String] {
+        [
+            "    /// An unrecognized `\(discriminator)` value, captured alongside the members",
+            "    /// of the object that no other property owns, so a variant this revision",
+            "    /// does not list decodes without error and re-encodes unchanged.",
+            "    ///",
+            "    /// The payload holds neither `\(discriminator)` nor any member declared",
+            "    /// beside this union: those have their own storage, and a second copy",
+            "    /// here would win on re-encode. Encoding a payload that declares one is",
+            "    /// an `EncodingError`.",
+        ]
+    }
+
+    /// Renders the array literal of member names an unrecognized variant's
+    /// payload must not hold, because something else encodes them.
+    ///
+    /// - Parameters:
+    ///   - discriminator: The union's discriminator wire name.
+    ///   - siblingMembers: Enclosing-object members, empty for a stand-alone
+    ///     union.
+    /// - Returns: The Swift array literal.
+    private static func ownedMembers(discriminator: String, siblingMembers: [String]) -> String {
+        "[\(([discriminator] + siblingMembers).map(stringLiteral).joined(separator: ", "))]"
+    }
+
+    /// Renders the decode arm that captures an unrecognized discriminator.
+    ///
+    /// - Parameters:
+    ///   - pattern: The `switch` pattern binding the matched discriminator.
+    ///   - discriminator: The union's discriminator wire name.
+    ///   - siblingMembers: Enclosing-object members the payload excludes.
+    /// - Returns: The arm's two lines, indented two levels.
+    private static func unknownDecodeArm(
+        pattern: String,
+        discriminator: String,
+        siblingMembers: [String] = []
+    ) -> [String] {
+        let owned = ownedMembers(discriminator: discriminator, siblingMembers: siblingMembers)
+        return [
+            "        \(pattern):",
+            "            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: \(owned)))",
+        ]
+    }
+
+    /// Renders the encode arm that restores an unrecognized variant.
+    ///
+    /// Reserves the same member names the decode arm excluded, so a payload
+    /// built in Swift cannot overwrite the tag its own case holds or a member
+    /// of the object the union is nested in.
+    ///
+    /// - Parameters:
+    ///   - discriminator: The union's discriminator wire name.
+    ///   - siblingMembers: Enclosing-object members, empty for a stand-alone
+    ///     union.
+    /// - Returns: The arm's three lines, indented two levels.
+    private static func unknownEncodeArm(discriminator: String, siblingMembers: [String] = []) -> [String] {
+        let owned = ownedMembers(discriminator: discriminator, siblingMembers: siblingMembers)
+        return [
+            "        case .unknown(let discriminator, let payload):",
+            "            try container.encode(discriminator, forKey: .\(discriminator))",
+            "            try payload.encodeMembers(to: encoder, reserving: \(owned))",
+        ]
+    }
+
+    /// Renders a scalar enum with hand-rolled `Codable`.
+    ///
+    /// Known wire constants map to named cases, anything else decodes to
+    /// `unknown`, and `.unknown` re-encodes the value it captured.
     ///
     /// - Parameter model: The enum's emission model.
     /// - Returns: The rendered enum declaration.
-    static func stringEnumDeclaration(_ model: StringEnumModel) -> String {
+    static func scalarEnumDeclaration(_ model: ScalarEnumModel) -> String {
+        let rawType = model.rawKind.swiftTypeName
         var lines = docLines(model.documentation, indent: "")
         lines.append("public enum \(model.name): Codable, Hashable, Sendable {")
         for enumCase in model.cases {
@@ -320,46 +389,46 @@ enum Emitter {
         lines.append(contentsOf: [
             "    /// An unrecognized wire value, captured verbatim so a newer peer's",
             "    /// value decodes without error and re-encodes unchanged.",
-            "    case unknown(String)",
+            "    case unknown(\(rawType))",
             "",
-            "    /// The string as it crosses the wire.",
-            "    public var wireValue: String {",
+            "    /// The value as it crosses the wire.",
+            "    public var wireValue: \(rawType) {",
             "        switch self {",
         ])
         for enumCase in model.cases {
-            lines.append("        case .\(enumCase.swiftName): \(stringLiteral(enumCase.wireValue))")
+            lines.append("        case .\(enumCase.swiftName): \(wireLiteral(enumCase, kind: model.rawKind))")
         }
         lines.append(contentsOf: [
             "        case .unknown(let value): value",
             "        }",
             "    }",
             "",
-            "    /// Creates the case matching a wire string, routing unrecognized",
+            "    /// Creates the case matching a wire value, routing unrecognized",
             "    /// values to `.unknown`.",
             "    ///",
-            "    /// - Parameter wireValue: The string as it crosses the wire.",
-            "    public init(wireValue: String) {",
+            "    /// - Parameter wireValue: The value as it crosses the wire.",
+            "    public init(wireValue: \(rawType)) {",
             "        switch wireValue {",
         ])
         for enumCase in model.cases {
-            lines.append("        case \(stringLiteral(enumCase.wireValue)): self = .\(enumCase.swiftName)")
+            lines.append("        case \(wireLiteral(enumCase, kind: model.rawKind)): self = .\(enumCase.swiftName)")
         }
         lines.append(contentsOf: [
             "        default: self = .unknown(wireValue)",
             "        }",
             "    }",
             "",
-            "    /// Decodes the wire string, never failing on unrecognized values.",
+            "    /// Decodes the wire value, never failing on unrecognized values.",
             "    ///",
-            "    /// - Parameter decoder: The decoder positioned at the string.",
-            "    /// - Throws: `DecodingError` when the wire value is not a string.",
+            "    /// - Parameter decoder: The decoder positioned at the value.",
+            "    /// - Throws: `DecodingError` when the wire value is not a \(rawType).",
             "    public init(from decoder: any Decoder) throws {",
-            "        self.init(wireValue: try decoder.singleValueContainer().decode(String.self))",
+            "        self.init(wireValue: try decoder.singleValueContainer().decode(\(rawType).self))",
             "    }",
             "",
-            "    /// Encodes the wire string; `.unknown` re-emits its captured string.",
+            "    /// Encodes the wire value; `.unknown` re-emits the value it captured.",
             "    ///",
-            "    /// - Parameter encoder: The encoder to write the string into.",
+            "    /// - Parameter encoder: The encoder to write the value into.",
             "    /// - Throws: Rethrows any error from the underlying encoder.",
             "    public func encode(to encoder: any Encoder) throws {",
             "        var container = encoder.singleValueContainer()",
@@ -368,6 +437,23 @@ enum Emitter {
             "}",
         ])
         return lines.joined(separator: "\n")
+    }
+
+    /// Renders one scalar-enum case's wire constant as a Swift literal.
+    ///
+    /// String constants are escaped here rather than at the generator
+    /// boundary, so no schema value can break out of the emitted source even
+    /// if it reaches the emitter unvalidated.
+    ///
+    /// - Parameters:
+    ///   - enumCase: The case model.
+    ///   - kind: The enum's raw kind.
+    /// - Returns: The literal's source text.
+    private static func wireLiteral(_ enumCase: EnumCaseModel, kind: EnumRawKind) -> String {
+        switch kind {
+        case .string: stringLiteral(enumCase.wireValue)
+        case .integer: enumCase.wireValue
+        }
     }
 
     /// Renders a tagged union as an enum with hand-rolled `Codable`.
@@ -391,11 +477,9 @@ enum Emitter {
             }
             lines.append("")
         }
+        lines.append(contentsOf: unknownCaseDoc(discriminator: model.discriminator))
         lines.append(contentsOf: [
-            "    /// An unrecognized discriminator value, captured so decoding never",
-            "    /// fails. Re-encoding emits only the discriminator; an unrecognized",
-            "    /// variant's payload fields are not preserved.",
-            "    case unknown(String)",
+            "    case unknown(String, JSONValue)",
             "",
             "    private enum CodingKeys: String, CodingKey {",
             "        case \(model.discriminator)",
@@ -419,9 +503,14 @@ enum Emitter {
                 lines.append("            self = .\(unionCase.swiftName)")
             }
         }
+        lines.append(
+            contentsOf: unknownDecodeArm(
+                pattern: "case let other",
+                discriminator: model.discriminator,
+                siblingMembers: model.siblingMembers
+            )
+        )
         lines.append(contentsOf: [
-            "        case let other:",
-            "            self = .unknown(other)",
             "        }",
             "    }",
             "",
@@ -444,9 +533,13 @@ enum Emitter {
                 lines.append("            try container.encode(\(stringLiteral(unionCase.tag)), forKey: .\(model.discriminator))")
             }
         }
+        lines.append(
+            contentsOf: unknownEncodeArm(
+                discriminator: model.discriminator,
+                siblingMembers: model.siblingMembers
+            )
+        )
         lines.append(contentsOf: [
-            "        case .unknown(let discriminator):",
-            "            try container.encode(discriminator, forKey: .\(model.discriminator))",
             "        }",
             "    }",
             "}",
@@ -471,11 +564,9 @@ enum Emitter {
             lines.append("    case \(unionCase.swiftName)(\(unionCase.payloadType))")
             lines.append("")
         }
+        lines.append(contentsOf: unknownCaseDoc(discriminator: model.discriminator))
         lines.append(contentsOf: [
-            "    /// An unrecognized discriminator value, captured so decoding never",
-            "    /// fails. Re-encoding emits only the discriminator; an unrecognized",
-            "    /// variant's payload fields are not preserved.",
-            "    case unknown(String)",
+            "    case unknown(String, JSONValue)",
             "",
             "    private enum CodingKeys: String, CodingKey {",
             "        case \(model.discriminator)",
@@ -500,9 +591,8 @@ enum Emitter {
             lines.append("        case nil:")
             lines.append("            self = .\(defaultCase.swiftName)(try \(defaultCase.payloadType)(from: decoder))")
         }
+        lines.append(contentsOf: unknownDecodeArm(pattern: "case let other?", discriminator: model.discriminator))
         lines.append(contentsOf: [
-            "        case let other?:",
-            "            self = .unknown(other)",
             "        }",
             "    }",
             "",
@@ -523,9 +613,8 @@ enum Emitter {
             }
             lines.append("            try payload.encode(to: encoder)")
         }
+        lines.append(contentsOf: unknownEncodeArm(discriminator: model.discriminator))
         lines.append(contentsOf: [
-            "        case .unknown(let discriminator):",
-            "            try container.encode(discriminator, forKey: .\(model.discriminator))",
             "        }",
             "    }",
             "}",
@@ -533,48 +622,104 @@ enum Emitter {
         return lines.joined(separator: "\n")
     }
 
-    // MARK: - Object value unions
+    // MARK: - Objects carrying a union
 
     /// The reserved wire member ACP attaches metadata to, always emitted last.
     private static let metaWireName = "_meta"
 
-    /// Renders an object definition that carries a value union.
+    /// The union portion of an object that carries one, as the struct emitter
+    /// needs it.
     ///
-    /// The base object properties become ordinary struct members; the value
-    /// union becomes a nested enum whose payload flattens beside the base
-    /// members. Decoding and encoding delegate the union portion to that enum.
+    /// The two families differ only in what the nested enum looks like and
+    /// what the stored property is called; the surrounding struct — members,
+    /// initializer, coding keys, and both Codable halves — is identical, since
+    /// in both cases the union's own Codable flattens into the same object.
+    private struct FlattenedUnion {
+        /// The wire member name the union occupies (`value`, `operation`).
+        let wireName: String
+
+        /// The nested enum's Swift type name.
+        let typeName: String
+
+        /// The doc comment on the struct's stored property, without `///`.
+        let documentation: String
+
+        /// The rendered nested enum, indented one level.
+        let declaration: [String]
+    }
+
+    /// Renders an object definition that carries a value union.
     ///
     /// - Parameter model: The object-value-union emission model.
     /// - Returns: The rendered struct declaration.
     static func objectValueUnionDeclaration(_ model: ObjectValueUnionModel) -> String {
-        let base = model.base
+        objectCarryingAUnion(
+            base: model.base,
+            union: FlattenedUnion(
+                wireName: model.valueWireName,
+                typeName: model.valueEnumName,
+                documentation: "The value carried beside the object's own members, selected by its `\(model.discriminator)` discriminator.",
+                declaration: valueUnionEnum(model)
+            )
+        )
+    }
+
+    /// Renders an object definition that carries a tagged `$ref`-payload union.
+    ///
+    /// - Parameter model: The object-tagged-union emission model.
+    /// - Returns: The rendered struct declaration.
+    static func objectTaggedUnionDeclaration(_ model: ObjectTaggedUnionModel) -> String {
+        objectCarryingAUnion(
+            base: model.base,
+            union: FlattenedUnion(
+                wireName: model.union.discriminator,
+                typeName: model.union.name,
+                documentation: "The variant payload, whose own members sit flattened beside this object's.",
+                declaration: indented(declaration: taggedUnionDeclaration(model.union))
+                    .split(separator: "\n", omittingEmptySubsequences: false)
+                    .map(String.init)
+            )
+        )
+    }
+
+    /// Renders the struct wrapping an object's flattened union.
+    ///
+    /// The base object properties become ordinary struct members; the union
+    /// becomes a nested enum whose payload flattens beside them. Decoding and
+    /// encoding delegate the union portion to that enum.
+    ///
+    /// - Parameters:
+    ///   - base: The base struct model.
+    ///   - union: The union portion.
+    /// - Returns: The rendered struct declaration.
+    private static func objectCarryingAUnion(base: StructModel, union: FlattenedUnion) -> String {
         let meta = base.properties.first { $0.wireName == metaWireName }
         let leading = base.properties.filter { $0.wireName != metaWireName }
 
         var lines = docLines(base.documentation, indent: "")
         lines.append("public struct \(base.name): Codable, Hashable, Sendable {")
-        lines.append(contentsOf: valueUnionEnum(model))
+        lines.append(contentsOf: union.declaration)
         for property in leading {
             lines.append("")
             lines.append(contentsOf: docLines(property.documentation, indent: "    "))
             lines.append("    public var \(property.swiftName): \(renderedType(of: property))")
         }
         lines.append("")
-        lines.append("    /// The configuration value to set.")
-        lines.append("    public var \(model.valueWireName): \(model.valueEnumName)")
+        lines.append(contentsOf: docLines(union.documentation, indent: "    "))
+        lines.append("    public var \(union.wireName): \(union.typeName)")
         if let meta {
             lines.append("")
             lines.append(contentsOf: docLines(meta.documentation, indent: "    "))
             lines.append("    public var \(meta.swiftName): \(renderedType(of: meta))")
         }
         lines.append("")
-        lines.append(contentsOf: valueUnionStructInit(model, leading: leading, meta: meta))
+        lines.append(contentsOf: unionStructInit(base: base, union: union, leading: leading, meta: meta))
         lines.append("")
         lines.append(contentsOf: codingKeys(base))
         lines.append("")
-        lines.append(contentsOf: valueUnionStructDecoder(model, leading: leading, meta: meta))
+        lines.append(contentsOf: unionStructDecoder(base: base, union: union, leading: leading, meta: meta))
         lines.append("")
-        lines.append(contentsOf: valueUnionStructEncoder(model, leading: leading, meta: meta))
+        lines.append(contentsOf: unionStructEncoder(base: base, union: union, leading: leading, meta: meta))
         lines.append("}")
         return lines.joined(separator: "\n")
     }
@@ -585,12 +730,12 @@ enum Emitter {
     /// - Returns: The enum lines, indented one level.
     private static func valueUnionEnum(_ model: ObjectValueUnionModel) -> [String] {
         var lines = [
-            "    /// The configuration value carried by the request.",
+            "    /// The value payload, selected by the `\(model.discriminator)` discriminator.",
             "    public enum \(model.valueEnumName): Codable, Hashable, Sendable {",
         ]
         for unionCase in model.cases {
             lines.append(contentsOf: docLines(unionCase.documentation, indent: "        "))
-            lines.append("        case \(unionCase.swiftName)(\(unionCase.valueType))")
+            lines.append("        case \(unionCase.swiftName)(\(caseAssociatedValues(of: unionCase)))")
         }
         lines.append(contentsOf: [
             "",
@@ -599,70 +744,136 @@ enum Emitter {
             "            case \(model.valueWireName)",
             "        }",
             "",
+        ])
+        lines.append(contentsOf: valueUnionDecoder(model))
+        lines.append("")
+        lines.append(contentsOf: valueUnionEncoder(model))
+        lines.append("    }")
+        return lines
+    }
+
+    /// Renders one value-union case's associated-value list.
+    ///
+    /// The catch-all default takes the matched discriminator ahead of the
+    /// value, since it is the one case whose tag is not fixed by its name.
+    ///
+    /// - Parameter unionCase: The value-union case model.
+    /// - Returns: The associated-value types, comma-separated.
+    private static func caseAssociatedValues(of unionCase: ValueUnionCaseModel) -> String {
+        switch unionCase.selector {
+        case .tag, .untagged:
+            unionCase.valueType
+        case .capturedTag:
+            "String, \(unionCase.valueType)"
+        }
+    }
+
+    /// Renders `init(from:)` for a nested value-union enum.
+    ///
+    /// A catch-all default binds the discriminator it matched, so the
+    /// discriminator decodes strictly; a default that declares no discriminator
+    /// is instead what an *absent* one selects, so there it decodes leniently.
+    ///
+    /// - Parameter model: The object-value-union emission model.
+    /// - Returns: The initializer lines, indented two levels.
+    private static func valueUnionDecoder(_ model: ObjectValueUnionModel) -> [String] {
+        let capturesTag = model.cases.contains { $0.selector == .capturedTag }
+        var lines = [
             "        /// Decodes the value by its `\(model.discriminator)` discriminator,",
-            "        /// falling back to the default variant when it is absent or unknown.",
+            "        /// falling back to the default variant when it is \(capturesTag ? "unrecognized" : "absent or unknown").",
             "        ///",
             "        /// - Parameter decoder: The decoder positioned at the object.",
             "        /// - Throws: `DecodingError` when the payload is missing or mistyped.",
             "        public init(from decoder: any Decoder) throws {",
             "            let container = try decoder.container(keyedBy: CodingKeys.self)",
-            "            switch try container.decodeIfPresent(String.self, forKey: .\(model.discriminator)) {",
-        ])
+        ]
+        let subject = capturesTag
+            ? "try container.decode(String.self, forKey: .\(model.discriminator))"
+            : "try container.decodeIfPresent(String.self, forKey: .\(model.discriminator))"
+        lines.append("            switch \(subject) {")
         for unionCase in model.cases {
-            guard let tag = unionCase.tag else { continue }
-            lines.append("            case \(stringLiteral(tag))?:")
-            lines.append("                self = .\(unionCase.swiftName)(try container.decode(\(unionCase.valueType).self, forKey: .\(model.valueWireName)))")
+            guard case .tag(let tag) = unionCase.selector else { continue }
+            lines.append("            case \(stringLiteral(tag))\(capturesTag ? "" : "?"):")
+            lines.append("                self = .\(unionCase.swiftName)(\(valueDecodeCall(unionCase, model)))")
         }
-        if let defaultCase = model.cases.first(where: { $0.tag == nil }) {
-            lines.append("            default:")
-            lines.append("                self = .\(defaultCase.swiftName)(try container.decode(\(defaultCase.valueType).self, forKey: .\(model.valueWireName)))")
+        for unionCase in model.cases {
+            switch unionCase.selector {
+            case .tag:
+                continue
+            case .untagged:
+                lines.append("            default:")
+                lines.append("                self = .\(unionCase.swiftName)(\(valueDecodeCall(unionCase, model)))")
+            case .capturedTag:
+                lines.append("            case let other:")
+                lines.append("                self = .\(unionCase.swiftName)(other, \(valueDecodeCall(unionCase, model)))")
+            }
         }
-        lines.append(contentsOf: [
-            "            }",
-            "        }",
-            "",
-            "        /// Encodes the value, flattening its payload beside the request's",
-            "        /// own members; the default variant omits the discriminator.",
+        lines.append(contentsOf: ["            }", "        }"])
+        return lines
+    }
+
+    /// Renders the keyed decode call for a value-union case's payload.
+    ///
+    /// - Parameters:
+    ///   - unionCase: The value-union case model.
+    ///   - model: The object-value-union emission model.
+    /// - Returns: The `try container.decode…` expression.
+    private static func valueDecodeCall(_ unionCase: ValueUnionCaseModel, _ model: ObjectValueUnionModel) -> String {
+        "try container.decode(\(unionCase.valueType).self, forKey: .\(model.valueWireName))"
+    }
+
+    /// Renders `encode(to:)` for a nested value-union enum.
+    ///
+    /// - Parameter model: The object-value-union emission model.
+    /// - Returns: The method lines, indented two levels.
+    private static func valueUnionEncoder(_ model: ObjectValueUnionModel) -> [String] {
+        var lines = [
+            "        /// Encodes the value, flattening its payload beside the object's own",
+            "        /// members; a default variant declaring no discriminator omits it.",
             "        ///",
             "        /// - Parameter encoder: The encoder to write the object into.",
             "        /// - Throws: Rethrows any error from the underlying encoder.",
             "        public func encode(to encoder: any Encoder) throws {",
             "            var container = encoder.container(keyedBy: CodingKeys.self)",
             "            switch self {",
-        ])
+        ]
         for unionCase in model.cases {
-            lines.append("            case .\(unionCase.swiftName)(let payload):")
-            if let tag = unionCase.tag {
+            switch unionCase.selector {
+            case .tag(let tag):
+                lines.append("            case .\(unionCase.swiftName)(let payload):")
                 lines.append("                try container.encode(\(stringLiteral(tag)), forKey: .\(model.discriminator))")
+            case .untagged:
+                lines.append("            case .\(unionCase.swiftName)(let payload):")
+            case .capturedTag:
+                lines.append("            case .\(unionCase.swiftName)(let discriminator, let payload):")
+                lines.append("                try container.encode(discriminator, forKey: .\(model.discriminator))")
             }
             lines.append("                try container.encode(payload, forKey: .\(model.valueWireName))")
         }
-        lines.append(contentsOf: [
-            "            }",
-            "        }",
-            "    }",
-        ])
+        lines.append(contentsOf: ["            }", "        }"])
         return lines
     }
 
-    /// Renders the memberwise initializer for an object value union.
+    /// Renders the memberwise initializer for an object carrying a union.
     ///
     /// - Parameters:
-    ///   - model: The object-value-union emission model.
-    ///   - leading: The base properties preceding the value member.
+    ///   - base: The base struct model.
+    ///   - union: The union portion.
+    ///   - leading: The base properties preceding the union member.
     ///   - meta: The `_meta` property, if present.
     /// - Returns: The initializer lines, indented one level.
-    private static func valueUnionStructInit(
-        _ model: ObjectValueUnionModel,
+    private static func unionStructInit(
+        base: StructModel,
+        union: FlattenedUnion,
         leading: [PropertyModel],
         meta: PropertyModel?
     ) -> [String] {
         var parameters = leading.map(initParameter)
-        parameters.append("\(model.valueWireName): \(model.valueEnumName)")
+        parameters.append("\(union.wireName): \(union.typeName)")
         if let meta {
             parameters.append(initParameter(meta))
         }
-        var lines = ["    /// Creates a `\(model.base.name)`.", "    public init("]
+        var lines = ["    /// Creates a `\(base.name)`.", "    public init("]
         for (index, parameter) in parameters.enumerated() {
             let comma = index < parameters.count - 1 ? "," : ""
             lines.append("        " + parameter + comma)
@@ -671,7 +882,7 @@ enum Emitter {
         for property in leading {
             lines.append("        self.\(property.swiftName) = \(property.swiftName)")
         }
-        lines.append("        self.\(model.valueWireName) = \(model.valueWireName)")
+        lines.append("        self.\(union.wireName) = \(union.wireName)")
         if let meta {
             lines.append("        self.\(meta.swiftName) = \(meta.swiftName)")
         }
@@ -679,20 +890,22 @@ enum Emitter {
         return lines
     }
 
-    /// Renders `init(from:)` for an object value union.
+    /// Renders `init(from:)` for an object carrying a union.
     ///
     /// - Parameters:
-    ///   - model: The object-value-union emission model.
-    ///   - leading: The base properties preceding the value member.
+    ///   - base: The base struct model.
+    ///   - union: The union portion.
+    ///   - leading: The base properties preceding the union member.
     ///   - meta: The `_meta` property, if present.
     /// - Returns: The initializer lines, indented one level.
-    private static func valueUnionStructDecoder(
-        _ model: ObjectValueUnionModel,
+    private static func unionStructDecoder(
+        base: StructModel,
+        union: FlattenedUnion,
         leading: [PropertyModel],
         meta: PropertyModel?
     ) -> [String] {
         var lines = [
-            "    /// Decodes a `\(model.base.name)`; forgiving fields degrade to their",
+            "    /// Decodes a `\(base.name)`; forgiving fields degrade to their",
             "    /// schema defaults instead of failing the message.",
             "    ///",
             "    /// - Parameter decoder: The decoder positioned at the object.",
@@ -703,7 +916,7 @@ enum Emitter {
         for property in leading {
             lines.append("        " + decodeLine(property))
         }
-        lines.append("        self.\(model.valueWireName) = try \(model.valueEnumName)(from: decoder)")
+        lines.append("        self.\(union.wireName) = try \(union.typeName)(from: decoder)")
         if let meta {
             lines.append("        " + decodeLine(meta))
         }
@@ -711,20 +924,22 @@ enum Emitter {
         return lines
     }
 
-    /// Renders `encode(to:)` for an object value union.
+    /// Renders `encode(to:)` for an object carrying a union.
     ///
     /// - Parameters:
-    ///   - model: The object-value-union emission model.
-    ///   - leading: The base properties preceding the value member.
+    ///   - base: The base struct model.
+    ///   - union: The union portion.
+    ///   - leading: The base properties preceding the union member.
     ///   - meta: The `_meta` property, if present.
     /// - Returns: The method lines, indented one level.
-    private static func valueUnionStructEncoder(
-        _ model: ObjectValueUnionModel,
+    private static func unionStructEncoder(
+        base: StructModel,
+        union: FlattenedUnion,
         leading: [PropertyModel],
         meta: PropertyModel?
     ) -> [String] {
         var lines = [
-            "    /// Encodes a `\(model.base.name)`, omitting nil optional fields.",
+            "    /// Encodes a `\(base.name)`, omitting nil optional fields.",
             "    ///",
             "    /// - Parameter encoder: The encoder to write the object into.",
             "    /// - Throws: Rethrows any error from the underlying encoder.",
@@ -734,7 +949,7 @@ enum Emitter {
         for property in leading {
             lines.append("        " + encodeCall(property))
         }
-        lines.append("        try \(model.valueWireName).encode(to: encoder)")
+        lines.append("        try \(union.wireName).encode(to: encoder)")
         if let meta {
             lines.append("        " + encodeCall(meta))
         }

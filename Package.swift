@@ -51,6 +51,11 @@ let package = Package(
             path: "Plugins/GenerateACP"
         ),
         .testTarget(
+            name: "FoundationModelsACPTests",
+            dependencies: ["FoundationModelsACP"],
+            path: "Tests/FoundationModelsACPTests"
+        ),
+        .testTarget(
             name: "ACPGenerateTests",
             dependencies: ["ACPGenerateCore"],
             path: "Tests/ACPGenerateTests"

@@ -72,8 +72,11 @@ this out in the milestone that restores it, because it is easy to lose quietly:
   — **done in M0** (`Tests/ACPGenerateTests/VendoredSchemaTests.swift`), which
   also pins the checked-in output against a fresh in-memory run.
 - `TaggedUnionRoundTripTests` and `UnknownFallbackRoundTripTests`: runtime
-  decode/encode of generated unions and `unknown(String)` fallbacks — **M1**.
-- `ForgivingDecodingTests` — **M1**.
+  decode/encode of generated unions and their unknown fallbacks — **done in
+  M1**, in the new `Tests/FoundationModelsACPTests` target, alongside
+  `JSONValueTests`, `WireInvariantTests`, `MetaFieldTests`, and
+  `RequestErrorTests`.
+- `ForgivingDecodingTests` — **done in M1**, same target.
 - The compiled-routing-table acceptance suite (the wrong-wiring regression
   guard) — **M2**.
 - Every connection, transport, replay, and end-to-end test — **M3** onward.
@@ -97,73 +100,63 @@ generated file is overwritten and shows up as drift — verified.
 schema-vocabulary-independent.** v2 rewrote the union vocabulary: every union is
 `anyOf` (v1 used `oneOf` for enums and tagged unions), and 14 of them close with
 an explicit unknown-discriminator variant that `not`-excludes every known tag —
-the fallback v1 left implicit and the generator already synthesizes as
-`unknown(String)`. Generation aborted on that construct. The generator now
+the fallback v1 left implicit and the generator already synthesizes.
+Generation aborted on that construct. The generator now
 recognizes it, mapping it onto whatever fallback each union family already
 emits, and reads `anyOf` string enums with an open tail.
 
-**Where the schema's catch-all carries more than the tag, the whole definition
-defers to raw JSON rather than truncate it.** Four do, in two shapes that fail
-in opposite directions:
+**Where the schema's catch-all carries more than the tag, the fallback carries
+it too.** M0 left four definitions deferring to raw `JSONValue` rather than
+truncate what their catch-all declared; **M1 resolved all of them**, along with
+the two other deferred shapes beside them. What changed, and why each mattered:
 
-- **Three tagged unions lose the payload and keep the tag.** `AuthMethod`
-  requires `methodId` and `name` beside the unrecognized tag,
-  `PlanUpdateContent` requires `planId`, `ReplayFrom` carries `_meta`. Their
-  variants flatten `$ref` payloads, so the emitter's synthesized
-  `unknown(String)` has nowhere to put those members and drops them.
-- **`SetSessionConfigOptionRequest` is the inverse: it loses the tag and keeps
-  the payload.** It is an object (`sessionId`, `configId`, `_meta`) that also
-  carries a value union on `type`, and its catch-all re-declares `type`
-  *unpinned* alongside the very `value` the union is built around. The emitted
-  value-union default case is keyed on the value member alone, so it preserves
-  `value` and cannot re-encode the discriminator it matched.
+| Shape | Definitions | What M1 did |
+|---|---|---|
+| Integer enum with an open tail | `ErrorCode` | The enum stage became scalar rather than string-only: one `enumRawKinds` table maps the JSON `type` keyword to the emitted raw type, so `ErrorCode` emits `unknown(Int)` beside its eight named codes. An integer cannot name its own case, so those come from each variant's `title`. |
+| Base object plus a tagged (`allOf`-payload) union | `DiffChange`, `SessionConfigOption` | A new `.objectTaggedUnion` family: the base object becomes a struct with a nested `Payload` enum whose payload flattens beside the base members. Fixed name rather than one derived from the discriminator, because `SessionConfigOption`'s discriminator is `type` and `SessionConfigOption.Type` is metatype syntax. |
+| Tagged union whose catch-all carries payload | `AuthMethod`, `PlanUpdateContent`, `ReplayFrom` | The synthesized fallback became `unknown(String, JSONValue)`, holding the raw object *less* the discriminator. This is an emitter-wide change, so all eleven stand-alone tagged unions gained it — a `session/update` variant a newer peer adds was being truncated too. |
+| Object plus a value union whose catch-all leaves the tag unpinned | `SetSessionConfigOptionRequest` | The value union's default case gained the matched tag: `other(String, JSONValue)`. `session/set_config_option` now routes a typed params object. |
+| Pre-existing (also deferred under v1) | `AgentResponse`, `ClientResponse`, `EmbeddedResourceResource`, `ExtRequest`, `ExtResponse`, `ExtNotification`, `RequestID`, `SessionConfigSelectOptions` | Still deferred, and deliberately. Three are the extension escape hatch, which states no shape at all; the other five are untagged unions whose branches pin no discriminator, so there is nothing to key a Swift enum on. |
 
-Either loss would contradict *Conventions* below and the schema's own
-instruction to "preserve the raw payload when storing, replaying, proxying, or
-forwarding". `JSONValue` is lossless, so that is what all four emit until M1
-gives each fallback somewhere to keep what it currently drops.
+The raw payload is the variant's object minus the members something else already
+owns — the discriminator, which the case holds as its own associated value, and
+for a nested union the base object's members, which the struct decodes and
+re-encodes itself. Keeping a second copy of either is how a stale value wins on
+re-encode: two keyed containers over one encoder share an object, and the later
+write wins. `JSONValue.init(from:excludingMembers:)` drops those names on the
+way in and `encodeMembers(to:reserving:)` rejects them on the way out — the
+fallback cases are public and take two associated values, so a payload built in
+Swift, unlike one decoded from the wire, can claim a name it does not own.
 
-**Left on the placeholder seam, for M1.** The last two rows carry the API
-surface each deferral untypes, because a definition name alone does not convey
-that three ordinary stable fields and one whole params object are raw JSON
-today. Rows 1 and 2 untype six more properties — `ACPError.code`,
-`Diff.changes`, and `configOptions` on `NewSessionResponse`,
-`ResumeSessionResponse`, `SetSessionConfigOptionResponse`, and
-`ConfigOptionUpdate` — for fourteen placeholder-typed properties in all:
+`Unresolved.generated.swift` is down from 15 placeholders to those 8, and
+`VendoredSchemaTests.onlyTheDeliberatelyFreeFormDefinitionsStayUntyped` pins the
+list by name, so a definition sliding back onto the seam has to be spelled out
+there to pass.
 
-| Shape | Definitions, and the API surface each untypes |
-|---|---|
-| Integer enum with an open tail | `ErrorCode` |
-| Base object plus a tagged (`allOf`-payload) union | `DiffChange`, `SessionConfigOption` |
-| Tagged union whose catch-all carries payload | `AuthMethod` → `InitializeResponse.authMethods: [JSONValue]?`; `PlanUpdateContent` → `PlanUpdate.plan: JSONValue` (required, not optional); `ReplayFrom` → `ResumeSessionRequest.replayFrom: JSONValue?` |
-| Object plus a value union whose catch-all leaves the tag unpinned | `SetSessionConfigOptionRequest` → the entire `session/set_config_option` params object. `MethodTable.generated.swift` routes it as `paramsTypeName: "SetSessionConfigOptionRequest"`, which resolves to `JSONValue`, so `sessionId`, `configId`, `value`, and `_meta` are all untyped at the one routed stable method that has no typed params |
-| Pre-existing (also deferred under v1) | `AgentResponse`, `ClientResponse`, `EmbeddedResourceResource`, `ExtRequest`, `ExtResponse`, `ExtNotification`, `RequestID`, `SessionConfigSelectOptions` |
+**The unreachable generated surface, before and after.** M0 counted 26
+declarations in `Sources/FoundationModelsACP/Generated/` that nothing else in
+the generated surface referenced. Ten of them were reachable only through the
+rows above, and resolving those rows was M1's completion signal; the count is
+now 16, and the difference is exactly those ten — the eight structs
+`AuthMethodAgent`, `DiffPathChange`, `DiffPathPairChange`, `PlanItems`,
+`ReplayFromStart`, `SessionConfigBoolean`, `SessionConfigId`,
+`SessionConfigSelect`, and the two enums `DiffFileType` and
+`SessionConfigOptionCategory`. The 16 that remain are the groups the triage said
+would:
 
-The seam is also why so much of the generated surface is unreachable.
-`Sources/FoundationModelsACP/Generated/` holds **26** declarations that nothing
-else in the generated surface references. The triage below accounts for every
-one of the 26, so an M1 that satisfies it leaves no orphan behind:
-
-- **Ten are unlocked by rows 1-4 — this group is M1's completion signal.**
-  Eight structs (`AuthMethodAgent`, `DiffPathChange`, `DiffPathPairChange`,
-  `PlanItems`, `ReplayFromStart`, `SessionConfigBoolean`, `SessionConfigId`,
-  `SessionConfigSelect`) and two enums (`DiffFileType`,
-  `SessionConfigOptionCategory`). `SessionConfigId` is reached from two rows —
-  `SessionConfigOption` in row 2 and `SetSessionConfigOptionRequest` in row 4 —
-  and every other member from exactly one.
-- **Four hang off row 5 and stay orphaned past M1.** `TextResourceContents`
-  and `BlobResourceContents` are `$ref`'d only by `EmbeddedResourceResource`;
+- **Four hang off the still-deferred row.** `TextResourceContents` and
+  `BlobResourceContents` are `$ref`'d only by `EmbeddedResourceResource`;
   `SessionConfigSelectGroup` only by `SessionConfigSelectOptions`; and
   `ACPError` by `AgentResponse` and `ClientResponse` — plus twice more from the
   schema root's batch-response branches, four inbound `$ref`s in all. The last
   is easy to file under the envelope types below — it is not one. The schema
-  does `$ref` it, from two row-5 placeholders, so it is reachable in principle
-  even though nothing plans to resolve those rows.
-- **Five are row-5 placeholders that are themselves orphans** —
-  `AgentResponse`, `ClientResponse`, `ExtRequest`, `ExtResponse`,
-  `ExtNotification`. Row 5's other three (`EmbeddedResourceResource`,
-  `RequestID`, `SessionConfigSelectOptions`) are referenced, so they are not.
-- **Five are JSON-RPC envelope types no row will ever reach** — `AgentRequest`,
+  does `$ref` it, from two placeholders, so it is reachable in principle even
+  though nothing plans to resolve them.
+- **Five are those placeholders, themselves orphans** — `AgentResponse`,
+  `ClientResponse`, `ExtRequest`, `ExtResponse`, `ExtNotification`. The other
+  three (`EmbeddedResourceResource`, `RequestID`, `SessionConfigSelectOptions`)
+  are referenced, so they are not.
+- **Five are JSON-RPC envelope types nothing will ever reach** — `AgentRequest`,
   `AgentNotification`, `ClientRequest`, `ClientNotification`,
   `ProtocolLevelNotification`. Each is `$ref`'d exactly twice and only from the
   schema root's message envelope — the four request and notification types from
@@ -173,8 +166,7 @@ one of the 26, so an M1 that satisfies it leaves no orphan behind:
   `ClientResponse`, in the group immediately above, are also referenced only
   from the root and by no other definition — once each rather than twice, since
   the batch-response branches reach `ACPError` directly instead of `$ref`ing
-  them. What distinguishes the five is that the routing table supersedes them;
-  exclude them from the signal or it can never go green.
+  them. What distinguishes the five is that the routing table supersedes them.
 - **Two are the routing roots** — `ACPMethodTable` and `Unstable`. Nothing in
   the generated surface references them by design; consumers do.
 
@@ -304,8 +296,10 @@ written by hand if no mapping is written by hand.
   which is exactly the workflow this pipeline is for.
 
 **Hand-written, never generated:** transports, connections, role protocols,
-`JSONValue`, `AbsolutePath`, `RequestError`, and the `unknown(String)` fallbacks
-that make unknown-value preservation real.
+`JSONValue`, and `AbsolutePath`. The `unknown` fallbacks that make unknown-value
+preservation real *are* generated — one per union, synthesized by the emitter
+rather than written into the schema. `RequestError` is a `typealias` for the
+generated `ACPError` plus an `Error` conformance and its named constructors.
 
 ## Connection model: full-duplex, notification-first
 
@@ -387,54 +381,33 @@ replayable script.
   payload inventory above is now read off the schema, and every question the
   plan had open about it — `session/delete`, the `session/update` variant list,
   display terminals, `mcp/*`, message deletion — is answered in place.
-- [ ] **M1 — Types and conventions.** Generated models/unions/enums, plus the
-  hand-written `JSONValue`, `AbsolutePath`, `RequestError`, and the
-  `unknown(String)` fallbacks. Decode-time enforcement of absolute paths.
-  Resolve the four union shapes M0 left on the placeholder seam (table under
-  *Starting point*) — which for the payload-bearing catch-alls means giving each
-  fallback somewhere to keep what it currently drops: `unknown(String, JSONValue)`
-  for the three tagged unions, and a two-associated-value default
-  (`other(String, JSONValue)` in `ValueUnionCaseModel` and
-  `objectValueUnionDeclaration`) for the value union, so unknown-value
-  preservation is real rather than asserted.
+- [ ] **M1 — Types and conventions.** Generated models, unions, and enums from
+  the v2 schema, plus the hand-written pieces that are deliberately never
+  generated: `JSONValue`, `AbsolutePath`, `ACP`, and `RequestError`. Every
+  deferred union shape resolved — see the table under *Starting point* for what
+  each one needed.
 
-  **Take `SetSessionConfigOptionRequest` first.** It is the cheapest of the four
-  and the most expensive to leave: it is the one deferral that untypes a *routed
-  stable method's entire params object* rather than a single field. Three
-  coupled generator edits, all in `SchemaGenerator.swift`:
+  **`RequestError` is a `typealias` for the generated `ACPError`**, plus an
+  `Error` conformance and one named constructor per predefined code. v2 defines
+  the error object in the schema, so a second hand-written copy of code, message,
+  and `data` would only be able to disagree with it; and now that `ErrorCode`
+  generates, no code number is restated anywhere in hand-written source.
 
-  1. Relax `isUnknownFallbackVariant` **for the value-union family only** — a
-     catch-all member the modeled variants already declare is not new payload.
-     Leave it strict for tagged unions, where the three above must keep
-     deferring until their fallback can carry a payload.
-  2. Give `ValueUnionCaseModel` the matched discriminator, and emit
-     `other(String, JSONValue)` from `objectValueUnionDeclaration`.
-  3. Drop the `objectValueUnionModel` guard that rejects a default variant
-     declaring the discriminator. It is correct only while the default case
-     cannot re-encode a tag; step 2 is exactly what makes it obsolete. Skipping
-     this makes generation *throw* rather than emit.
+  **Absolute paths ride the schema's own `AbsolutePath` `$def`**, so the
+  invariant reaches every path field through its `$ref` with no per-field
+  configuration. **No line-number invariant** — see *Conventions* above.
 
-  Then add the round-trip test in the same change — decode
-  `{"type": "_vendor_x", "value": 42}`, re-encode, assert both members survive.
-  Nothing currently exercises generated runtime types, but the harness is
-  already there: `ACPGenerateTests` depends on `ACPGenerateCore`, which itself
-  depends on `FoundationModelsACP`, so the generated module is linked into the
-  test binary today and the test costs one `import`. Do not defer this step —
-  an unexercised two-associated-value `Codable` case is the
-  "preservation asserted rather than real" failure this milestone exists to
-  close.
+  **One conformance gap, deliberately left for M7.** Six upsert `_meta` fields
+  say "Omitted means no metadata update; `null` is an explicit clear signal",
+  and the same three-state rule governs the other fields of `UserMessage`,
+  `AgentMessage`, `AgentThought`, `TerminalUpdate`, and `ToolCallUpdate`. A
+  Swift `Optional` has two states, so `null` currently reads as omitted.
+  `MetaFieldTests.upsertMetaCannotYetDistinguishOmittedFromNull` pins the gap so
+  it stays visible.
 
-  M0 left it deferred because none of that is M0's remit — vendor, re-point,
-  verify — and deferring costs nothing that is not recoverable: `JSONValue` is
-  lossless, and M1 lands before M2, so nothing generates against the placeholder
-  in between. Do this one first, then the tagged-union three, so both families
-  get the same answer to the same question.
 - [ ] **M2 — Role protocols.** `Agent` (ten methods plus `session/cancel`) and
   `Client` (`session/request_permission` plus the `session/update`
   notification). Capability-gated methods default to method-not-found.
-  *Blocked on the M1 seam:* `session/set_config_option` has no params type until
-  `SetSessionConfigOptionRequest` resolves — generated against today's output it
-  would emit `setSessionConfigOption(_ params: JSONValue)`.
 - [ ] **M3 — Connections and transports.** Both connection sides, the read loop,
   continuation correlation, per-request `Task` dispatch, fail-loud disconnect,
   stdio and `InMemoryTransport`.
@@ -442,23 +415,18 @@ replayable script.
   and `capabilities`, empty-object support markers, nested
   `capabilities.session.*` (including `mcp.stdio` / `mcp.http` /
   `additionalDirectories`), and `protocolVersion: 2`.
-  *Blocked on the M1 seam:* `InitializeResponse.authMethods` is `[JSONValue]?`
-  until `AuthMethod` resolves.
 - [ ] **M5 — Sessions.** `session/new` / `list` / `resume` / `close` / `delete`, `mcpServers`
   on new and resume, `replayFrom`, config options.
-  *Blocked on the M1 seam:* `ResumeSessionRequest.replayFrom` is `JSONValue?`
-  until `ReplayFrom` resolves, and config options are untyped end to end —
-  `SessionConfigOption` on the listing side, the whole
-  `session/set_config_option` params object on the setting side.
 - [ ] **M6 — Prompt lifecycle.** `session/prompt` immediate ack, `state_update`
   states, `stopReason` on idle, `session/cancel` → cancelled idle.
 - [ ] **M7 — Updates.** All sixteen `session/update` variants: messages and
   chunks with `messageId`, tool-call upserts and content chunks, terminal
   upserts and base64 output chunks (confirmed stable in M0), plans, available
   commands, config options, session info, usage.
-  *Blocked on the M1 seam:* `PlanUpdate.plan` is `JSONValue` — required, so
-  every `plan_update` carries an untyped payload — until `PlanUpdateContent`
-  resolves.
+  *Carried in from M1:* the six upsert types have three-state patch semantics
+  (omitted leaves unchanged, `null` clears, a value replaces) that a Swift
+  `Optional` cannot express. M1 typed their payloads; expressing the third
+  state is this milestone's.
 - [ ] **M8 — Permissions.** `session/request_permission` with `title` /
   `description` / tagged `subject` (`tool_call` or `command`, the latter
   optionally naming a `terminalId`). **Elicitation is out of scope until it is

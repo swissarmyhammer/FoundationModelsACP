@@ -17,6 +17,17 @@ comments:
     - Added the terminal patch semantics from `TerminalUpdate` (omitted unchanged / `null` clears / value replaces; new `terminalId` starts unknown) and the explicit note that the schema exposes no input, resize, interrupt, kill, wait, release, or execution surface.
     - Added the M1-seam note for `PlanUpdate.plan: JSONValue`, matching `plan.md` -> M7.
   timestamp: 2026-07-26T15:24:46.679190+00:00
+- actor: claude-code
+  id: 01kyfxv3g2f4gnmh6chdb50jhh
+  text: |-
+    The M1 seam is closed — the "blocked on the M1 seam" note is resolved. `PlanUpdate.plan` is now `PlanUpdateContent`, a tagged union with `items(PlanItems)` and an `unknown(String, JSONValue)` fallback that keeps `planId` when the content type is one this revision does not list.
+
+    Two things landed for this milestone beyond that.
+
+    **Every `session/update` variant's fallback now preserves payload, not just the deferred three.** `unknown(String)` became `unknown(String, JSONValue)` across the whole tagged-union emitter, so a `sessionUpdate` value a newer peer adds round-trips with its members intact rather than being truncated to its tag. `TaggedUnionRoundTripTests.everyDeclaredTagSelectsAModeledCase` probes all 44 discriminator values the vendored schema declares, across all 13 payload-bearing unions, reading the tags from `Schema/acp-v2.json` rather than restating them.
+
+    **One conformance gap is deliberately left here, and it is this milestone's.** v2 gives upsert fields three wire states — omitted leaves the stored value unchanged, `null` clears it, a value replaces it — and every one of them generates as a Swift `Optional`, which has two. Omitted and `null` both decode to `nil` and both re-encode as an omitted key, so a client meaning "clear" sends "unchanged". It affects the six upsert types (`UserMessage`, `AgentMessage`, `AgentThought`, `SessionInfoUpdate`, `TerminalUpdate`, `ToolCallUpdate`) — their `_meta` says so explicitly, and their definition-level prose says the same of their other fields. Carded as ^1pfngj1 with the design constraints, and pinned in its current-behaviour form by `MetaFieldTests.upsertMetaCannotYetDistinguishOmittedFromNull`, so it fails loudly when fixed.
+  timestamp: 2026-07-26T19:18:44.994678+00:00
 depends_on:
 - 01KYD58WWGMA9JWPT0B1PQPP65
 position_column: todo

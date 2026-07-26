@@ -96,6 +96,7 @@ private func assertRoundTrips<T: Codable & Equatable>(_ type: T.Type, fixture: S
             name: "Weird",
             documentation: nil,
             discriminator: "type",
+            siblingMembers: [],
             cases: [
                 UnionCaseModel(tag: #"a"b\c"#, swiftName: "aBC", payloadType: nil, documentation: nil)
             ]

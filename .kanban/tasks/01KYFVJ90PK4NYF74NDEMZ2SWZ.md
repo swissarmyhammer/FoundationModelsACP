@@ -1,6 +1,18 @@
 ---
 assignees:
 - claude-code
+comments:
+- actor: claude-code
+  id: 01kyfxvq5z7px5nsdhmjf58tk5
+  text: |-
+    M1 touched the code item 1 describes, so here is what moved and what did not.
+
+    **Item 1 is still open and still accurate.** `classifyOneOf` still has no fallback guard, and a `const`-pinning `not` variant still survives `unionVariants(of:)` and reaches `discriminatorTag`. The doc comment on `isUnknownFallbackVariant` still carries the warning, reworded.
+
+    What changed around it: `isUnknownFallbackVariant` lost its `pinned:` parameter and is now just "has a `not` and pins no `const` of its own", because a fallback that carries payload no longer cares what the catch-all declares. One side effect on the `oneOf` path — a *payload-bearing* catch-all on a `oneOf` is now filtered out rather than modeled, which is the same treatment `anyOf` gives it. The `const`-pinning case, which is the one item 1 is about, is unaffected.
+
+    **Item 3's premise moved.** M1 rewrote large parts of `SchemaGenerator.swift` and `Emitter.swift`, so `git log -L` on the lines round 5 cited will now point at the M1 commit rather than at `c82ca85` and friends. Re-run the review rather than working from the old finding list; some of those lines no longer exist. `objectValueUnionDeclaration` and the new `objectTaggedUnionDeclaration` were already deduplicated onto a shared `objectCarryingAUnion`, and the three struct-part helpers now take `base:union:` instead of one model type.
+  timestamp: 2026-07-26T19:19:05.151931+00:00
 position_column: todo
 position_ordinal: 8a80
 title: Generator follow-ups deferred during M0

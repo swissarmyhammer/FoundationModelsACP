@@ -6,38 +6,15 @@
 /// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
 public typealias AgentResponse = JSONValue
 
-/// Describes an available authentication method.
-///
-/// The `type` field acts as the discriminator in the serialized JSON form.
-///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
-public typealias AuthMethod = JSONValue
-
 /// A JSON-RPC response object.
 ///
 /// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
 public typealias ClientResponse = JSONValue
 
-/// One file-level change described by a [`Diff`].
-///
-/// Structured change metadata lets clients identify affected files and
-/// operations without parsing the text patch.
-///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
-public typealias DiffChange = JSONValue
-
 /// Resource content that can be embedded in a message.
 ///
 /// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
 public typealias EmbeddedResourceResource = JSONValue
-
-/// Predefined error codes for common JSON-RPC and ACP-specific errors.
-///
-/// These codes follow the JSON-RPC 2.0 specification for standard errors
-/// and use the reserved range (-32000 to -32099) for protocol-specific errors.
-///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
-public typealias ErrorCode = JSONValue
 
 /// Allows the Agent to send an arbitrary notification that is not part of the ACP spec.
 /// Extension notifications provide a way to send one-way messages for custom functionality
@@ -66,18 +43,6 @@ public typealias ExtRequest = JSONValue
 /// Free-form by schema: the definition places no shape constraints, so raw JSON is its final representation.
 public typealias ExtResponse = JSONValue
 
-/// Updated content for a plan.
-///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
-public typealias PlanUpdateContent = JSONValue
-
-/// Inclusive cursor describing where replayed session history should begin.
-///
-/// Replay includes the position identified by the cursor.
-///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
-public typealias ReplayFrom = JSONValue
-
 /// JSON RPC Request Id
 ///
 /// An identifier established by the Client that MUST contain a String, Number, or NULL value if included. If it is not included it is assumed to be a notification. The value SHOULD normally not be Null \[1\] and Numbers SHOULD NOT contain fractional parts \[2\]
@@ -91,17 +56,7 @@ public typealias ReplayFrom = JSONValue
 /// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
 public typealias RequestID = JSONValue
 
-/// A session configuration option selector and its current state.
-///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
-public typealias SessionConfigOption = JSONValue
-
 /// Possible values for a session configuration option.
 ///
 /// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
 public typealias SessionConfigSelectOptions = JSONValue
-
-/// Request parameters for setting a session configuration option.
-///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
-public typealias SetSessionConfigOptionRequest = JSONValue

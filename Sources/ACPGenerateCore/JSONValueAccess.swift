@@ -14,6 +14,9 @@ extension JSONValue {
     /// The boolean when this value is a JSON bool, else `nil`.
     var boolValue: Bool? { unwrapped() }
 
+    /// The number when this value is a JSON number, else `nil`.
+    var numberValue: Double? { unwrapped() }
+
     /// Looks up an object member by key; `nil` when absent or not an object.
     ///
     /// - Parameter key: The member name.

@@ -104,9 +104,9 @@ import Testing
     @Test func explicitUnknownVariantBecomesTheSynthesizedFallback() throws {
         // ACP v2 spells the unknown case out in the schema: a final variant
         // whose `not` excludes every known discriminator and which accepts
-        // any additional properties. That is the `unknown(String)` case the
-        // emitter already synthesizes, so it must not be modeled as a variant
-        // of its own.
+        // any additional properties. That is the `unknown` case the emitter
+        // already synthesizes, so it must not be modeled as a variant of its
+        // own.
         //
         // Reverting `taggedUnionModel` to a raw `anyOf` read throws
         // `discriminator type has no const value` at the catch-all.
@@ -114,43 +114,75 @@ import Testing
         let unions = try #require(files.first { $0.name == "Unions.generated.swift" }).contents
         #expect(unions.contains("public enum Thing: Codable, Hashable, Sendable"))
         #expect(unions.contains("case alpha(Alpha)"))
-        #expect(unions.contains("case unknown(String)"))
+        #expect(unions.contains("case unknown(String, JSONValue)"))
         let unresolved = try #require(files.first { $0.name == "Unresolved.generated.swift" }).contents
         #expect(!unresolved.contains("typealias Thing"))
     }
 
-    @Test func unknownVariantCarryingPayloadStaysDeferred() throws {
+    @Test func unknownVariantCarryingPayloadKeepsItOnTheFallback() throws {
         // ACP v2's `AuthMethod` catch-all requires `methodId` and `name`
         // alongside the unrecognized tag, and its own description says clients
         // "should preserve the raw payload when storing, replaying, proxying,
-        // or forwarding". A synthesized `unknown(String)` holds the tag and
-        // drops the rest, so such a union must not be modeled as a tagged enum
-        // at all — raw JSON is lossless where a truncating enum is not.
+        // or forwarding". The synthesized fallback takes the raw object beside
+        // the tag, so those members survive and the union is modeled rather
+        // than deferred to raw JSON wholesale.
         let files = try SchemaGenerator().generate(schemaJSON: Self.payloadBearingUnknownVariantSchema)
-        let unresolved = try #require(files.first { $0.name == "Unresolved.generated.swift" }).contents
-        #expect(unresolved.contains("public typealias Thing = JSONValue"))
         let unions = try #require(files.first { $0.name == "Unions.generated.swift" }).contents
-        #expect(!unions.contains("public enum Thing"))
-    }
-
-    @Test func valueUnionDefaultDeclaringTheDiscriminatorFailsLoudly() throws {
-        // The value-union emitter writes only the `value` member for its
-        // default case. A default variant that *declares* the discriminator
-        // therefore round-trips to JSON missing a member the schema requires,
-        // so the shape is rejected instead of emitted.
-        #expect(throws: GeneratorError.self) {
-            _ = try SchemaGenerator().generate(schemaJSON: Self.valueUnionDefaultWithDiscriminatorSchema)
-        }
-    }
-
-    @Test func objectCarryingATaggedPayloadUnionStaysDeferred() throws {
-        // A base object whose variants flatten `$ref` payloads is neither a
-        // plain tagged union nor the object-plus-`value`-union shape. It has no
-        // emission model yet, so it stays a placeholder seam rather than
-        // being forced through the value-union stage.
-        let files = try SchemaGenerator().generate(schemaJSON: Self.objectWithTaggedPayloadUnionSchema)
+        #expect(unions.contains("public enum Thing: Codable, Hashable, Sendable"))
+        #expect(unions.contains("case alpha(Alpha)"))
+        #expect(unions.contains("case unknown(String, JSONValue)"))
         let unresolved = try #require(files.first { $0.name == "Unresolved.generated.swift" }).contents
-        #expect(unresolved.contains("public typealias Change = JSONValue"))
+        #expect(!unresolved.contains("typealias Thing"))
+    }
+
+    @Test func valueUnionDefaultDeclaringTheDiscriminatorCapturesIt() throws {
+        // A default variant that *declares* the discriminator without pinning
+        // it is selected by any unrecognized tag, so its emitted case takes
+        // that tag as a leading associated value and re-encodes it beside the
+        // value. Writing the value alone would round-trip to JSON missing a
+        // member the schema requires, which is why this shape was rejected
+        // while the default carried one associated value.
+        let files = try SchemaGenerator().generate(schemaJSON: Self.valueUnionDefaultWithDiscriminatorSchema)
+        let models = try #require(files.first { $0.name == "Models.generated.swift" }).contents
+        #expect(models.contains("case other(String, JSONValue)"))
+    }
+
+    @Test func valueUnionCatchAllCarryingAValueBecomesTheDefaultCase() throws {
+        // ACP v2's `SetSessionConfigOptionRequest` shape: the catch-all
+        // re-declares the discriminator *unpinned* beside the very `value` the
+        // union is built around. That is not new payload — the modeled
+        // variants declare both members already — so the definition is modeled
+        // rather than deferred, with the catch-all becoming the tag-capturing
+        // default case.
+        let files = try SchemaGenerator().generate(schemaJSON: Self.valueUnionWithPayloadCatchAllSchema)
+        let models = try #require(files.first { $0.name == "Models.generated.swift" }).contents
+        #expect(models.contains("public struct Choice: Codable, Hashable, Sendable"))
+        #expect(models.contains("case boolean(Bool)"))
+        #expect(models.contains("case other(String, JSONValue)"))
+        let unresolved = try #require(files.first { $0.name == "Unresolved.generated.swift" }).contents
+        #expect(!unresolved.contains("typealias Choice"))
+    }
+
+    @Test func objectCarryingATaggedPayloadUnionEmitsANestedPayload() throws {
+        // A base object whose variants flatten `$ref` payloads is neither a
+        // plain tagged union nor the object-plus-`value`-union shape: the
+        // payload sits beside the base members rather than under a `value`
+        // key. It emits as the base struct with a nested `Payload` enum whose
+        // own Codable flattens into the same object.
+        let files = try SchemaGenerator().generate(schemaJSON: Self.objectWithTaggedPayloadUnionSchema)
+        let models = try #require(files.first { $0.name == "Models.generated.swift" }).contents
+        #expect(models.contains("public struct Change: Codable, Hashable, Sendable"))
+        #expect(models.contains("    public enum Payload: Codable, Hashable, Sendable {"))
+        #expect(models.contains("        case add(Alpha)"))
+        #expect(models.contains("        case unknown(String, JSONValue)"))
+        #expect(models.contains("    public var operation: Payload"))
+        #expect(models.contains("    public var id: String"))
+        // The base members travel beside the payload, so they are not part of
+        // an unrecognized variant's capture — re-encoding them from both the
+        // struct and the captured payload is how a stale copy wins.
+        #expect(models.contains(#"try JSONValue(from: decoder, excludingMembers: ["operation", "id"])"#))
+        let unresolved = try #require(files.first { $0.name == "Unresolved.generated.swift" }).contents
+        #expect(!unresolved.contains("typealias Change"))
     }
 
     @Test func objectValueUnionClassifiesAndEmits() throws {
@@ -180,6 +212,34 @@ import Testing
         #expect(models.contains("public enum Value: Codable, Hashable, Sendable"))
         #expect(models.contains("case boolean(Bool)"))
         #expect(models.contains("case text(String)"))
+    }
+
+    @Test func aUnionMemberCollidingWithABasePropertyFailsLoudly() throws {
+        // Both object-carrying-a-union stages write the union through a second
+        // keyed container over the same encoder, which shares one object with
+        // the struct's own. A name on both sides is written twice and the later
+        // write wins, so the two can disagree on the wire — and the struct's
+        // Swift property and the union's would disagree in memory as well.
+        // Reject the shape rather than emit it.
+        for schema in [Self.valueUnionCollidingWithBaseSchema, Self.taggedPayloadUnionCollidingWithBaseSchema] {
+            let error = #expect(throws: GeneratorError.self) {
+                _ = try SchemaGenerator().generate(schemaJSON: schema)
+            }
+            // Pinned, because "it threw" would also be satisfied by the shape
+            // being rejected somewhere upstream for an unrelated reason.
+            #expect(try #require(error).description.contains("collides with a base property of the same name"))
+        }
+    }
+
+    @Test func aValueMemberThatIsNotAnIdentifierFailsLoudly() throws {
+        // The nested enum takes its name from the value member. Every other
+        // emitted name is validated at the generator boundary, so this one is
+        // too: `public enum Foo-bar` would otherwise fail at `swiftc`, well
+        // past the point where the schema shape is still in view.
+        let error = #expect(throws: GeneratorError.self) {
+            _ = try SchemaGenerator().generate(schemaJSON: Self.valueUnionWithUnusableMemberNameSchema)
+        }
+        #expect(try #require(error).description.contains("does not map to a plain Swift identifier"))
     }
 
     @Test func discriminatedUnionWithoutDefaultFailsLoudly() throws {
@@ -250,6 +310,89 @@ import Testing
             _ = try SchemaGenerator().generate(schemaJSON: schema)
         }
     }
+
+    /// A value union whose base object already declares the discriminator.
+    private static let valueUnionCollidingWithBaseSchema = Data(
+        """
+        {
+          "$defs": {
+            "Choice": {
+              "type": "object",
+              "properties": { "type": { "type": "string" } },
+              "required": ["type"],
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": { "value": { "type": "boolean" }, "type": { "type": "string", "const": "boolean" } },
+                  "required": ["type", "value"]
+                },
+                {
+                  "title": "text",
+                  "type": "object",
+                  "properties": { "value": { "type": "string" } },
+                  "required": ["value"]
+                }
+              ]
+            }
+          }
+        }
+        """.utf8)
+
+    /// A tagged-payload union whose base object already declares the
+    /// discriminator.
+    private static let taggedPayloadUnionCollidingWithBaseSchema = Data(
+        """
+        {
+          "$defs": {
+            "Alpha": {
+              "type": "object",
+              "properties": { "x": { "type": "string" } },
+              "required": ["x"]
+            },
+            "Change": {
+              "type": "object",
+              "properties": { "operation": { "type": "string" } },
+              "required": ["operation"],
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": { "operation": { "type": "string", "const": "add" } },
+                  "required": ["operation"],
+                  "allOf": [{ "$ref": "#/$defs/Alpha" }]
+                }
+              ]
+            }
+          }
+        }
+        """.utf8)
+
+    /// A value union whose value member does not map to a Swift identifier, so
+    /// the nested enum it would name cannot be emitted.
+    private static let valueUnionWithUnusableMemberNameSchema = Data(
+        """
+        {
+          "$defs": {
+            "Choice": {
+              "type": "object",
+              "properties": { "id": { "type": "string" } },
+              "required": ["id"],
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": { "value-of": { "type": "boolean" }, "type": { "type": "string", "const": "boolean" } },
+                  "required": ["type", "value-of"]
+                },
+                {
+                  "title": "text",
+                  "type": "object",
+                  "properties": { "value-of": { "type": "string" } },
+                  "required": ["value-of"]
+                }
+              ]
+            }
+          }
+        }
+        """.utf8)
 
     /// A miniature ACP v2-shaped tagged union: one discriminated `$ref`
     /// payload variant plus the schema's explicit unknown-discriminator
@@ -388,7 +531,8 @@ import Testing
         """.utf8)
 
     /// A tagged union whose catch-all requires members beyond the
-    /// discriminator — ACP v2's `AuthMethod` shape.
+    /// discriminator — ACP v2's `AuthMethod` shape. The fallback must keep
+    /// them.
     private static let payloadBearingUnknownVariantSchema = Data(
         """
         {
@@ -433,8 +577,9 @@ import Testing
         """.utf8)
 
     /// A value union whose default variant declares the discriminator without
-    /// pinning it. The emitter's default case writes only the value member, so
-    /// this shape cannot round-trip and must be rejected.
+    /// pinning it, and without a `not` marking it as the schema's catch-all.
+    /// The emitted default case captures the tag it matched so both members
+    /// round-trip.
     private static let valueUnionDefaultWithDiscriminatorSchema = Data(
         """
         {
@@ -461,9 +606,48 @@ import Testing
         }
         """.utf8)
 
+    /// ACP v2's `SetSessionConfigOptionRequest` shape: a base object plus a
+    /// value union closed by the schema's explicit unknown-discriminator
+    /// catch-all, which re-declares the discriminator *unpinned* beside the
+    /// union's own `value` member.
+    private static let valueUnionWithPayloadCatchAllSchema = Data(
+        """
+        {
+          "$defs": {
+            "Choice": {
+              "type": "object",
+              "properties": { "id": { "type": "string" } },
+              "required": ["id"],
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": { "value": { "type": "boolean" }, "type": { "type": "string", "const": "boolean" } },
+                  "required": ["type", "value"]
+                },
+                {
+                  "title": "other",
+                  "type": "object",
+                  "properties": { "type": { "type": "string" }, "value": { "description": "Raw value payload." } },
+                  "required": ["type", "value"],
+                  "not": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": { "type": { "type": "string", "const": "boolean" } },
+                        "required": ["type"]
+                      }
+                    ]
+                  },
+                  "additionalProperties": true
+                }
+              ]
+            }
+          }
+        }
+        """.utf8)
+
     /// A base object that also carries a tagged union whose variants flatten
-    /// `$ref` payloads — ACP v2's `DiffChange` shape, which has no emission
-    /// model yet.
+    /// `$ref` payloads — ACP v2's `DiffChange` and `SessionConfigOption` shape.
     private static let objectWithTaggedPayloadUnionSchema = Data(
         """
         {

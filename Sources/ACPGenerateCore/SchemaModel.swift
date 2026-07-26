@@ -27,9 +27,9 @@ enum DefinitionKind {
     /// A bare `type: string` definition emitted as a distinct ID newtype.
     case stringIdentifier
 
-    /// A `oneOf` of string-const variants emitted as a Swift enum with an
-    /// `unknown(String)` fallback for unrecognized wire values.
-    case stringEnum
+    /// A union of scalar-const variants emitted as a Swift enum with an
+    /// `unknown` fallback carrying the unrecognized wire value.
+    case scalarEnum(EnumRawKind)
 
     /// A `oneOf` of discriminated object variants emitted as a Swift enum
     /// with associated values, keyed on the shared discriminator member.
@@ -43,6 +43,11 @@ enum DefinitionKind {
     /// A `type: object` definition that also carries a top-level `anyOf`
     /// value union, emitted as a struct with a nested value-union enum.
     case objectValueUnion
+
+    /// A `type: object` definition that also carries a top-level `anyOf`
+    /// tagged union whose variants flatten `$ref` payloads, emitted as a
+    /// struct with a nested tagged-union enum.
+    case objectTaggedUnion
 
     /// An `anyOf`/`enum` definition deferred to a later generator stage;
     /// emitted as a placeholder typealias seam.
@@ -120,9 +125,34 @@ struct PropertyModel {
     let documentation: String?
 }
 
-/// The emission model for one string-enum case.
+/// The scalar JSON type a constant-union enum's values take.
+///
+/// ACP v2 builds enums out of both: string discriminators for protocol
+/// vocabulary, and `int32` constants for `ErrorCode`. Both close with an
+/// unconstrained variant standing for the values a newer peer may send, so
+/// both emit the same enum shape over a different raw type.
+enum EnumRawKind: Equatable {
+    /// String constants (e.g. `end_turn`).
+    case string
+
+    /// Integer constants (e.g. `-32700`).
+    case integer
+
+    /// The Swift type the raw wire value decodes as.
+    var swiftTypeName: String {
+        switch self {
+        case .string: "String"
+        case .integer: "Int"
+        }
+    }
+}
+
+/// The emission model for one scalar-enum case.
 struct EnumCaseModel {
-    /// The exact string as it crosses the wire (e.g. `switch_mode`).
+    /// The constant as it crosses the wire — the string's contents for a
+    /// string enum (e.g. `switch_mode`), the decimal digits for an integer
+    /// one (e.g. `-32700`). The emitter renders it as a literal of the
+    /// enum's raw kind.
     let wireValue: String
 
     /// The camelCase Swift case name (e.g. `switchMode`).
@@ -132,13 +162,17 @@ struct EnumCaseModel {
     let documentation: String?
 }
 
-/// The emission model for a string enum with an `unknown(String)` fallback.
-struct StringEnumModel {
+/// The emission model for a scalar enum with an `unknown` fallback carrying
+/// the unrecognized wire value.
+struct ScalarEnumModel {
     /// The emitted Swift type name (after renames).
     let name: String
 
     /// The schema `description`, emitted as a doc comment.
     let documentation: String?
+
+    /// The scalar JSON type the cases' wire values take.
+    let rawKind: EnumRawKind
 
     /// Cases in schema order.
     let cases: [EnumCaseModel]
@@ -172,8 +206,29 @@ struct TaggedUnionModel {
     /// The wire name of the discriminator member (e.g. `sessionUpdate`).
     let discriminator: String
 
+    /// Wire member names that belong to an enclosing object rather than to the
+    /// union, and so are not part of an unrecognized variant's captured
+    /// payload. Empty for a stand-alone union; the base object's members when
+    /// the union is nested in one, where capturing them would let a stale copy
+    /// overwrite the struct's own on re-encode.
+    let siblingMembers: [String]
+
     /// Cases in schema order.
     let cases: [UnionCaseModel]
+}
+
+/// The emission model for an object definition that carries a tagged union.
+///
+/// The base object properties are modeled as an ordinary struct; the top-level
+/// `anyOf` becomes a nested enum whose `$ref` payload flattens beside the base
+/// properties on the wire, exactly as it would for a stand-alone tagged union.
+struct ObjectTaggedUnionModel {
+    /// The base struct model built from the object's `properties`/`required`.
+    let base: StructModel
+
+    /// The nested union. Its `discriminator` is also the struct's stored
+    /// property name, since that is the member the union occupies on the wire.
+    let union: TaggedUnionModel
 }
 
 /// The emission model for one discriminated-`anyOf`-union variant.
@@ -209,11 +264,27 @@ struct DiscriminatedUnionModel {
     let cases: [DiscriminatedCaseModel]
 }
 
+/// How a value-union variant is selected on the wire, and what its emitted
+/// case re-encodes as the discriminator.
+enum ValueUnionSelector: Equatable {
+    /// A `const`-pinned variant: matched by this tag, re-encoded with it.
+    case tag(String)
+
+    /// A default variant that does not declare the discriminator at all. It is
+    /// selected when the discriminator is absent, and re-encodes without one —
+    /// so it has no tag to carry and its case takes the value alone.
+    case untagged
+
+    /// A default variant that declares the discriminator *unpinned* — the
+    /// schema's catch-all. Any unrecognized tag selects it, so its case takes
+    /// that tag as a leading associated value and re-encodes it verbatim.
+    case capturedTag
+}
+
 /// The emission model for one variant of an object's embedded value union.
 struct ValueUnionCaseModel {
-    /// The discriminator value on the wire (e.g. `boolean`), or `nil` for the
-    /// default variant selected when the discriminator is absent or unknown.
-    let tag: String?
+    /// How the variant is selected on the wire.
+    let selector: ValueUnionSelector
 
     /// The camelCase Swift case name (e.g. `boolean`, `valueId`).
     let swiftName: String
@@ -243,7 +314,8 @@ struct ObjectValueUnionModel {
     /// The emitted name of the nested value-union enum (e.g. `Value`).
     let valueEnumName: String
 
-    /// Cases in schema order; exactly one carries a `nil` `tag` (the default).
+    /// Cases in schema order; exactly one is a default — that is, carries a
+    /// selector other than `.tag`.
     let cases: [ValueUnionCaseModel]
 }
 

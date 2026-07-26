@@ -1548,6 +1548,161 @@ public struct Diff: Codable, Hashable, Sendable {
     }
 }
 
+/// One file-level change described by a [`Diff`].
+///
+/// Structured change metadata lets clients identify affected files and
+/// operations without parsing the text patch.
+public struct DiffChange: Codable, Hashable, Sendable {
+    /// The variant payload, selected by the `operation` discriminator.
+    public enum Payload: Codable, Hashable, Sendable {
+        /// A file was added.
+        case add(DiffPathChange)
+
+        /// A file was deleted.
+        case delete(DiffPathChange)
+
+        /// A file was modified in place.
+        case modify(DiffPathChange)
+
+        /// A file was moved or renamed.
+        case move(DiffPathPairChange)
+
+        /// A file was copied.
+        case copy(DiffPathPairChange)
+
+        /// An unrecognized `operation` value, captured alongside the members
+        /// of the object that no other property owns, so a variant this revision
+        /// does not list decodes without error and re-encodes unchanged.
+        ///
+        /// The payload holds neither `operation` nor any member declared
+        /// beside this union: those have their own storage, and a second copy
+        /// here would win on re-encode. Encoding a payload that declares one is
+        /// an `EncodingError`.
+        case unknown(String, JSONValue)
+
+        private enum CodingKeys: String, CodingKey {
+            case operation
+        }
+
+        /// Decodes by the `operation` discriminator, routing
+        /// unrecognized values to `.unknown`.
+        ///
+        /// - Parameter decoder: The decoder positioned at the object.
+        /// - Throws: `DecodingError` when the discriminator is missing or a
+        ///   known variant's payload is malformed.
+        public init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            switch try container.decode(String.self, forKey: .operation) {
+            case "add":
+                self = .add(try DiffPathChange(from: decoder))
+            case "delete":
+                self = .delete(try DiffPathChange(from: decoder))
+            case "modify":
+                self = .modify(try DiffPathChange(from: decoder))
+            case "move":
+                self = .move(try DiffPathPairChange(from: decoder))
+            case "copy":
+                self = .copy(try DiffPathPairChange(from: decoder))
+            case let other:
+                self = .unknown(other, try JSONValue(from: decoder, excludingMembers: ["operation", "fileType", "mimeType", "_meta"]))
+            }
+        }
+
+        /// Encodes the `operation` discriminator, flattening the
+        /// payload's fields into the same object.
+        ///
+        /// - Parameter encoder: The encoder to write the object into.
+        /// - Throws: Rethrows any error from the underlying encoder.
+        public func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            switch self {
+            case .add(let payload):
+                try container.encode("add", forKey: .operation)
+                try payload.encode(to: encoder)
+            case .delete(let payload):
+                try container.encode("delete", forKey: .operation)
+                try payload.encode(to: encoder)
+            case .modify(let payload):
+                try container.encode("modify", forKey: .operation)
+                try payload.encode(to: encoder)
+            case .move(let payload):
+                try container.encode("move", forKey: .operation)
+                try payload.encode(to: encoder)
+            case .copy(let payload):
+                try container.encode("copy", forKey: .operation)
+                try payload.encode(to: encoder)
+            case .unknown(let discriminator, let payload):
+                try container.encode(discriminator, forKey: .operation)
+                try payload.encodeMembers(to: encoder, reserving: ["operation", "fileType", "mimeType", "_meta"])
+            }
+        }
+    }
+
+    /// File content kind.
+    ///
+    /// Omitted or `null` means the content kind is unknown.
+    public var fileType: DiffFileType?
+
+    /// MIME type of the file contents.
+    ///
+    /// Omitted or `null` means the MIME type is unknown.
+    public var mimeType: MediaType?
+
+    /// The variant payload, whose own members sit flattened beside this object's.
+    public var operation: Payload
+
+    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
+    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+    /// these keys.
+    ///
+    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+    public var meta: JSONValue?
+
+    /// Creates a `DiffChange`.
+    public init(
+        fileType: DiffFileType? = nil,
+        mimeType: MediaType? = nil,
+        operation: Payload,
+        meta: JSONValue? = nil
+    ) {
+        self.fileType = fileType
+        self.mimeType = mimeType
+        self.operation = operation
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case fileType
+        case mimeType
+        case meta = "_meta"
+    }
+
+    /// Decodes a `DiffChange`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing or mistyped.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.fileType = container.forgivingDecodeIfPresent(DiffFileType.self, forKey: .fileType)
+        self.mimeType = container.forgivingDecodeIfPresent(MediaType.self, forKey: .mimeType)
+        self.operation = try Payload(from: decoder)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `DiffChange`, omitting nil optional fields.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(fileType, forKey: .fileType)
+        try container.encodeIfPresent(mimeType, forKey: .mimeType)
+        try operation.encode(to: encoder)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
 /// Renderable patch text and its format.
 public struct DiffPatch: Codable, Hashable, Sendable {
     /// Patch format. The only ACP-defined value is `git_patch`.
@@ -4463,6 +4618,146 @@ public struct SessionConfigBoolean: Codable, Hashable, Sendable {
     }
 }
 
+/// A session configuration option selector and its current state.
+public struct SessionConfigOption: Codable, Hashable, Sendable {
+    /// The variant payload, selected by the `type` discriminator.
+    public enum Payload: Codable, Hashable, Sendable {
+        /// Single-value selector (dropdown).
+        case select(SessionConfigSelect)
+
+        /// Boolean on/off toggle.
+        case boolean(SessionConfigBoolean)
+
+        /// An unrecognized `type` value, captured alongside the members
+        /// of the object that no other property owns, so a variant this revision
+        /// does not list decodes without error and re-encodes unchanged.
+        ///
+        /// The payload holds neither `type` nor any member declared
+        /// beside this union: those have their own storage, and a second copy
+        /// here would win on re-encode. Encoding a payload that declares one is
+        /// an `EncodingError`.
+        case unknown(String, JSONValue)
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+        }
+
+        /// Decodes by the `type` discriminator, routing
+        /// unrecognized values to `.unknown`.
+        ///
+        /// - Parameter decoder: The decoder positioned at the object.
+        /// - Throws: `DecodingError` when the discriminator is missing or a
+        ///   known variant's payload is malformed.
+        public init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            switch try container.decode(String.self, forKey: .type) {
+            case "select":
+                self = .select(try SessionConfigSelect(from: decoder))
+            case "boolean":
+                self = .boolean(try SessionConfigBoolean(from: decoder))
+            case let other:
+                self = .unknown(other, try JSONValue(from: decoder, excludingMembers: ["type", "configId", "name", "category", "description", "_meta"]))
+            }
+        }
+
+        /// Encodes the `type` discriminator, flattening the
+        /// payload's fields into the same object.
+        ///
+        /// - Parameter encoder: The encoder to write the object into.
+        /// - Throws: Rethrows any error from the underlying encoder.
+        public func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            switch self {
+            case .select(let payload):
+                try container.encode("select", forKey: .type)
+                try payload.encode(to: encoder)
+            case .boolean(let payload):
+                try container.encode("boolean", forKey: .type)
+                try payload.encode(to: encoder)
+            case .unknown(let discriminator, let payload):
+                try container.encode(discriminator, forKey: .type)
+                try payload.encodeMembers(to: encoder, reserving: ["type", "configId", "name", "category", "description", "_meta"])
+            }
+        }
+    }
+
+    /// Unique identifier for the configuration option.
+    public var configId: SessionConfigId
+
+    /// Human-readable label for the option.
+    public var name: String
+
+    /// Optional semantic category for this option (UX only).
+    public var category: SessionConfigOptionCategory?
+
+    /// Optional description for the Client to display to the user.
+    public var description: String?
+
+    /// The variant payload, whose own members sit flattened beside this object's.
+    public var type: Payload
+
+    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
+    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+    /// these keys.
+    ///
+    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+    public var meta: JSONValue?
+
+    /// Creates a `SessionConfigOption`.
+    public init(
+        configId: SessionConfigId,
+        name: String,
+        category: SessionConfigOptionCategory? = nil,
+        description: String? = nil,
+        type: Payload,
+        meta: JSONValue? = nil
+    ) {
+        self.configId = configId
+        self.name = name
+        self.category = category
+        self.description = description
+        self.type = type
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case configId
+        case name
+        case category
+        case description
+        case meta = "_meta"
+    }
+
+    /// Decodes a `SessionConfigOption`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing or mistyped.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.configId = try container.decode(SessionConfigId.self, forKey: .configId)
+        self.name = try container.decode(String.self, forKey: .name)
+        self.category = container.forgivingDecodeIfPresent(SessionConfigOptionCategory.self, forKey: .category)
+        self.description = container.forgivingDecodeIfPresent(String.self, forKey: .description)
+        self.type = try Payload(from: decoder)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `SessionConfigOption`, omitting nil optional fields.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(configId, forKey: .configId)
+        try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(category, forKey: .category)
+        try container.encodeIfPresent(description, forKey: .description)
+        try type.encode(to: encoder)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
 /// A single-value selector (dropdown) session configuration option payload.
 public struct SessionConfigSelect: Codable, Hashable, Sendable {
     /// The currently selected value.
@@ -4831,6 +5126,125 @@ public struct SessionInfoUpdate: Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(title, forKey: .title)
         try container.encodeIfPresent(updatedAt, forKey: .updatedAt)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
+/// Request parameters for setting a session configuration option.
+public struct SetSessionConfigOptionRequest: Codable, Hashable, Sendable {
+    /// The value payload, selected by the `type` discriminator.
+    public enum Value: Codable, Hashable, Sendable {
+        /// A [`SessionConfigValueId`] string value (`type: "id"`).
+        case id(SessionConfigValueId)
+        /// A boolean value (`type: "boolean"`).
+        case boolean(Bool)
+        /// Custom or future session configuration option value payload.
+        ///
+        /// Values beginning with `_` are reserved for implementation-specific
+        /// extensions. Unknown values that do not begin with `_` are reserved for
+        /// future ACP variants.
+        case other(String, JSONValue)
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+            case value
+        }
+
+        /// Decodes the value by its `type` discriminator,
+        /// falling back to the default variant when it is unrecognized.
+        ///
+        /// - Parameter decoder: The decoder positioned at the object.
+        /// - Throws: `DecodingError` when the payload is missing or mistyped.
+        public init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            switch try container.decode(String.self, forKey: .type) {
+            case "id":
+                self = .id(try container.decode(SessionConfigValueId.self, forKey: .value))
+            case "boolean":
+                self = .boolean(try container.decode(Bool.self, forKey: .value))
+            case let other:
+                self = .other(other, try container.decode(JSONValue.self, forKey: .value))
+            }
+        }
+
+        /// Encodes the value, flattening its payload beside the object's own
+        /// members; a default variant declaring no discriminator omits it.
+        ///
+        /// - Parameter encoder: The encoder to write the object into.
+        /// - Throws: Rethrows any error from the underlying encoder.
+        public func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            switch self {
+            case .id(let payload):
+                try container.encode("id", forKey: .type)
+                try container.encode(payload, forKey: .value)
+            case .boolean(let payload):
+                try container.encode("boolean", forKey: .type)
+                try container.encode(payload, forKey: .value)
+            case .other(let discriminator, let payload):
+                try container.encode(discriminator, forKey: .type)
+                try container.encode(payload, forKey: .value)
+            }
+        }
+    }
+
+    /// The ID of the configuration option to set.
+    public var configId: SessionConfigId
+
+    /// The ID of the session to set the configuration option for.
+    public var sessionId: SessionId
+
+    /// The value carried beside the object's own members, selected by its `type` discriminator.
+    public var value: Value
+
+    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
+    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
+    /// these keys.
+    ///
+    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+    public var meta: JSONValue?
+
+    /// Creates a `SetSessionConfigOptionRequest`.
+    public init(
+        configId: SessionConfigId,
+        sessionId: SessionId,
+        value: Value,
+        meta: JSONValue? = nil
+    ) {
+        self.configId = configId
+        self.sessionId = sessionId
+        self.value = value
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case configId
+        case sessionId
+        case meta = "_meta"
+    }
+
+    /// Decodes a `SetSessionConfigOptionRequest`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing or mistyped.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.configId = try container.decode(SessionConfigId.self, forKey: .configId)
+        self.sessionId = try container.decode(SessionId.self, forKey: .sessionId)
+        self.value = try Value(from: decoder)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `SetSessionConfigOptionRequest`, omitting nil optional fields.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(configId, forKey: .configId)
+        try container.encode(sessionId, forKey: .sessionId)
+        try value.encode(to: encoder)
         try container.encodeIfPresent(meta, forKey: .meta)
     }
 }

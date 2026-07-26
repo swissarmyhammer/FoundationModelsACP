@@ -166,13 +166,91 @@ import FoundationModelsACP
         #expect(Self.caseNames(in: declaration) == ["text", "image", "audio", "resourceLink", "resource", "unknown"])
     }
 
-    @Test func unknownVariantsCarryingPayloadStayDeferred() throws {
-        let unresolved = try #require(try Self.generateFromVendoredArtifacts()["Unresolved.generated.swift"])
-        // Four v2 catch-alls require members beyond the unrecognized tag, which
-        // a synthesized `unknown(String)` would drop. Raw JSON keeps them.
+    @Test func unknownVariantsCarryingPayloadAreModeledWithoutTruncation() throws {
+        let generated = try Self.generateFromVendoredArtifacts()
+        let unresolved = try #require(generated["Unresolved.generated.swift"])
+        // Four v2 catch-alls require members beyond the unrecognized tag. A
+        // fallback holding the tag alone would drop them, which is why these
+        // four deferred to raw JSON wholesale until the fallbacks could carry a
+        // payload. None of them may go back to a placeholder.
         for name in ["AuthMethod", "PlanUpdateContent", "ReplayFrom", "SetSessionConfigOptionRequest"] {
-            #expect(unresolved.contains("public typealias \(name) = JSONValue"), "\(name) must not truncate its catch-all")
+            #expect(!unresolved.contains("public typealias \(name) = JSONValue"), "\(name) is untyped again")
         }
+        // Three are tagged unions whose fallback keeps the raw object beside
+        // the tag it could not name.
+        let unions = try #require(generated["Unions.generated.swift"])
+        for name in ["AuthMethod", "PlanUpdateContent", "ReplayFrom"] {
+            let declaration = try #require(Self.declaration(named: name, in: unions), "\(name) is not emitted as a union")
+            #expect(declaration.contains("case unknown(String, JSONValue)"), "\(name) truncates its catch-all")
+        }
+        // The fourth is the inverse shape: a routed params object whose value
+        // union closes with a catch-all that leaves the tag unpinned, so the
+        // default case captures the tag beside the raw value.
+        let models = try #require(generated["Models.generated.swift"])
+        #expect(models.contains("public struct SetSessionConfigOptionRequest: Codable, Hashable, Sendable"))
+        #expect(models.contains("case other(String, JSONValue)"))
+    }
+
+    @Test func everyTaggedUnionCarriesAPayloadBearingFallback() throws {
+        let generated = try Self.generateFromVendoredArtifacts()
+        // Two inventories, pinned by name rather than by count. The runtime
+        // suite `TaggedUnionRoundTripTests` mirrors this list as a
+        // definition-name-to-Swift-type table it cannot derive, and probes
+        // every tag of every entry; a union added upstream has to be added
+        // there too, and failing here is what says so.
+        let unions = try #require(generated["Unions.generated.swift"])
+        #expect(
+            Self.declaredTypeNames(in: unions).filter {
+                Self.declaration(named: $0, in: unions)?.contains("case unknown(String, JSONValue)") == true
+            } == [
+                "AuthMethod", "AvailableCommandInput", "ContentBlock", "McpServer", "PlanUpdateContent",
+                "ReplayFrom", "RequestPermissionOutcome", "RequestPermissionSubject", "SessionUpdate",
+                "StateUpdate", "ToolCallContent",
+            ]
+        )
+        // The remaining unions are scalar enums, whose fallback has no payload
+        // beside the value because the value is the whole of the variant.
+        #expect(
+            Self.declaredTypeNames(in: unions).filter {
+                Self.declaration(named: $0, in: unions)?.contains("case unknown(String)\n") == true
+            } == [
+                "DiffFileType", "DiffPatchFormat", "IconTheme", "PermissionOptionKind", "PlanEntryPriority",
+                "PlanEntryStatus", "Role", "SessionConfigOptionCategory", "StopReason", "ToolCallStatus",
+                "ToolKind",
+            ]
+        )
+        #expect(unions.contains("case unknown(Int)"))
+        // And the two base objects whose union is nested inside them.
+        let models = try #require(generated["Models.generated.swift"])
+        #expect(Self.declarationsNesting("    public enum Payload: Codable", in: models) == ["DiffChange", "SessionConfigOption"])
+        #expect(Self.declarationsNesting("    public enum Value: Codable", in: models) == ["SetSessionConfigOptionRequest"])
+    }
+
+    @Test func onlyTheDeliberatelyFreeFormDefinitionsStayUntyped() throws {
+        let unresolved = try #require(try Self.generateFromVendoredArtifacts()["Unresolved.generated.swift"])
+        // What is left on the placeholder seam, and why each one is there.
+        // Nothing here is a union the generator declined to model: every
+        // `anyOf` in the vendored document now emits a typed declaration.
+        //
+        // - `ExtRequest`/`ExtResponse`/`ExtNotification` are the extension
+        //   escape hatch; the schema states no shape for them at all.
+        // - The other five are untagged unions — no branch pins a
+        //   discriminator, so there is nothing to key a Swift enum on.
+        //   `AgentResponse`/`ClientResponse` separate their two branches by
+        //   which member is present (`result` versus `error`), and the routing
+        //   table supersedes them anyway by naming each method's own result
+        //   type; `EmbeddedResourceResource` and `SessionConfigSelectOptions`
+        //   by payload shape alone; and `RequestID` is JSON-RPC's id, a
+        //   string, an integer, or null.
+        //
+        // Pinning the whole list, not a count: a definition sliding back onto
+        // the seam has to be spelled out here to pass.
+        #expect(
+            Self.declaredTypeNames(in: unresolved) == [
+                "AgentResponse", "ClientResponse", "EmbeddedResourceResource", "ExtNotification",
+                "ExtRequest", "ExtResponse", "RequestID", "SessionConfigSelectOptions",
+            ]
+        )
     }
 
     @Test func generatedDocCNamesNoProtocolVersion() throws {
@@ -332,9 +410,9 @@ import FoundationModelsACP
             emitted.mapValues(\.count) == [
                 "Identifiers.generated.swift": 12,
                 "MethodTable.generated.swift": 2,
-                "Models.generated.swift": 98,
-                "Unions.generated.swift": 19,
-                "Unresolved.generated.swift": 15,
+                "Models.generated.swift": 101,
+                "Unions.generated.swift": 23,
+                "Unresolved.generated.swift": 8,
             ]
         )
     }
@@ -512,6 +590,27 @@ import FoundationModelsACP
             guard type.contains(typeName) else { continue }
             let property = line[line.index(line.startIndex, offsetBy: marker.count)..<separator.lowerBound]
             matches.append("\(owner).\(property): \(type)")
+        }
+        return matches
+    }
+
+    /// The top-level declarations of a generated file that open a nested
+    /// declaration, in emission order.
+    ///
+    /// - Parameters:
+    ///   - linePrefix: The opening line of the nested declaration, indented
+    ///     one level.
+    ///   - source: The generated file's source text.
+    /// - Returns: The enclosing declarations' names.
+    private static func declarationsNesting(_ linePrefix: String, in source: String) -> [String] {
+        var owner = ""
+        var matches: [String] = []
+        for line in source.split(separator: "\n", omittingEmptySubsequences: false) {
+            if let declared = declaredTypeName(on: line) {
+                owner = declared
+            } else if line.hasPrefix(linePrefix) {
+                matches.append(owner)
+            }
         }
         return matches
     }

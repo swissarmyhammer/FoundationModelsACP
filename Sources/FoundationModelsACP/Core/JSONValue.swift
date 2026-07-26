@@ -61,3 +61,106 @@ public enum JSONValue: Codable, Hashable, Sendable {
         }
     }
 }
+
+// MARK: - Flattened object members
+
+extension JSONValue {
+    /// Decodes the JSON object at a decoder, dropping named members.
+    ///
+    /// This is how a generated union captures the payload of a variant it
+    /// cannot name. Two kinds of member are dropped, and for the same reason —
+    /// something else already owns them, so keeping a second copy here lets the
+    /// two disagree. The discriminator is held as the case's own associated
+    /// value; and where the union is nested in a struct, that struct's own
+    /// properties are decoded and re-encoded by the struct.
+    ///
+    /// - Parameters:
+    ///   - decoder: The decoder positioned at the object.
+    ///   - members: The wire names to drop.
+    /// - Throws: `DecodingError` when the value is not a JSON object, since a
+    ///   discriminated variant is always one.
+    public init(from decoder: any Decoder, excludingMembers members: [String]) throws {
+        guard case .object(var remaining) = try JSONValue(from: decoder) else {
+            throw DecodingError.typeMismatch(
+                [String: JSONValue].self,
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "an unrecognized variant must be a JSON object"
+                )
+            )
+        }
+        for member in members {
+            remaining.removeValue(forKey: member)
+        }
+        self = .object(remaining)
+    }
+
+    /// Encodes an object's members as members of the encoder's own object,
+    /// rather than as a nested value.
+    ///
+    /// The inverse of `init(from:excludingMembers:)`: it writes a captured
+    /// payload back beside the members its owners encode for themselves, which
+    /// is what makes an unrecognized variant round-trip.
+    ///
+    /// `reserved` names those owners' members, and a payload declaring one is
+    /// rejected rather than written. Two keyed containers over the same encoder
+    /// share one object and the last write wins, so a payload carrying the
+    /// discriminator would silently overwrite the tag its own case holds, and
+    /// one carrying an enclosing struct's property would overwrite that
+    /// property — in both cases re-encoding to a document that says something
+    /// the value did not. Decoding never produces such a payload, since
+    /// `init(from:excludingMembers:)` drops exactly these names; a value built
+    /// in Swift can, and this is the boundary that catches it.
+    ///
+    /// - Parameters:
+    ///   - encoder: The encoder positioned at the enclosing object.
+    ///   - reserved: Member names the enclosing object encodes itself.
+    /// - Throws: `EncodingError.invalidValue` when the value is not an object,
+    ///   which has no members to flatten, or when it declares a reserved
+    ///   member; otherwise rethrows from the encoder.
+    public func encodeMembers(to encoder: any Encoder, reserving reserved: [String]) throws {
+        guard case .object(let members) = self else {
+            throw EncodingError.invalidValue(
+                self,
+                EncodingError.Context(
+                    codingPath: encoder.codingPath,
+                    debugDescription: "only a JSON object has members to flatten"
+                )
+            )
+        }
+        let claimed = reserved.filter { members[$0] != nil }.sorted()
+        guard claimed.isEmpty else {
+            throw EncodingError.invalidValue(
+                self,
+                EncodingError.Context(
+                    codingPath: encoder.codingPath,
+                    debugDescription:
+                        "flattened payload declares \(claimed.joined(separator: ", ")), which the enclosing object owns"
+                )
+            )
+        }
+        var container = encoder.container(keyedBy: MemberKey.self)
+        for (name, value) in members {
+            try container.encode(value, forKey: MemberKey(name))
+        }
+    }
+
+    /// A coding key for an arbitrary JSON object member name.
+    private struct MemberKey: CodingKey {
+        let stringValue: String
+
+        var intValue: Int? { nil }
+
+        init(_ stringValue: String) {
+            self.stringValue = stringValue
+        }
+
+        init?(stringValue: String) {
+            self.init(stringValue)
+        }
+
+        init?(intValue: Int) {
+            nil
+        }
+    }
+}

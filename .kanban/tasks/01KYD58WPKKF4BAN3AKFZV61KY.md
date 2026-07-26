@@ -15,6 +15,15 @@ comments:
     - Added the M1-seam note for `session/set_config_option` params, matching `plan.md` -> M2.
     - Acceptance/test bullets follow: "four entry points" -> "two", capability gate for `session/delete`, and a new check that no unstable-only method lands on a role protocol.
   timestamp: 2026-07-26T15:23:04.777688+00:00
+- actor: claude-code
+  id: 01kyfxsvfc4zrhygnw82h6j9qf
+  text: |-
+    The M1 seam is closed — this card's "blocked on the M1 seam" note is resolved and has been removed from `plan.md`.
+
+    `session/set_config_option` now routes a real params type. `SetSessionConfigOptionRequest` generates as a struct with `sessionId: SessionId`, `configId: SessionConfigId`, `value: SetSessionConfigOptionRequest.Value`, and `_meta`, so M2 will emit `setSessionConfigOption(_ params: SetSessionConfigOptionRequest)` rather than `(_ params: JSONValue)`. `MethodTable.generated.swift` already carries `paramsTypeName: "SetSessionConfigOptionRequest"` and it now resolves to that struct.
+
+    Nothing else in the stable routing table resolves to a placeholder: `Unresolved.generated.swift` is down to eight typealiases, and `VendoredSchemaTests.stableMethodTableRoutesExactlyTheStableManifest` pins every params and result type name.
+  timestamp: 2026-07-26T19:18:04.012194+00:00
 depends_on:
 - 01KYD58WN4KFHR3TP9HQZHT036
 position_column: todo
