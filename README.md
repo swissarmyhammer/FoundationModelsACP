@@ -37,8 +37,10 @@ ACP is a JSON-RPC protocol where a *client* (an editor or host) drives an
   carries an agent-generated `messageId`.
 - **Upserts, not appends**: `tool_call_update` both creates and patches, keyed
   by `toolCallId`.
-- **No client filesystem and no client terminals.** Agents reach the client's
-  world through MCP instead.
+- **No client filesystem and no client-run terminals.** Agents reach the
+  client's world through MCP instead. Terminals survive only as a display-only
+  stream the *agent* owns — `terminal_update` and `terminal_output_chunk`
+  session updates, rendered via a `terminal` tool-call content reference.
 - **Replay is first-class**: `session/resume` handles both plain reconnect and
   full history replay.
 

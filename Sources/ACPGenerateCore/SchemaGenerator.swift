@@ -35,8 +35,8 @@ public struct SchemaGenerator: Sendable {
     /// Creates a generator with the given configuration.
     ///
     /// - Parameter config: Generator configuration; defaults to the vendored
-    ///   ACP v1 schema's configuration.
-    public init(config: GeneratorConfig = .acpV1) {
+    ///   ACP v2 schema's configuration.
+    public init(config: GeneratorConfig = .acpV2) {
         self.config = config
     }
 
@@ -193,6 +193,10 @@ public struct SchemaGenerator: Sendable {
     /// The schema keyword for intersections (single-ref wrappers here).
     private static let allOfKey = "allOf"
 
+    /// The schema keyword negating a subschema, used by a union's explicit
+    /// unknown-discriminator variant to exclude every known tag.
+    private static let notKey = "not"
+
     /// The schema keyword for closed value sets.
     private static let enumKey = "enum"
 
@@ -347,21 +351,100 @@ public struct SchemaGenerator: Sendable {
     ///   - name: The definition's schema name.
     ///   - members: The definition's object members.
     ///   - variants: The `anyOf` entries.
-    /// - Returns: `.objectValueUnion` for an object that also carries a value
-    ///   union, `.discriminatedUnion` for a discriminated `$ref`-payload union
-    ///   with a default variant, or `.deferredUnion` for every other `anyOf`.
+    /// - Returns: `.stringEnum` for a set of string constants, `.taggedUnion`
+    ///   for a discriminated union with an explicit unknown variant,
+    ///   `.objectValueUnion` for an object that also carries a value union,
+    ///   `.discriminatedUnion` for a discriminated `$ref`-payload union with a
+    ///   default variant, or `.deferredUnion` for every other `anyOf`.
+    ///
+    /// A union carrying an explicit unknown-discriminator variant is a tagged
+    /// union: that variant replaces the discriminator-less default a
+    /// `.discriminatedUnion` requires, and it names no payload to flatten, so
+    /// the emitter's synthesized `unknown(String)` is its representation. When
+    /// the catch-all declares members *beyond* the discriminator, that
+    /// representation would silently drop them, so the whole definition defers
+    /// to raw JSON — which is lossless — instead.
+    ///
+    /// That check runs ahead of the object test, so it also catches the
+    /// value-union family, where the loss runs the other way: a catch-all that
+    /// re-declares the discriminator unpinned would keep its `value` and lose
+    /// the tag. Both defer; only the direction of the loss differs.
+    ///
+    /// An object that also carries a union is the `.objectValueUnion` shape
+    /// only when its variants differ by an inline `value` member. When they
+    /// flatten `$ref` payloads instead, the definition is a base object plus a
+    /// tagged union — a shape with no emission model yet, so it defers rather
+    /// than being forced through the value-union stage.
     private func classifyAnyOf(
         name: String,
         members: [String: JSONValue],
         variants: [JSONValue]
     ) -> DefinitionKind {
+        if variants.allSatisfy({ $0[Self.typeKey]?.stringValue == "string" }),
+            variants.contains(where: { $0[Self.constKey] != nil })
+        {
+            return .stringEnum
+        }
+        let pinned = pinnedDiscriminators(of: variants)
+        let fallbacks = variants.filter { $0[Self.notKey] != nil }
+        guard fallbacks.allSatisfy({ isUnknownFallbackVariant($0, pinned: pinned) }) else {
+            return .deferredUnion(keyword: Self.anyOfKey)
+        }
+        let modeled = variants.filter { $0[Self.notKey] == nil }
         if members[Self.typeKey]?.stringValue == "object", members[Self.propertiesKey] != nil {
+            guard !modeled.contains(where: { $0[Self.allOfKey] != nil }) else {
+                return .deferredUnion(keyword: Self.anyOfKey)
+            }
             return .objectValueUnion
+        }
+        if modeled.count < variants.count, !modeled.isEmpty, modeled.allSatisfy(hasConstDiscriminator) {
+            return .taggedUnion
         }
         if variants.contains(where: hasConstDiscriminator) {
             return .discriminatedUnion
         }
         return .deferredUnion(keyword: Self.anyOfKey)
+    }
+
+    /// The member names a union's variants pin with a `const` — its
+    /// discriminators, usually exactly one.
+    ///
+    /// - Parameter variants: The union's variant fragments.
+    /// - Returns: Every pinned member name.
+    private func pinnedDiscriminators(of variants: [JSONValue]) -> Set<String> {
+        Set(
+            variants.flatMap { variant in
+                (variant[Self.propertiesKey]?.objectValue ?? [:])
+                    .filter { $0.value[Self.constKey] != nil }
+                    .keys
+            }
+        )
+    }
+
+    /// Reports whether a union variant is the schema's explicit
+    /// unknown-discriminator catch-all *and* holds nothing the emitted fallback
+    /// would drop.
+    ///
+    /// ACP v2 writes out, as a final variant, the fallback earlier schema
+    /// revisions left implicit: an object that `not`-excludes every known
+    /// discriminator value and accepts any additional properties. Where it
+    /// declares only the discriminator it describes no new payload — the
+    /// document saying "a tag this revision does not list" — and each union
+    /// family maps it onto the fallback that family already emits.
+    ///
+    /// Some catch-alls do carry payload: v2's `AuthMethod` requires `methodId`
+    /// and `name` beside the unrecognized tag, and instructs clients to
+    /// "preserve the raw payload when storing, replaying, proxying, or
+    /// forwarding". Those are not this shape.
+    ///
+    /// - Parameters:
+    ///   - variant: The union variant fragment.
+    ///   - pinned: The union's discriminator member names.
+    /// - Returns: `true` when the variant negates the known discriminators and
+    ///   declares nothing besides them.
+    private func isUnknownFallbackVariant(_ variant: JSONValue, pinned: Set<String>) -> Bool {
+        guard variant[Self.notKey] != nil else { return false }
+        return (variant[Self.propertiesKey]?.objectValue ?? [:]).keys.allSatisfy(pinned.contains)
     }
 
     /// Reports whether an `anyOf` variant pins a `const` discriminator member.
@@ -386,7 +469,12 @@ public struct SchemaGenerator: Sendable {
     /// - Throws: `GeneratorError.unsupportedShape` when a variant lacks a
     ///   const value or the case names collide.
     private func stringEnumModel(name: String, fragment: JSONValue) throws -> StringEnumModel {
-        let variants = unionVariants(of: fragment)
+        // A variant that pins no value is the enum's open tail — the values a
+        // newer peer may send — which the emitter renders as `unknown(String)`.
+        let variants = unionVariants(of: fragment).filter { $0[Self.constKey] != nil }
+        guard !variants.isEmpty else {
+            throw GeneratorError.unsupportedShape(context: name, detail: "no variant pins a \(Self.constKey) value")
+        }
         let cases = try variants.enumerated().map { index, variant in
             let context = "\(name) variant \(index)"
             guard let wireValue = variant[Self.constKey]?.stringValue else {
@@ -591,9 +679,21 @@ public struct SchemaGenerator: Sendable {
     ///
     /// The base object properties are modeled as an ordinary struct. Each
     /// top-level `anyOf` variant contributes a `value`-payload case: the
-    /// `const`-pinned variants are tagged, and the single discriminator-less
-    /// variant is the default, selected when the discriminator is absent or
-    /// unrecognized on the wire.
+    /// `const`-pinned variants are tagged, and the single variant that does not
+    /// pin the discriminator is the default, selected when the discriminator is
+    /// absent or unrecognized on the wire.
+    ///
+    /// No vendored v2 definition reaches this stage. v2's one
+    /// object-plus-value union, `SetSessionConfigOptionRequest`, closes with a
+    /// catch-all that re-declares the discriminator *unpinned* beside `value`,
+    /// and `classifyAnyOf` defers the whole definition to raw JSON because the
+    /// default case emitted here is keyed on the value member alone and could
+    /// not re-encode the tag it matched. The stage is kept for the shape; the
+    /// guard below then fails loudly on a discriminator-declaring default
+    /// reaching it by some other route, rather than emitting a union that
+    /// silently drops the tag. That guard is correct only while the default
+    /// carries one associated value — teaching it to carry the discriminator
+    /// too is what retires both the guard and the deferral.
     ///
     /// - Parameters:
     ///   - name: The definition's schema name.
@@ -604,20 +704,33 @@ public struct SchemaGenerator: Sendable {
     private func objectValueUnionModel(name: String, fragment: JSONValue) throws -> ObjectValueUnionModel {
         let base = try structModel(name: name, fragment: fragment)
         let variants = fragment[Self.anyOfKey]?.arrayValue ?? []
-        var discriminator: String?
+        let discriminator = try valueUnionDiscriminator(of: variants, context: name)
         var valueWireName: String?
         var defaultCount = 0
         let cases = try variants.enumerated().map { index, variant -> ValueUnionCaseModel in
             let context = "\(name) value variant \(index)"
             let properties = variant[Self.propertiesKey]?.objectValue ?? [:]
-            let (valueKey, valueFragment) = try valueMember(of: properties, context: context)
+            let (valueKey, valueFragment) = try valueMember(
+                of: properties,
+                discriminator: discriminator,
+                context: context
+            )
             if let established = valueWireName, established != valueKey {
                 throw GeneratorError.unsupportedShape(context: context, detail: "variants disagree on the value member: \(established) vs \(valueKey)")
             }
             valueWireName = valueKey
             let valueType = try resolveType(fragment: valueFragment, override: nil, context: "\(context).\(valueKey)").base
             let documentation = variant[Self.descriptionKey]?.stringValue
-            guard let (key, tag) = try valueDiscriminator(in: properties, valueKey: valueKey, context: context) else {
+            guard let tag = properties[discriminator]?[Self.constKey]?.stringValue else {
+                // The emitted default case writes only the value member, so a
+                // default that declares the discriminator would re-encode
+                // without it — invalid against its own variant.
+                guard properties[discriminator] == nil else {
+                    throw GeneratorError.unsupportedShape(
+                        context: context,
+                        detail: "default variant declares the \(discriminator) discriminator, which the emitted case cannot re-encode"
+                    )
+                }
                 defaultCount += 1
                 return ValueUnionCaseModel(
                     tag: nil,
@@ -626,10 +739,6 @@ public struct SchemaGenerator: Sendable {
                     documentation: documentation
                 )
             }
-            if let established = discriminator, established != key {
-                throw GeneratorError.unsupportedShape(context: context, detail: "variants disagree on the discriminator: \(established) vs \(key)")
-            }
-            discriminator = key
             return ValueUnionCaseModel(
                 tag: tag,
                 swiftName: try swiftCaseName(fromWire: tag, context: context),
@@ -637,8 +746,8 @@ public struct SchemaGenerator: Sendable {
                 documentation: documentation
             )
         }
-        guard let discriminator, let valueWireName else {
-            throw GeneratorError.unsupportedShape(context: name, detail: "value union needs a \(Self.constKey) discriminator and a value member")
+        guard let valueWireName else {
+            throw GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail)
         }
         guard defaultCount == 1 else {
             throw GeneratorError.unsupportedShape(context: name, detail: "expected exactly one default value variant, found \(defaultCount)")
@@ -653,45 +762,51 @@ public struct SchemaGenerator: Sendable {
         )
     }
 
+    /// Resolves the one member name a value union's variants pin with `const`.
+    ///
+    /// Naming the discriminator once, from the union as a whole, is what lets a
+    /// variant that repeats it *unpinned* — the default, and ACP v2's explicit
+    /// unknown variant — still be told apart from the value member.
+    ///
+    /// - Parameters:
+    ///   - variants: The union's variant fragments.
+    ///   - context: The definition's error context.
+    /// - Returns: The discriminator's wire name.
+    /// - Throws: `GeneratorError.unsupportedShape` when no variant pins a
+    ///   discriminator, or the variants pin different members.
+    private func valueUnionDiscriminator(of variants: [JSONValue], context: String) throws -> String {
+        let pinned = pinnedDiscriminators(of: variants)
+        guard let discriminator = pinned.first, pinned.count == 1 else {
+            throw GeneratorError.unsupportedShape(
+                context: context,
+                detail: pinned.isEmpty
+                    ? "value union needs a \(Self.constKey) discriminator"
+                    : "variants disagree on the discriminator: \(pinned.sorted().joined(separator: " vs "))"
+            )
+        }
+        return discriminator
+    }
+
     /// Finds the single non-discriminator `value` payload member of a variant.
     ///
     /// - Parameters:
     ///   - properties: The variant's inline properties.
+    ///   - discriminator: The union's discriminator wire name, excluded from
+    ///     the search whether or not this variant pins it.
     ///   - context: The variant's error context.
     /// - Returns: The value member's wire name and fragment.
-    /// - Throws: `GeneratorError.unsupportedShape` unless exactly one member is
-    ///   not `const`-pinned.
-    private func valueMember(of properties: [String: JSONValue], context: String) throws -> (key: String, fragment: JSONValue) {
-        let payloadMembers = properties.filter { $0.value[Self.constKey] == nil }
+    /// - Throws: `GeneratorError.unsupportedShape` unless exactly one member
+    ///   remains once the discriminator is set aside.
+    private func valueMember(
+        of properties: [String: JSONValue],
+        discriminator: String,
+        context: String
+    ) throws -> (key: String, fragment: JSONValue) {
+        let payloadMembers = properties.filter { $0.key != discriminator }
         guard payloadMembers.count == 1, let member = payloadMembers.first else {
             throw GeneratorError.unsupportedShape(context: context, detail: "expected exactly one non-discriminator value member")
         }
         return (member.key, member.value)
-    }
-
-    /// Reads the `const` discriminator among a value variant's properties.
-    ///
-    /// - Parameters:
-    ///   - properties: The variant's inline properties.
-    ///   - valueKey: The value member's wire name, excluded from the search.
-    ///   - context: The variant's error context.
-    /// - Returns: The discriminator wire name and tag, or `nil` for the
-    ///   discriminator-less default variant.
-    /// - Throws: `GeneratorError.unsupportedShape` when more than one
-    ///   discriminator is present.
-    private func valueDiscriminator(
-        in properties: [String: JSONValue],
-        valueKey: String,
-        context: String
-    ) throws -> (key: String, tag: String)? {
-        let discriminators = properties.filter { $0.key != valueKey && $0.value[Self.constKey] != nil }
-        guard !discriminators.isEmpty else { return nil }
-        guard discriminators.count == 1, let (key, keyFragment) = discriminators.first,
-            let tag = keyFragment[Self.constKey]?.stringValue
-        else {
-            throw GeneratorError.unsupportedShape(context: context, detail: "expected at most one \(Self.constKey) discriminator")
-        }
-        return (key, tag)
     }
 
     /// Swift keywords that cannot appear as bare `case` names.
@@ -1366,10 +1481,7 @@ extension SchemaGenerator {
         ("protocolMethods", .protocolLevel),
     ]
 
-    /// The only manifest layout revision this generator understands.
-    private static let supportedManifestVersion = JSONValue.number(1)
-
-    /// The manifest member naming its layout revision.
+    /// The manifest member naming the protocol revision it routes.
     private static let versionKey = "version"
 
     /// The schema annotation naming a routed definition's serving side.
@@ -1418,12 +1530,19 @@ extension SchemaGenerator {
         group.sorted { $0.value < $1.value }
     }
 
-    /// A definition's `oneOf` variants, empty when absent.
+    /// A definition's modeled union variants, empty when absent.
+    ///
+    /// Reads whichever union keyword the definition uses, and drops the
+    /// explicit unknown-discriminator variant: the string-enum and tagged-union
+    /// emitters each synthesize an `unknown` case for it already, so modeling
+    /// it again would emit a duplicate.
     ///
     /// - Parameter fragment: The definition's schema fragment.
-    /// - Returns: The variant fragments in schema order.
+    /// - Returns: The modeled variant fragments in schema order.
     private func unionVariants(of fragment: JSONValue) -> [JSONValue] {
-        fragment[Self.oneOfKey]?.arrayValue ?? []
+        let variants = fragment[Self.oneOfKey]?.arrayValue ?? fragment[Self.anyOfKey]?.arrayValue ?? []
+        let pinned = pinnedDiscriminators(of: variants)
+        return variants.filter { !isUnknownFallbackVariant($0, pinned: pinned) }
     }
 
     /// Builds the method-routing table file.
@@ -1470,9 +1589,9 @@ extension SchemaGenerator {
 
     /// Parses and validates a routing manifest document.
     ///
-    /// The manifest must be a version-1 object carrying exactly the three
-    /// known routing groups; an unknown group or version fails loudly rather
-    /// than silently dropping routes.
+    /// The manifest must declare the configured version and carry exactly the
+    /// three known routing groups; an unknown group or version fails loudly
+    /// rather than silently dropping routes.
     ///
     /// - Parameters:
     ///   - data: The raw manifest bytes.
@@ -1484,8 +1603,8 @@ extension SchemaGenerator {
         guard let members = manifest.objectValue else {
             throw GeneratorError.invalidSchema("\(context) is not a JSON object")
         }
-        guard members[Self.versionKey] == Self.supportedManifestVersion else {
-            throw GeneratorError.invalidSchema("\(context) does not declare supported version 1")
+        guard members[Self.versionKey] == .number(Double(config.manifestVersion)) else {
+            throw GeneratorError.invalidSchema("\(context) does not declare expected version \(config.manifestVersion)")
         }
         let knownKeys = Set(Self.manifestGroups.map(\.key) + [Self.versionKey])
         for key in members.keys.sorted() where !knownKeys.contains(key) {
@@ -1802,7 +1921,11 @@ extension Emitter {
     fileprivate static func methodTableDeclaration(_ methods: [MethodModel]) -> String {
         tableDeclaration(
             header: [
-                "/// The method-routing table for the stable ACP v1 surface.",
+                // Version-neutral on purpose: this line ships as public DocC on
+                // the generated table, and a hardcoded version goes stale the
+                // moment a new schema is vendored. `Schema/README.md` names the
+                // vendored revision.
+                "/// The method-routing table for the stable ACP surface.",
                 "///",
                 "/// Derived from the vendored `meta.json` routing manifest and the schema's",
                 "/// `x-side`/`x-method` annotations — never hand-wired.",

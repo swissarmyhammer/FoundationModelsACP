@@ -3,10 +3,10 @@ import Testing
 
 @testable import ACPGenerateCore
 
-/// Tests the schema→Swift generator core against a miniature schema fixture
-/// and the full vendored `Schema/acp-v1.json`, asserting the emitted source
-/// contains the expected struct/newtype declarations, CodingKeys, and
-/// AbsolutePath/LineNumber wire-invariant field mappings.
+/// Tests the schema→Swift generator core against a miniature schema fixture,
+/// asserting the emitted source contains the expected struct/newtype
+/// declarations, CodingKeys, and AbsolutePath/LineNumber wire-invariant field
+/// mappings. The vendored artifacts are covered by `VendoredSchemaTests`.
 @Suite struct GeneratorCoreTests {
     /// A miniature schema exercising every shape the generator core handles:
     /// an ID newtype, object structs with required/optional/forgiving fields,
@@ -111,13 +111,30 @@ import Testing
         }
         """.utf8)
 
+    /// The configuration the miniature schema is generated under.
+    ///
+    /// Stated here rather than borrowed from a vendored set, so these
+    /// assertions describe the generator's mechanisms and do not move when a
+    /// schema revision stops needing a particular override. The miniature
+    /// schema spells absolute paths and line numbers as bare `string`/`integer`
+    /// fields, which is exactly the case the override table exists for.
+    private static let miniatureConfig = GeneratorConfig(
+        wireInvariantFields: [
+            "NewSessionRequest.cwd": .absolutePath,
+            "NewSessionRequest.additionalDirectories": .absolutePath,
+            "ToolCallLocation.path": .absolutePath,
+            "ToolCallLocation.line": .lineNumber,
+        ],
+        handwrittenDefinitions: ["ProtocolVersion"]
+    )
+
     /// Generates from the miniature schema and returns the file contents by name.
     ///
     /// - Parameter named: The generated file name to look up.
     /// - Returns: The Swift source text of that file.
     /// - Throws: A test failure when generation fails or the file is missing.
     private func miniatureOutput(named name: String) throws -> String {
-        let files = try SchemaGenerator().generate(schemaJSON: Self.miniatureSchema)
+        let files = try SchemaGenerator(config: Self.miniatureConfig).generate(schemaJSON: Self.miniatureSchema)
         let file = files.first { $0.name == name }
         return try #require(file, "expected generated file \(name)").contents
     }
@@ -169,7 +186,7 @@ import Testing
     }
 
     @Test func handwrittenProtocolVersionIsNotEmitted() throws {
-        let files = try SchemaGenerator().generate(schemaJSON: Self.miniatureSchema)
+        let files = try SchemaGenerator(config: Self.miniatureConfig).generate(schemaJSON: Self.miniatureSchema)
         for file in files {
             #expect(
                 !file.contents.contains("struct ProtocolVersion"),

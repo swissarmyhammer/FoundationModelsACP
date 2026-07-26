@@ -1,11 +1,14 @@
 /// Configuration for the schema generator, reviewed alongside the output.
 ///
-/// The wire-invariant field table below is the spec §4 field→invariant-type
-/// mapping: schema fields that carry file paths emit as `AbsolutePath` and
-/// line-number fields emit as `LineNumber`, never bare `String`/`Int`, so a
+/// The wire-invariant field table below is the field→invariant-type mapping
+/// for invariants a schema states only in prose: such fields emit as
+/// `AbsolutePath` or `LineNumber` rather than bare `String`/`Int`, so a
 /// relative path or a 0-based line is a decode-time error. Invariant-mapped
 /// fields always decode strictly — the invariant wins over any
-/// `x-deserialize-default-on-error` annotation on the same field.
+/// `x-deserialize-default-on-error` annotation on the same field. A schema
+/// that gives the invariant its own definition (as ACP v2 does for
+/// `AbsolutePath`) needs no entries: the `$ref` carries the type, and the
+/// definition is listed in `handwrittenDefinitions` instead.
 public struct GeneratorConfig: Sendable {
     /// A hand-written invariant-carrying newtype a schema field can map to.
     public enum InvariantType: String, Sendable {
@@ -39,6 +42,14 @@ public struct GeneratorConfig: Sendable {
     /// entry cannot linger after a schema bump.
     public var deprecatedMethods: [String: String]
 
+    /// The `version` the vendored routing manifests must declare.
+    ///
+    /// Upstream sets this to the ACP protocol's major version, so it moves with
+    /// every protocol bump; which value to accept is therefore vendoring
+    /// configuration, not a constant. A manifest declaring anything else fails
+    /// generation rather than being parsed hopefully.
+    public var manifestVersion: Int
+
     /// Creates a configuration.
     ///
     /// - Parameters:
@@ -46,44 +57,35 @@ public struct GeneratorConfig: Sendable {
     ///   - typeRenames: Definition-name renames.
     ///   - handwrittenDefinitions: Definitions to skip emitting.
     ///   - deprecatedMethods: Wire method → deprecation message markers.
+    ///   - manifestVersion: The version the routing manifests must declare.
     public init(
         wireInvariantFields: [String: InvariantType] = [:],
         typeRenames: [String: String] = [:],
         handwrittenDefinitions: Set<String> = [],
-        deprecatedMethods: [String: String] = [:]
+        deprecatedMethods: [String: String] = [:],
+        manifestVersion: Int = 1
     ) {
         self.wireInvariantFields = wireInvariantFields
         self.typeRenames = typeRenames
         self.handwrittenDefinitions = handwrittenDefinitions
         self.deprecatedMethods = deprecatedMethods
+        self.manifestVersion = manifestVersion
     }
 
-    /// Configuration for the vendored `Schema/acp-v1.json` document.
-    public static let acpV1 = GeneratorConfig(
-        wireInvariantFields: [
-            // Working directories — "Must be an absolute path."
-            "CreateTerminalRequest.cwd": .absolutePath,
-            "ListSessionsRequest.cwd": .absolutePath,
-            "LoadSessionRequest.cwd": .absolutePath,
-            "NewSessionRequest.cwd": .absolutePath,
-            "ResumeSessionRequest.cwd": .absolutePath,
-            "SessionInfo.cwd": .absolutePath,
-            // Additional workspace roots — "Each path must be absolute."
-            "LoadSessionRequest.additionalDirectories": .absolutePath,
-            "NewSessionRequest.additionalDirectories": .absolutePath,
-            "ResumeSessionRequest.additionalDirectories": .absolutePath,
-            "SessionInfo.additionalDirectories": .absolutePath,
-            // File paths — "The absolute file path …" / "Absolute path to …"
-            "Diff.path": .absolutePath,
-            "ReadTextFileRequest.path": .absolutePath,
-            "ToolCallLocation.path": .absolutePath,
-            "WriteTextFileRequest.path": .absolutePath,
-            // "Absolute path to the MCP server executable."
-            "McpServerStdio.command": .absolutePath,
-            // 1-based line numbers.
-            "ReadTextFileRequest.line": .lineNumber,
-            "ToolCallLocation.line": .lineNumber,
-        ],
+    /// Configuration for the vendored `Schema/acp-v2.json` document.
+    ///
+    /// `wireInvariantFields` is empty by design. v1 needed a per-field table
+    /// because it spelled absolute paths as bare `"type": "string"`; v2 gives
+    /// them a first-class `AbsolutePath` definition, so every path field
+    /// reaches the invariant through its own `$ref` and the table would only
+    /// be a second, drift-prone copy of the schema. The override mechanism
+    /// stays for schema revisions that describe an invariant in prose alone.
+    ///
+    /// There is no `.lineNumber` mapping either: the vendored document
+    /// contains exactly one line-valued field, `ToolCallLocation.line`, and
+    /// neither the schema nor the v2 documentation states that it is 1-based.
+    /// An unstated invariant is not enforced at decode time.
+    public static let acpV2 = GeneratorConfig(
         typeRenames: [
             // `Error` would shadow `Swift.Error` inside the module.
             "Error": "ACPError",
@@ -91,13 +93,11 @@ public struct GeneratorConfig: Sendable {
             "RequestId": "RequestID",
         ],
         handwrittenDefinitions: [
+            // Hand-written in Core, rejecting relative paths at decode.
+            "AbsolutePath",
             // Hand-written in Core with the negotiated-version invariant.
-            "ProtocolVersion"
+            "ProtocolVersion",
         ],
-        deprecatedMethods: [
-            // v1.19 supersedes session modes with boolean/select session
-            // config options; neither schema nor manifest carries the marker.
-            "session/set_mode": "Deprecated upstream in favor of session/set_config_option."
-        ]
+        manifestVersion: 2
     )
 }

@@ -13,6 +13,26 @@ import Testing
         let files = try SchemaGenerator().generate(schemaJSON: Data(schema.utf8))
         #expect(!files.contains { $0.name == "MethodTable.generated.swift" })
     }
+
+    @Test func manifestVersionIsConfigured() throws {
+        // Upstream sets the manifest's `version` to the ACP protocol major
+        // version, so it moves with every protocol bump. Which value to accept
+        // is configuration, not a constant compiled into the generator.
+        let manifest = #"""
+            {
+              "version": 7,
+              "agentMethods": {"widget_frob": "widget/frob"},
+              "clientMethods": {},
+              "protocolMethods": {}
+            }
+            """#
+        let files = try SchemaGenerator(config: GeneratorConfig(manifestVersion: 7)).generate(
+            schemaJSON: Data(syntheticSchema.utf8),
+            metaJSON: Data(manifest.utf8)
+        )
+        let table = try #require(files.first { $0.name == "MethodTable.generated.swift" }).contents
+        #expect(table.contains(#"wireMethod: "widget/frob""#))
+    }
 }
 
 /// A minimal schema whose only routed method is `widget/frob` on the agent
@@ -115,9 +135,11 @@ private let syntheticManifest = #"""
     }
 
     @Test func unsupportedManifestVersionFails() {
+        // A manifest declaring a version this configuration does not expect is
+        // rejected rather than parsed hopefully.
         let manifest = #"""
             {
-              "version": 2,
+              "version": 99,
               "agentMethods": {"widget_frob": "widget/frob"},
               "clientMethods": {},
               "protocolMethods": {}

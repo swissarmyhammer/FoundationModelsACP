@@ -27,6 +27,12 @@ jobs:
     runs-on: [self-hosted, macOS]
     steps:
       - uses: actions/checkout@v4
+      # The content-hash stamp is checked in, so a plain run short-circuits and
+      # rewrites nothing — leaving a hand-edited generated file, or output stale
+      # against a generator change, undetected. Dropping the stamp forces a full
+      # regeneration, which is what the diff below is meant to compare against.
+      - name: Drop the content-hash stamp
+        run: rm -f Sources/FoundationModelsACP/Generated/.schema-hash
       - name: Regenerate codegen
         run: swift package --allow-writing-to-package-directory generate-acp
       - name: Fail on drift

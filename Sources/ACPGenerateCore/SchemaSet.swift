@@ -2,12 +2,12 @@
 /// generator configuration for one ACP protocol version.
 ///
 /// The generator's inputs are data, not constants: adding a hypothetical
-/// second set (spec §7.2, ACP v2) is a new `SchemaSet` value appended to
-/// `all`, requiring no generator code change. A non-primary set carries a
-/// non-nil `outputNamespace`, so its types nest inside a clearly labeled
-/// enum rather than colliding with the primary set.
+/// second set is a new `SchemaSet` value appended to `all`, requiring no
+/// generator code change. A non-primary set carries a non-nil
+/// `outputNamespace`, so its types nest inside a clearly labeled enum rather
+/// than colliding with the primary set.
 public struct SchemaSet: Sendable {
-    /// The human-readable protocol version label (e.g. `v1`).
+    /// The human-readable protocol version label (e.g. `v2`).
     public let versionLabel: String
 
     /// The enclosing namespace enum the emitted types nest inside, or `nil`
@@ -54,15 +54,19 @@ public struct SchemaSet: Sendable {
         self.config = config
     }
 
-    /// The vendored ACP v1 schema set — the primary set, emitted at the top
+    /// The vendored ACP v2 schema set — the primary set, emitted at the top
     /// level.
-    public static let acpV1 = SchemaSet(
-        versionLabel: "v1",
+    ///
+    /// v2 publishes an unstable routing manifest alongside the stable one, so
+    /// `unstableMetaPath` is populated and the emitted `Unstable` namespace is
+    /// live rather than dead configuration.
+    public static let acpV2 = SchemaSet(
+        versionLabel: "v2",
         outputNamespace: nil,
-        schemaPath: "Schema/acp-v1.json",
-        metaPath: "Schema/acp-v1.meta.json",
-        unstableMetaPath: "Schema/acp-v1.meta.unstable.json",
-        config: .acpV1
+        schemaPath: "Schema/acp-v2.json",
+        metaPath: "Schema/acp-v2.meta.json",
+        unstableMetaPath: "Schema/acp-v2.meta.unstable.json",
+        config: .acpV2
     )
 
     /// Every vendored schema set the generator emits, in output order.
@@ -70,5 +74,5 @@ public struct SchemaSet: Sendable {
     /// Vendoring a second protocol version is an append here plus its schema
     /// artifacts under `Schema/`; the generator and CLI iterate this list
     /// without change.
-    public static let all: [SchemaSet] = [.acpV1]
+    public static let all: [SchemaSet] = [.acpV2]
 }

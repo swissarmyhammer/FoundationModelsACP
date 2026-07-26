@@ -49,24 +49,28 @@ particular was sound and its v2 equivalent will look similar.
 
 | Kept | Why |
 |---|---|
-| `Sources/ACPGenerateCore/` | The schema→Swift generator: schema model, emitter, tagged/anyOf union stages, routing-table builder, hash stamp. Schema-vocabulary-independent. |
+| `Sources/ACPGenerateCore/` | The schema→Swift generator: schema model, emitter, tagged/anyOf union stages, routing-table builder, hash stamp. Mostly schema-vocabulary-independent — M0 had to teach it v2's `anyOf` union vocabulary, see below. |
 | `Sources/acp-generate/`, `Plugins/GenerateACP/` | The CLI and the `swift package generate-acp` command plugin. |
-| `Tests/ACPGenerateTests/` | 43 generator tests driven by inline synthetic schemas. |
+| `Tests/ACPGenerateTests/` | Generator tests driven by inline synthetic schemas, plus `VendoredSchemaTests` against the real artifacts. |
 | `Core/JSONValue.swift`, `AbsolutePath.swift`, `MethodInfo.swift`, `WireRawValueCodable.swift` | The hand-written support types the generator itself imports. |
 
 **Deleted, and must be rebuilt:** every generated model/union/enum; the `Agent`
 and `Client` role protocols; `Connection`, `RoleDispatch`, `RoleConnectionCore`,
 both side connections, `SessionUpdateRouter`, `RequestError`; all transports
-(`Stdio`, `InMemory`, `Subprocess`, `Replay`, `NDJSONCodec`); `LineNumber`,
-`ProtocolVersion`, `ForgivingDecoding`, `ACP`; the whole
-`FoundationModelsACPTests` target and the `acp-test-agent` fixture binary; the
-v1 schema artifacts; `docs/GUIDE.md`.
+(`Stdio`, `InMemory`, `Subprocess`, `Replay`, `NDJSONCodec`); `LineNumber` and
+`ACP`; the whole `FoundationModelsACPTests` target and the `acp-test-agent`
+fixture binary; the v1 schema artifacts; `docs/GUIDE.md`.
+
+`ProtocolVersion` and `ForgivingDecoding` came back in **M0**, because the
+regenerated v2 output references them and would not compile otherwise;
+`ProtocolVersion` now carries `.v2` rather than `.v1`.
 
 **Test coverage deliberately dropped, to be re-established against v2** — call
 this out in the milestone that restores it, because it is easy to lose quietly:
 
 - Vendored-schema emission assertions (models, unions, enums, routing table)
-  — **M0/M1**.
+  — **done in M0** (`Tests/ACPGenerateTests/VendoredSchemaTests.swift`), which
+  also pins the checked-in output against a fresh in-memory run.
 - `TaggedUnionRoundTripTests` and `UnknownFallbackRoundTripTests`: runtime
   decode/encode of generated unions and `unknown(String)` fallbacks — **M1**.
 - `ForgivingDecodingTests` — **M1**.
@@ -74,38 +78,119 @@ this out in the milestone that restores it, because it is easy to lose quietly:
   guard) — **M2**.
 - Every connection, transport, replay, and end-to-end test — **M3** onward.
 
-**Known consequence of the reset:** `Schema/` is empty, so
-`swift package generate-acp` and the CI codegen diff gate both fail until M0
-vendors `acp-v2.json`. `swift build` and `swift test` are green. Also,
-`SchemaSet.acpV1` and `GeneratorConfig.acpV1` still carry v1 names and
-v1-specific field mappings (`ReadTextFileRequest.path`,
-`CreateTerminalRequest.cwd`, `LoadSessionRequest.*`) for types v2 deletes; M0
-re-points them. The generator's `Unstable` namespace support also survives — if
-v2 publishes no unstable manifest, that code path is dead and M0 should say so.
+**Resolved by M0.** `Schema/` now holds `acp-v2.json` and both meta manifests,
+vendored from the tagged pre-release `schema-v2.0.0-alpha.2`;
+`SchemaSet.acpV2` / `GeneratorConfig.acpV2` point at them, generation is
+idempotent, and the CI codegen diff gate passes again. v2 **does** publish an
+unstable manifest, so the generator's `Unstable` namespace is live code, not
+dead: the manifest declares 26 agent, 7 client, and 1 protocol method, and the
+emitted namespace routes the 20 entries the stable table does not already carry
+(15 agent, 5 client — `mcp/message` is routed on both sides, so it is two
+entries under one wire name).
+
+The gate needed one fix to mean anything: because the content-hash stamp is
+checked in, a fresh checkout regenerated nothing and `git diff --exit-code`
+passed trivially. The job now deletes the stamp first, so a hand-edited
+generated file is overwritten and shows up as drift — verified.
+
+**M0 also found that the codegen pipeline was *not* fully
+schema-vocabulary-independent.** v2 rewrote the union vocabulary: every union is
+`anyOf` (v1 used `oneOf` for enums and tagged unions), and 14 of them close with
+an explicit unknown-discriminator variant that `not`-excludes every known tag —
+the fallback v1 left implicit and the generator already synthesizes as
+`unknown(String)`. Generation aborted on that construct. The generator now
+recognizes it, mapping it onto whatever fallback each union family already
+emits, and reads `anyOf` string enums with an open tail.
+
+**Where the schema's catch-all carries more than the tag, the whole definition
+defers to raw JSON rather than truncate it.** Four do, in two shapes that fail
+in opposite directions:
+
+- **Three tagged unions lose the payload and keep the tag.** `AuthMethod`
+  requires `methodId` and `name` beside the unrecognized tag,
+  `PlanUpdateContent` requires `planId`, `ReplayFrom` carries `_meta`. Their
+  variants flatten `$ref` payloads, so the emitter's synthesized
+  `unknown(String)` has nowhere to put those members and drops them.
+- **`SetSessionConfigOptionRequest` is the inverse: it loses the tag and keeps
+  the payload.** It is an object (`sessionId`, `configId`, `_meta`) that also
+  carries a value union on `type`, and its catch-all re-declares `type`
+  *unpinned* alongside the very `value` the union is built around. The emitted
+  value-union default case is keyed on the value member alone, so it preserves
+  `value` and cannot re-encode the discriminator it matched.
+
+Either loss would contradict *Conventions* below and the schema's own
+instruction to "preserve the raw payload when storing, replaying, proxying, or
+forwarding". `JSONValue` is lossless, so that is what all four emit until M1
+gives each fallback somewhere to keep what it currently drops.
+
+**Left on the placeholder seam, for M1.** The last two rows carry the API
+surface each deferral untypes, because a definition name alone does not convey
+that three ordinary stable fields and one whole params object are raw JSON
+today. Rows 1 and 2 untype six more properties — `ACPError.code`,
+`Diff.changes`, and `configOptions` on `NewSessionResponse`,
+`ResumeSessionResponse`, `SetSessionConfigOptionResponse`, and
+`ConfigOptionUpdate` — for fourteen placeholder-typed properties in all:
+
+| Shape | Definitions, and the API surface each untypes |
+|---|---|
+| Integer enum with an open tail | `ErrorCode` |
+| Base object plus a tagged (`allOf`-payload) union | `DiffChange`, `SessionConfigOption` |
+| Tagged union whose catch-all carries payload | `AuthMethod` → `InitializeResponse.authMethods: [JSONValue]?`; `PlanUpdateContent` → `PlanUpdate.plan: JSONValue` (required, not optional); `ReplayFrom` → `ResumeSessionRequest.replayFrom: JSONValue?` |
+| Object plus a value union whose catch-all leaves the tag unpinned | `SetSessionConfigOptionRequest` → the entire `session/set_config_option` params object. `MethodTable.generated.swift` routes it as `paramsTypeName: "SetSessionConfigOptionRequest"`, which resolves to `JSONValue`, so `sessionId`, `configId`, `value`, and `_meta` are all untyped at the one routed stable method that has no typed params |
+| Pre-existing (also deferred under v1) | `AgentResponse`, `ClientResponse`, `EmbeddedResourceResource`, `ExtRequest`, `ExtResponse`, `ExtNotification`, `RequestID`, `SessionConfigSelectOptions` |
+
+Resolving the first four rows also makes **seven** already-emitted structs
+reachable that nothing currently references — `AuthMethodAgent`,
+`DiffPathChange`, `DiffPathPairChange`, `PlanItems`, `ReplayFromStart`,
+`SessionConfigBoolean`, `SessionConfigSelect` — so "these seven have callers" is
+M1's completion signal. Three more (`TextResourceContents`,
+`BlobResourceContents`, `SessionConfigSelectGroup`) hang off the fifth row's
+`EmbeddedResourceResource` and `SessionConfigSelectOptions`, so they stay
+orphaned past M1. Six others never will be reached by any row —
+`ACPError`, `AgentRequest`, `AgentNotification`, `ClientRequest`,
+`ClientNotification`, `ProtocolLevelNotification` are JSON-RPC envelope types
+the routing table supersedes; exclude them from the signal.
 
 ## What v2 is, in one page
 
+*Read off the vendored `Schema/acp-v2.meta.json` and `acp-v2.json`, not from the
+docs pages — M0 reconciled the two and the schema wins.*
+
 **Agent methods** (Client → Agent): `initialize`, `auth/login`, `auth/logout`,
-`session/new`, `session/list`, `session/resume`, `session/close`, `session/prompt`,
-`session/set_config_option`.
+`session/new`, `session/list`, `session/resume`, `session/close`,
+`session/delete`, `session/prompt`, `session/set_config_option`.
 **Agent notifications** (Client → Agent): `session/cancel`.
 
-**Client methods** (Agent → Client): `session/request_permission`,
-`elicitation/create`.
-**Client notifications** (Agent → Client): `session/update`,
-`elicitation/complete`.
+**Client methods** (Agent → Client): `session/request_permission`.
+**Client notifications** (Agent → Client): `session/update`.
 
-That is the whole surface — and the Client half is *four entry points*. When
-`capabilities.session` is advertised, an agent must implement the baseline:
+**Protocol-level**: `$/cancel_request`.
+
+That is the whole stable surface — and the Client half is *two entry points*.
+When `capabilities.session` is advertised, an agent must implement the baseline:
 `session/new`, `session/list`, `session/resume`, `session/close`,
-`session/prompt`, `session/cancel`, `session/update`.
+`session/prompt`, `session/cancel`, `session/update`. Capability sub-objects are
+`session.prompt` (`audio` / `image` / `embeddedContext`), `session.mcp`
+(`stdio` / `http`), `session.additionalDirectories`, and `session.delete`;
+`AgentCapabilities` adds `auth`. `ClientCapabilities` carries `_meta` and
+nothing else — *"stable v2 defines no standard client capability fields"* is
+literally true.
 
-**`session/update` carries everything that happens**: `state_update`,
-`user_message` / `user_message_chunk`, `agent_message` / `agent_message_chunk`,
-`agent_thought` / `agent_thought_chunk`, `tool_call_update`,
-`tool_call_content_chunk`, `plan_update`, `config_option_update`, and
-slash-command availability — plus `terminal_update` / `terminal_output_chunk`
-**only if M0 confirms they exist** (see below).
+**Unstable-only, and nothing may be built on it** (`acp-v2.meta.unstable.json`,
+routed by name and side only): `elicitation/create`, `elicitation/complete`,
+`mcp/connect`, `mcp/message`, `mcp/disconnect`, `session/fork`,
+`providers/list` / `providers/set` / `providers/disable`, `nes/*`, and
+`document/did*`. Elicitation in particular is **not** in the stable surface of
+the vendored `schema-v2.0.0-alpha.2`, though upstream `main` has already
+promoted it — expect it stable on the next re-vendor.
+
+**`session/update` carries everything that happens** — the sixteen variants the
+schema lists, in order: `user_message_chunk`, `user_message`,
+`agent_message_chunk`, `agent_message`, `agent_thought_chunk`, `agent_thought`,
+`state_update`, `tool_call_content_chunk`, `tool_call_update`,
+`terminal_update`, `terminal_output_chunk`, `plan_update`,
+`available_commands_update`, `config_option_update`, `session_info_update`,
+`usage_update` — plus an explicit unknown-discriminator fallback.
 
 ### The five changes that reshape the design
 
@@ -123,32 +208,56 @@ slash-command availability — plus `terminal_update` / `terminal_output_chunk`
    creates and patches, keyed by `toolCallId`. Whole-message upserts take `content`
    arrays with three-state semantics — omitted means unchanged, `null`/`[]` clears,
    a concrete array replaces — while `*_chunk` variants append.
-4. **No client filesystem, no client terminals.** `fs/*` and `terminal/*` are
+   **An upsert cannot delete a message.** `UserMessage` / `AgentMessage` /
+   `AgentThought` require only `messageId`, and the only removal the schema
+   offers is clearing `content` with `null` or `[]`: *"`content` is replaced as a
+   whole array; send `[]` or `null` to clear it."* There is no tombstone, no
+   `deleted` flag, and no `session/update` variant that retracts a `messageId`.
+   Whole-session removal is `session/delete`, gated on
+   `capabilities.session.delete`, and is a different thing from `session/close`.
+4. **No client filesystem, no client-run terminals.** `fs/*` and `terminal/*` are
    removed, and *"stable v2 defines no standard client capability fields."* Agents
    reach the client's world through **MCP** instead.
 
-   ⚠️ **The display-terminal successor is unconfirmed — do not build on it.** The
-   migration guide describes an agent-owned display terminal stream
-   (`terminal_update`, `terminal_output_chunk`, a `terminal` content reference,
-   explicitly with *"no input, resize, interrupt, kill, wait, release, or execution
-   semantics"*). But the surfaces that generate code do not show it: the v2 content
-   variants are `text` / `image` / `audio` / `resource` / `resource_link`, the
-   schema shows no terminal updates or content block, and there is **no v2
-   Terminals page** where v1 has one. What the schema *does* carry is a
-   `TerminalId` type and a `terminalId` on `CommandPermissionSubject` — *"the
-   associated terminal, when already known."* The migration guide appears to be
-   ahead of the schema, which is unremarkable for a draft. **M0 resolves it.**
+   **The display-terminal successor is real and stable — M0 confirmed it against
+   the vendored schema.** The earlier doubt came from a truncated schema fetch;
+   reading `Schema/acp-v2.json` directly settles it. `TerminalUpdate` and
+   `TerminalOutputChunk` are `session/update` variants (`terminal_update`,
+   `terminal_output_chunk`), and `Terminal` — *"a display-only reference to an
+   agent-owned terminal"* — is a variant of **`ToolCallContent`**, alongside
+   `content` and `diff`. That is why the content page's five variants
+   (`text` / `image` / `audio` / `resource` / `resource_link`) showed no
+   terminal: those are `ContentBlock`, the message-level union, and the terminal
+   reference does not live there. `TerminalOutputChunk.data` is *"independently
+   base64-encoded terminal output bytes"*; the schema carries no input, resize,
+   interrupt, kill, wait, release, or execution surface. `TerminalId` also
+   appears on `CommandPermissionSubject` as *"the associated terminal, when
+   already known."*
 5. **Replay is first-class.** `session/load` is gone; `session/resume` handles both
    plain reconnect and, with `replayFrom: {"type": "start"}`, full history replay
-   as ordinary session updates.
+   as ordinary session updates. `ReplayFrom` has exactly one known variant,
+   `start`, plus the unknown fallback.
 
 ### Conventions the type system should enforce
 
-Absolute paths everywhere, 1-based line numbers, `camelCase` object keys,
-`snake_case` discriminator values. Unknown enum and tagged-union values must be
-**accepted and preserved when proxying**; values beginning with `_` are
-implementation-specific, and unknown non-underscore values are reserved for future
-versions. `_meta` follows patch semantics in updates.
+Absolute paths everywhere, `camelCase` object keys, `snake_case` discriminator
+values. Unknown enum and tagged-union values must be **accepted and preserved
+when proxying**; values beginning with `_` are implementation-specific, and
+unknown non-underscore values are reserved for future versions. `_meta` follows
+patch semantics in updates.
+
+v2 gives absolute paths a first-class `AbsolutePath` definition, so the
+invariant rides the `$ref` and the generator needs no per-field override table —
+`AbsolutePath` is simply listed as hand-written in `GeneratorConfig.acpV2`.
+
+**There is no 1-based line-number invariant in v2.** The vendored schema has
+exactly one line-valued field, `ToolCallLocation.line`, described only as
+*"Optional line number within the file"* with `minimum: 0`; the v2 tool-calls
+page does not state a base either. The hand-written `LineNumber` type and the
+`.lineNumber` config mapping therefore have no v2 field to attach to. The
+generator keeps the mechanism (still covered by `GeneratorCoreTests`) for a
+revision that states the invariant in prose, but nothing uses it today, and
+`LineNumber` is not restored until something needs it.
 
 ## The wire specification: generate it, don't transcribe it
 
@@ -189,10 +298,11 @@ monotonic id and `[RequestID: CheckedContinuation]` inside the connection actor
 reverse request.
 
 v2 makes this materially simpler than v1 would have: with `session/prompt`
-acknowledging immediately, no request is held open for the duration of a turn. The
-remaining long-lived requests are the ones that genuinely wait on a human —
-`session/request_permission` and `elicitation/create` — and those must never block
-the read loop.
+acknowledging immediately, no request is held open for the duration of a turn.
+The one remaining long-lived request in the stable surface is the one that
+genuinely waits on a human — `session/request_permission` — and it must never
+block the read loop. (`elicitation/create` would join it if and when elicitation
+becomes stable.)
 
 **Fail loud on disconnect** (a real TS-SDK gap): on EOF or error, reject every
 pending continuation and finish every stream; per-request timeouts; honor `Task`
@@ -220,8 +330,8 @@ replayable script.
 - **Unknown-value preservation** — decode a payload carrying an unrecognized enum
   case and a `_`-prefixed extension, re-encode, and assert nothing was dropped.
   This is a protocol requirement, not politeness.
-- **Conventions** — relative paths and 0-based line numbers must fail at
-  decode time.
+- **Conventions** — relative paths must fail at decode time. (v2 states no
+  line-number base, so there is no 0-based case to reject; see *Conventions*.)
 
 ## Decisions
 
@@ -243,20 +353,61 @@ replayable script.
 
 ## Milestones
 
-- [ ] **M0 — Vendor v2 and restart the pipeline.** The v1 schema and its generated
-  output are already gone (see *Starting point*); vendor `acp-v2.json` (+ meta),
-  re-point `SchemaSet` and `GeneratorConfig` off their v1 names and field
-  mappings, and regenerate. Confirm the plugin, content-hash no-op, and CI diff
-  gate come back green. **Verify the method and payload
-  inventory against the schema** rather than against this plan — only the overview,
-  migration, session-setup, and content pages have been read closely, and the
-  migration guide has already proven to run ahead of the schema on terminals.
+- [x] **M0 — Vendor v2 and restart the pipeline.** `acp-v2.json` and both meta
+  manifests vendored from `schema-v2.0.0-alpha.2`; `SchemaSet.acpV2` /
+  `GeneratorConfig.acpV2` re-pointed; the generator taught v2's `anyOf` union
+  vocabulary; plugin, content-hash no-op, and CI diff gate green. The method and
+  payload inventory above is now read off the schema, and every question the
+  plan had open about it — `session/delete`, the `session/update` variant list,
+  display terminals, `mcp/*`, message deletion — is answered in place.
 - [ ] **M1 — Types and conventions.** Generated models/unions/enums, plus the
-  hand-written `JSONValue`, `AbsolutePath`, `RequestError`, and `unknown(String)`
-  fallbacks. Decode-time enforcement of absolute paths and 1-based lines.
-- [ ] **M2 — Role protocols.** `Agent` (nine methods plus `session/cancel`) and
-  `Client` (four entry points). Capability-gated methods default to
-  method-not-found.
+  hand-written `JSONValue`, `AbsolutePath`, `RequestError`, and the
+  `unknown(String)` fallbacks. Decode-time enforcement of absolute paths.
+  Resolve the four union shapes M0 left on the placeholder seam (table under
+  *Starting point*) — which for the payload-bearing catch-alls means giving each
+  fallback somewhere to keep what it currently drops: `unknown(String, JSONValue)`
+  for the three tagged unions, and a two-associated-value default
+  (`other(String, JSONValue)` in `ValueUnionCaseModel` and
+  `objectValueUnionDeclaration`) for the value union, so unknown-value
+  preservation is real rather than asserted.
+
+  **Take `SetSessionConfigOptionRequest` first.** It is the cheapest of the four
+  and the most expensive to leave: it is the one deferral that untypes a *routed
+  stable method's entire params object* rather than a single field. Three
+  coupled generator edits, all in `SchemaGenerator.swift`:
+
+  1. Relax `isUnknownFallbackVariant` **for the value-union family only** — a
+     catch-all member the modeled variants already declare is not new payload.
+     Leave it strict for tagged unions, where the three above must keep
+     deferring until their fallback can carry a payload.
+  2. Give `ValueUnionCaseModel` the matched discriminator, and emit
+     `other(String, JSONValue)` from `objectValueUnionDeclaration`.
+  3. Drop the `objectValueUnionModel` guard that rejects a default variant
+     declaring the discriminator. It is correct only while the default case
+     cannot re-encode a tag; step 2 is exactly what makes it obsolete. Skipping
+     this makes generation *throw* rather than emit.
+
+  Then add the round-trip test in the same change — decode
+  `{"type": "_vendor_x", "value": 42}`, re-encode, assert both members survive.
+  Nothing currently exercises generated runtime types, but the harness is
+  already there: `ACPGenerateTests` depends on `ACPGenerateCore`, which itself
+  depends on `FoundationModelsACP`, so the generated module is linked into the
+  test binary today and the test costs one `import`. Do not defer this step —
+  an unexercised two-associated-value `Codable` case is the
+  "preservation asserted rather than real" failure this milestone exists to
+  close.
+
+  M0 left it deferred because none of that is M0's remit — vendor, re-point,
+  verify — and deferring costs nothing that is not recoverable: `JSONValue` is
+  lossless, and M1 lands before M2, so nothing generates against the placeholder
+  in between. Do this one first, then the tagged-union three, so both families
+  get the same answer to the same question.
+- [ ] **M2 — Role protocols.** `Agent` (ten methods plus `session/cancel`) and
+  `Client` (`session/request_permission` plus the `session/update`
+  notification). Capability-gated methods default to method-not-found.
+  *Blocked on the M1 seam:* `session/set_config_option` has no params type until
+  `SetSessionConfigOptionRequest` resolves — generated against today's output it
+  would emit `setSessionConfigOption(_ params: JSONValue)`.
 - [ ] **M3 — Connections and transports.** Both connection sides, the read loop,
   continuation correlation, per-request `Task` dispatch, fail-loud disconnect,
   stdio and `InMemoryTransport`.
@@ -264,16 +415,29 @@ replayable script.
   and `capabilities`, empty-object support markers, nested
   `capabilities.session.*` (including `mcp.stdio` / `mcp.http` /
   `additionalDirectories`), and `protocolVersion: 2`.
+  *Blocked on the M1 seam:* `InitializeResponse.authMethods` is `[JSONValue]?`
+  until `AuthMethod` resolves.
 - [ ] **M5 — Sessions.** `session/new` / `list` / `resume` / `close`, `mcpServers`
   on new and resume, `replayFrom`, config options.
+  *Blocked on the M1 seam:* `ResumeSessionRequest.replayFrom` is `JSONValue?`
+  until `ReplayFrom` resolves, and config options are untyped end to end —
+  `SessionConfigOption` on the listing side, the whole
+  `session/set_config_option` params object on the setting side.
 - [ ] **M6 — Prompt lifecycle.** `session/prompt` immediate ack, `state_update`
   states, `stopReason` on idle, `session/cancel` → cancelled idle.
-- [ ] **M7 — Updates.** Every `session/update` variant: messages and chunks with
-  `messageId`, tool-call upserts and content chunks, terminal upserts and output
-  chunks, plans, config options, slash commands.
-- [ ] **M8 — Permissions and elicitation.** `session/request_permission` with
-  `title` / `description` / tagged `subject`; `elicitation/create` and
-  `elicitation/complete` with form and URL modes.
+- [ ] **M7 — Updates.** All sixteen `session/update` variants: messages and
+  chunks with `messageId`, tool-call upserts and content chunks, terminal
+  upserts and base64 output chunks (confirmed stable in M0), plans, available
+  commands, config options, session info, usage.
+  *Blocked on the M1 seam:* `PlanUpdate.plan` is `JSONValue` — required, so
+  every `plan_update` carries an untyped payload — until `PlanUpdateContent`
+  resolves.
+- [ ] **M8 — Permissions.** `session/request_permission` with `title` /
+  `description` / tagged `subject` (`tool_call` or `command`, the latter
+  optionally naming a `terminalId`). **Elicitation is out of scope until it is
+  stable** — `elicitation/create` and `elicitation/complete` are unstable-only
+  in the vendored `schema-v2.0.0-alpha.2`, with no request/response types in the
+  stable schema to generate from. Pick this up when a re-vendor promotes them.
 - [ ] **M9 — Replay and interop.** `ReplayTransport` with golden fixtures, and a
   round-trip against a real third-party v2 agent or client once one exists.
 
