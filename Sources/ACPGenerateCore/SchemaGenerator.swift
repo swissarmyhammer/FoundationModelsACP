@@ -397,6 +397,13 @@ public struct SchemaGenerator: Sendable {
             }
             return .objectValueUnion
         }
+        // This arity test is why `classifyAnyOf` takes the *raw* variant list
+        // rather than `unionVariants(of:)`. It is the only line here that
+        // depends on the unfiltered count: `modeled.count < variants.count`
+        // asks "was a catch-all present?", and over a pre-filtered list the
+        // two counts are always equal, so no definition would ever reach
+        // `.taggedUnion` — 8 of them do today. The fallback guard above is
+        // filter-invariant and is *not* the reason; do not cite it as one.
         if modeled.count < variants.count, !modeled.isEmpty, modeled.allSatisfy(hasConstDiscriminator) {
             return .taggedUnion
         }
@@ -442,8 +449,16 @@ public struct SchemaGenerator: Sendable {
     /// which member the discriminator is. Filtering it away would take that
     /// evidence with it — a union whose variants keyed on two different members
     /// would pass `valueUnionDiscriminator`'s agreement check with the odd
-    /// variant silently unmodeled — so it is not a fallback and the whole
-    /// definition defers to raw JSON instead, which is lossless.
+    /// variant silently unmodeled — so it is not a fallback.
+    ///
+    /// What happens next depends on the keyword. On an `anyOf`,
+    /// `classifyAnyOf`'s fallback guard sees a non-fallback `not` variant and
+    /// defers the whole definition to raw JSON, which is lossless. `oneOf` has
+    /// no such guard, so there the catch-all is *modeled* and reaches
+    /// `discriminatorTag` — yielding an extra case, or a thrown
+    /// `unsupportedShape`. That path is unreached today: the vendored schema
+    /// contains no definition-level `oneOf` at all. Add the same guard to
+    /// `classifyOneOf` before relying on one.
     ///
     /// - Parameters:
     ///   - variant: The union variant fragment.
