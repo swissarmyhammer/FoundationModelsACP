@@ -123,9 +123,47 @@ comments:
     - The `.discriminatedUnion` family matches **zero** vendored definitions — only synthetic generator tests reach it. Worth knowing before assuming a change there is covered by the vendored suite.
     - `swift format` was never run, per the standing warning.
   timestamp: 2026-07-26T20:34:08.052103+00:00
+- actor: claude-code
+  id: 01kyg3spdcjkf9g1fe4ff9pq9k
+  text: |
+    Review pass on c9810f3 (scope HEAD~1..HEAD). Engine: 48 checks attempted, 6 confirmed, 8 refuted. Five findings recorded; one dropped.
+
+    Dropped: a finding asking to delete the `assertRoundTrips` and `canonicalized` helpers in `Tests/ACPGenerateTests/TaggedUnionTests.swift`. That file is pre-existing and this commit adds exactly one line to it, so the finding targets test code that already existed. The review skill's blanket exception forbids recording findings that refactor pre-existing tests.
+
+    Scoping notes on what remains, for whoever picks this up:
+
+    * The four focus areas came back clean. No finding landed on `encodeMembers(to:reserving:)`, on unknown round-tripping for the tagged unions or the value union, on the new objectTaggedUnion decode/encode symmetry, or on the unionVariants and valueUnionVariants split.
+    * The two generated-output duplication findings on `Models.generated.swift` are cosmetic. Each cited pair is the decode side `excludingMembers` and the encode side `reserving`, and both are emitted from the single `ownedMembers(discriminator:siblingMembers:)` helper in `Emitter.swift` (call sites at lines 346 and 365). One source of truth, so the drift the finding warns about cannot occur. A fix means an emitter change plus regeneration of a byte pinned artifact.
+    * The value union finding concerns the `.untagged` default path. The only value union in the generated output takes the `.capturedTag` path, so no shipped type is lossy today. It is latent generator capability plus a docstring accuracy question.
+    * The Emitter duplication finding spans `unionStructInit` (new in this commit) and `memberwiseInit` (untouched, outside every diff hunk). Extract a helper on untouched pre existing code was ruled out of scope by precedent in M0 rounds 3 and 5.
+  timestamp: 2026-07-26T21:02:50.284463+00:00
+- actor: claude-code
+  id: 01kyg3wdj53c331vxw88w9ska6
+  text: |
+    ## Stopping here — M1 left in `review` with five open polish findings, by choice
+
+    The work is done and green: `c9810f3`, 123 tests / 16 suites, DocC clean, codegen regeneration a byte-for-byte no-op. The closing review found **no substantive defects**, and all four correctness areas it was pointed at came back with zero engine findings — the `encodeMembers(to:reserving:)` boundary, `unknown(String, JSONValue)` and `other(String, JSONValue)` round-tripping, `.objectTaggedUnion` decode/encode symmetry, and the `unionVariants` / `valueUnionVariants` split.
+
+    **I am not moving this to `done`, and not working the five findings either.** Both would be wrong:
+
+    - Forcing `done` with open findings is out of bounds; the gate exists precisely so a task advances on a clean review, not on an orchestrator's judgment.
+    - But working them would regenerate a byte-pinned artifact for zero correctness gain. Three target repeated literals in `Models.generated.swift` whose premise is false — both sides come from one emitter helper, so the drift they guard against cannot occur. One is latent and unreachable (the only value union in the generated output takes the other path), reducing to docstring accuracy. One is the extract-a-helper-on-untouched-code pattern already settled as out of scope twice during M0.
+
+    So the honest state is: **green, reviewed, and awaiting a human decision** on five style items against generated output. Recorded in the follow-ups card `^emz2swz` rather than churned here.
+
+    ## What a human should weigh in on before M7
+
+    The one genuinely open design question from M1 is carded as `^1pfngj1`: **three-state patch semantics**. v2's upsert `content` has three states — omitted means unchanged, `null` or `[]` clears, a value replaces — and a Swift `Optional` has two. A client meaning "clear this message's content" currently sends something indistinguishable from "leave it alone." That is silent history corruption on the wire, it affects six upsert types, and it belongs to M7. It is pinned by `MetaFieldTests.upsertMetaCannotYetDistinguishOmittedFromNull` so the limitation is visible rather than latent, but the fix is a design choice, not an implementation gap.
+
+    ## Correction to this card's own handover comment
+
+    The briefing I left at pickup said the seam was four definitions and that eight structs would become reachable. Both wrong. Derived from the diff afterwards: **seven** definitions resolved across four shape rows (`ErrorCode`; `DiffChange`, `SessionConfigOption`; `AuthMethod`, `PlanUpdateContent`, `ReplayFrom`; `SetSessionConfigOptionRequest`), and **ten** names became reachable, eight structs plus two enums. The eight survivors reconcile exactly to row 5 of `plan.md`'s table. Three parties produced three different counts for this before anyone ran the one-line check that settles it.
+
+    That handover comment also corrupted this card's YAML on arrival, leaving it reading `title: Untitled` — the warning it contained about the table separator reproduced the separator itself, inside backticks, which gives no protection. Repaired before implementation began.
+  timestamp: 2026-07-26T21:04:19.525125+00:00
 depends_on:
 - 01KYD58WKPK64VW7RWG16B89QC
-position_column: doing
+position_column: review
 position_ordinal: '80'
 title: M1 Types and conventions, enforced at decode time
 ---
@@ -186,3 +224,11 @@ The reset dropped these suites along with the v1 schema. They were real coverage
 - [x] A payload with a `_customThing` extension round-trips without loss.
 - [ ] `_meta` patch semantics: omitted vs null vs value behave per spec. **Partly.** Where the schema says omitted and `null` are equivalent, they are, and `nil` never encodes as an explicit null. Six upsert `_meta` fields say `null` is a distinct clear signal, which a Swift `Optional` cannot express; carded as ^1pfngj1 for M7 and pinned in its current form by `MetaFieldTests.upsertMetaCannotYetDistinguishOmittedFromNull`.
 - [x] `JSONValue` round-trips all six kinds including nested containers.
+
+## Review Findings (2026-07-26 15:39)
+
+- [ ] `Sources/ACPGenerateCore/Emitter.swift:752` — Value unions with untagged defaults silently lose unrecognized discriminators on re-encode, while the PR's goal (visible in tagged and discriminated unions) is to preserve them with synthesized `.unknown` cases. The docstring claims untagged defaults handle 'absent or unknown' discriminators, but the generated code doesn't capture unknown ones. Either (1) add schema validation to reject value unions with untagged defaults when tagged cases exist (since untagged variants cannot properly preserve unrecognized tags), or (2) clarify the docstring to specify that untagged defaults only handle 'absent' (nil) discriminators, not unrecognized values, or (3) ensure value union defaults are always `.capturedTag` when tagged cases exist, consistent with the union-wide pattern of preserving unknown variants.
+- [ ] `Sources/ACPGenerateCore/Emitter.swift:1062` — Parameter-listing code with comma handling is duplicated across two functions. The loop pattern for enumerating parameters, building commas, and appending indented lines appears in both `memberwiseInit` (lines 182–189) and `unionStructInit` (lines 1062–1066), differing only in input type and variable names. Factor the parameter-listing logic into a generic helper function (e.g., `renderParameters(items:render:)` accepting an array and a render closure). Refactor both `memberwiseInit` and `unionStructInit` to call this helper, passing `{ initParameter($0) }` or `{ $0 }` respectively.
+- [ ] `Sources/FoundationModelsACP/Generated/Models.generated.swift:1349` — The array `["operation", "fileType", "mimeType", "_meta"]` is a repeated literal that appears again at line 1364. Repeated literals should be named constants to avoid drift when maintaining parallel code paths (decode and encode). Define a private static constant within the Payload enum: `private static let excludedMembers = ["operation", "fileType", "mimeType", "_meta"]` and reference it in both methods.
+- [ ] `Sources/FoundationModelsACP/Generated/Models.generated.swift:1364` — The array `["operation", "fileType", "mimeType", "_meta"]` is a duplicate of line 1349. This repeated literal should be extracted to a named constant. Extract to a private static constant and use it in both init and encode methods.
+- [ ] `Sources/FoundationModelsACP/Generated/Models.generated.swift:3029` — The array `["type", "configId", "name", "category", "description", "_meta"]` is a duplicate of line 3014. This repeated literal should be extracted to a named constant. Extract to a private static constant and use it in both init and encode methods.

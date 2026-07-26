@@ -13,6 +13,21 @@ comments:
 
     **Item 3's premise moved.** M1 rewrote large parts of `SchemaGenerator.swift` and `Emitter.swift`, so `git log -L` on the lines round 5 cited will now point at the M1 commit rather than at `c82ca85` and friends. Re-run the review rather than working from the old finding list; some of those lines no longer exist. `objectValueUnionDeclaration` and the new `objectTaggedUnionDeclaration` were already deduplicated onto a shared `objectCarryingAUnion`, and the three struct-part helpers now take `base:union:` instead of one model type.
   timestamp: 2026-07-26T19:19:05.151931+00:00
+- actor: claude-code
+  id: 01kyg3vp97mhyd51qvfme58cxd
+  text: |
+    ## Two more items surfaced during M1, same character as the three above
+
+    Both were deliberately kept out of `c9810f3` to avoid widening a commit whose generated output is pinned byte-for-byte. Neither blocks anything.
+
+    - **Five surviving typealiases carry a stale generated banner.** `Unresolved.generated.swift`'s remaining eight are `AgentResponse`, `ClientResponse`, `EmbeddedResourceResource`, `ExtNotification`, `ExtRequest`, `ExtResponse`, `RequestID`, `SessionConfigSelectOptions` — row 5 of `plan.md`'s table, now classified as **permanently** deferred (three are the extension escape hatch with no declared shape; five are untagged unions whose branches pin no discriminator). But five still emit the banner "Placeholder seam: ... until a later generator stage replaces it," which reads as pending work. The text comes from the emitter, so correcting it is a generator change plus a regeneration, and the generated docs currently contradict the plan.
+
+    - **Possibly dead test helpers.** `assertRoundTrips` and `canonicalized` in `Tests/ACPGenerateTests/TaggedUnionTests.swift` were reported as uncalled. The report came from a review engine whose line numbers were stale elsewhere in the same run, so **verify before deleting** rather than trusting it. If genuinely uncalled they are a trivial sweep; the file is pre-existing and was outside M1's scope, which is why it was not touched.
+
+    ## Also worth folding in when this card is picked up
+
+    Three findings from M1's closing review target repeated literals in `Models.generated.swift` (real locations 1607/1636 and 4659/4679, not the line numbers the engine reported). The engine's premise is drift between parallel decode and encode lists, and that premise is wrong: both sides are emitted from a single helper, `ownedMembers(discriminator:siblingMembers:)` in `Emitter.swift`, inlined twice. There is one source of truth and no drift is possible. Recorded here as considered-and-declined rather than pending, so nobody re-raises it as new.
+  timestamp: 2026-07-26T21:03:55.687556+00:00
 position_column: todo
 position_ordinal: 8a80
 title: Generator follow-ups deferred during M0
