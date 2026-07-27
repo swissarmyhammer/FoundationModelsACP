@@ -104,9 +104,6 @@ enum RoleRouting {
 /// result; outbound helpers encode parameters, issue the wire call, and decode
 /// the response — all keyed through `RoleRouting` so no wire strings appear.
 enum RoleDispatch {
-    /// The wire result of a request whose handler returns no value.
-    static let emptyResult: JSONValue = .object([:])
-
     /// Serves a request whose handler returns a typed response.
     ///
     /// - Parameters:
@@ -127,29 +124,8 @@ enum RoleDispatch {
         }
     }
 
-    /// Serves a request whose handler returns no value, answering `{}`.
-    ///
-    /// - Parameters:
-    ///   - params: The raw request parameters.
-    ///   - requestType: The parameters' model type.
-    ///   - body: The role handler to invoke with the decoded parameters.
-    /// - Returns: The empty result object.
-    /// - Throws: `RequestError.invalidParams` on a decode failure, or any
-    ///   error the handler throws.
-    static func serveEmpty<Request: Decodable>(
-        _ params: JSONValue?,
-        as requestType: Request.Type,
-        _ body: (Request) async throws -> Void
-    ) async throws -> JSONValue {
-        try await serve(params, as: requestType) { request in
-            try await body(request)
-            return emptyResult
-        }
-    }
-
-    /// The single decode-then-invoke path behind `serveResult` and
-    /// `serveEmpty`, which differ only in how they turn the handler's outcome
-    /// into a wire response.
+    /// The single decode-then-invoke path behind `serveResult`, which decodes
+    /// parameters and turns the handler's outcome into a wire response.
     ///
     /// - Parameters:
     ///   - params: The raw request parameters.

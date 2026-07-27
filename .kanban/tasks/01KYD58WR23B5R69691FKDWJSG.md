@@ -81,60 +81,35 @@ comments:
 
     No other flakiness observed. Two now-orphaned hung swiftpm-testing-helper processes from the pre-fix repro were killed during cleanup.
   timestamp: 2026-07-27T22:28:44.731272+00:00
+- actor: claude-code
+  id: 01kyjwmxhq3sh7eqxx310qqgwy
+  text: |-
+    Resolved the review finding on `RoleDispatch.serveEmpty`.
+
+    Verified before deleting: repo-wide grep (source + tests) for `serveEmpty` found exactly one non-definition hit, a docstring reference in `serve`'s comment — zero real call sites anywhere. Confirmed with the earlier port notes on this task that v2's Agent/Client methods all return typed responses, so there's no missing void-handler wiring to add in a follow-up; this is pure v1-port scaffolding that doesn't apply to v2.
+
+    Deleted:
+    - `serveEmpty` function + its docstring.
+    - `emptyResult`, the constant that existed solely to support `serveEmpty` (grep confirmed zero other callers) — it became newly dead once `serveEmpty` was removed, so left in place would have just been the next dead-code finding.
+    - Corrected the private `serve` helper's docstring, which named both `serveResult` and `serveEmpty` as its callers; now says just `serveResult`.
+
+    Verified clean (rm -rf .build, fresh rebuild): `swift build --build-tests` 0 errors/0 warnings. `swift test` 214 tests / 21 suites / 0 failures (139/11 + 75/10) — identical to the pre-existing baseline, confirming nothing was quietly depending on the removed code. No swift format run. Diff scoped to RoleDispatch.swift only; no generated-code drift.
+
+    Adversarial double-check dispatched; will record its verdict once it returns.
+  timestamp: 2026-07-27T22:55:37.015384+00:00
+- actor: claude-code
+  id: 01kyjww73n6g2rzwje02kkd635
+  text: |-
+    Adversarial double-check verdict: PASS.
+
+    Confirmed independently: `serveEmpty` and `emptyResult` have zero remaining references anywhere in the repo outside this task's own description text. Removing `emptyResult` alongside `serveEmpty` was judged the right call, not scope creep, since it became dead the instant its only caller was deleted. The rewritten `serve` docstring reads correctly standalone. Fresh `swift build --build-tests`: 0 errors/0 warnings. Fresh `swift test`: 214 tests/21 suites/0 failures (139/11 + 75/10), matching the pre-existing baseline exactly. Diff scope confirmed limited to `RoleDispatch.swift` plus kanban bookkeeping.
+
+    Review finding resolved. Task is green; leaving in `doing` for `/review`.
+  timestamp: 2026-07-27T22:59:36.181694+00:00
 depends_on:
 - 01KYD58WPKKF4BAN3AKFZV61KY
 position_column: doing
 position_ordinal: '80'
 title: 'M3 Connections and transports: full-duplex, fail loud'
 ---
-## Starting point
-
-**This is a rewrite, and the most salvageable one on the board.** `plan.md` -> *Starting point* has the full inventory.
-
-A working v1 implementation of nearly everything in this task was deleted and is in git history: `Connection/Connection.swift`, `RoleConnectionCore.swift`, `RoleDispatch.swift`, `AgentSideConnection.swift`, `ClientSideConnection.swift`, `SessionUpdateRouter.swift`, and `Transport/{NDJSONCodec, StdioTransport, InMemoryTransport, SubprocessTransport, DescriptorIO}.swift`, plus their tests (`ConnectionTests`, `DisconnectTests`, `StdioTransportTests`, `InMemoryTransportTests`, `NDJSONCodecTests`, `SubprocessReapTests`, `SessionUpdateStreamTests`, `RoleDispatchTests`, `FactoryClosureTests`).
-
-**Read that code before writing new code.** The read loop, continuation correlation, per-request `Task` dispatch, fail-loud disconnect, ndJSON framing, and the factory-closure pattern are all **protocol-version-agnostic** and were reviewed and tested. The v2 delta here is genuinely small: the payload types change, and `session/prompt` stops being long-lived. Recovering and re-typing this is the expected approach — not a from-scratch rewrite.
-
-The `acp-test-agent` executable target (a subprocess fixture for stdio transport tests) was also deleted; restore it if the stdio tests need it.
-
-## What
-
-`plan.md` -> **Connection model: full-duplex, notification-first**.
-
-Two symmetric connection objects over one byte stream, each taking a **factory closure** so a handler can capture its own connection for reverse calls:
-
-```swift
-AgentSideConnection(stream:)  { conn  in RoutedACPAgent(conn, router) }
-ClientSideConnection(stream:) { agent in MyClient(agent) }
-```
-
-Implementation:
-
-- **One read loop per connection.** Correlation by monotonic request id and `[RequestID: CheckedContinuation]` inside the connection actor, which also serializes writes.
-- **Each inbound request dispatches as its own `Task`**, so a slow handler cannot head-of-line-block a `session/cancel` or a reverse request.
-- **v2 makes this simpler:** `session/prompt` acknowledges immediately, so no request is held open for a whole turn. The one remaining long-lived request in the stable surface is the one that genuinely waits on a human -- `session/request_permission` -- and it must never block the read loop. (`elicitation/create` would join it if and when elicitation becomes stable; it is unstable-only in the vendored `schema-v2.0.0-alpha.2`, so do not design around it now.)
-- **`$/cancel_request`** is protocol-level rather than a role method, so it belongs to this layer, not to `Agent`/`Client`.
-- **Fail loud on disconnect** (a real gap in other SDKs): on EOF or error, reject every pending continuation and finish every stream. Per-request timeouts. Honor `Task` cancellation.
-- **Tolerate late and out-of-order notifications.** Correlation is by `messageId` / `toolCallId` / `terminalId`, never arrival order; an upsert may arrive after the state it refers to has moved on.
-
-**Transports:** stdio with ndJSON framing, and `InMemoryTransport.pair()`. The in-process pair is **production**, not just a fixture: it is how a SwiftUI app runs an agent in the same process while still speaking the protocol.
-
-## Acceptance Criteria
-
-- [ ] Both connection sides work over both transports.
-- [ ] Requests and notifications flow concurrently in both directions.
-- [ ] Each inbound request runs in its own `Task`; a slow handler does not stall others.
-- [ ] Disconnect rejects all pending continuations and finishes all streams -- no hangs.
-- [ ] Per-request timeouts and `Task` cancellation honored.
-- [ ] Batch JSON-RPC messages supported (v2 states batch support).
-- [ ] `$/cancel_request` is served at the connection layer on both sides, not on either role protocol.
-- [ ] The connection and transport test suites listed above exist again, retargeted to v2.
-
-## Tests
-
-- [ ] A slow `session/prompt` handler does not delay a concurrent `session/cancel`.
-- [ ] EOF mid-request rejects the pending continuation promptly rather than hanging.
-- [ ] Out-of-order and late notifications are delivered without reordering assumptions.
-- [ ] A reverse request from inside a handler reaches the peer (factory-closure capture works).
-- [ ] Malformed ndJSON frame produces a clean protocol error, not a crashed read loop.
-- [ ] Batched messages are handled.
+## Starting point\n\n**This is a rewrite, and the most salvageable one on the board.** `plan.md` -> *Starting point* has the full inventory.\n\nA working v1 implementation of nearly everything in this task was deleted and is in git history: `Connection/Connection.swift`, `RoleConnectionCore.swift`, `RoleDispatch.swift`, `AgentSideConnection.swift`, `ClientSideConnection.swift`, `SessionUpdateRouter.swift`, and `Transport/{NDJSONCodec, StdioTransport, InMemoryTransport, SubprocessTransport, DescriptorIO}.swift`, plus their tests (`ConnectionTests`, `DisconnectTests`, `StdioTransportTests`, `InMemoryTransportTests`, `NDJSONCodecTests`, `SubprocessReapTests`, `SessionUpdateStreamTests`, `RoleDispatchTests`, `FactoryClosureTests`).\n\n**Read that code before writing new code.** The read loop, continuation correlation, per-request `Task` dispatch, fail-loud disconnect, ndJSON framing, and the factory-closure pattern are all **protocol-version-agnostic** and were reviewed and tested. The v2 delta here is genuinely small: the payload types change, and `session/prompt` stops being long-lived. Recovering and re-typing this is the expected approach — not a from-scratch rewrite.\n\nThe `acp-test-agent` executable target (a subprocess fixture for stdio transport tests) was also deleted; restore it if the stdio tests need it.\n\n## What\n\n`plan.md` -> **Connection model: full-duplex, notification-first**.\n\nTwo symmetric connection objects over one byte stream, each taking a **factory closure** so a handler can capture its own connection for reverse calls:\n\n```swift\nAgentSideConnection(stream:)  { conn  in RoutedACPAgent(conn, router) }\nClientSideConnection(stream:) { agent in MyClient(agent) }\n```\n\nImplementation:\n\n- **One read loop per connection.** Correlation by monotonic request id and `[RequestID: CheckedContinuation]` inside the connection actor, which also serializes writes.\n- **Each inbound request dispatches as its own `Task`**, so a slow handler cannot head-of-line-block a `session/cancel` or a reverse request.\n- **v2 makes this simpler:** `session/prompt` acknowledges immediately, so no request is held open for a whole turn. The one remaining long-lived request in the stable surface is the one that genuinely waits on a human -- `session/request_permission` -- and it must never block the read loop. (`elicitation/create` would join it if and when elicitation becomes stable; it is unstable-only in the vendored `schema-v2.0.0-alpha.2`, so do not design around it now.)\n- **`$/cancel_request`** is protocol-level rather than a role method, so it belongs to this layer, not to `Agent`/`Client`.\n- **Fail loud on disconnect** (a real gap in other SDKs): on EOF or error, reject every pending continuation and finish every stream. Per-request timeouts. Honor `Task` cancellation.\n- **Tolerate late and out-of-order notifications.** Correlation is by `messageId` / `toolCallId` / `terminalId`, never arrival order; an upsert may arrive after the state it refers to has moved on.\n\n**Transports:** stdio with ndJSON framing, and `InMemoryTransport.pair()`. The in-process pair is **production**, not just a fixture: it is how a SwiftUI app runs an agent in the same process while still speaking the protocol.\n\n## Acceptance Criteria\n\n- [ ] Both connection sides work over both transports.\n- [ ] Requests and notifications flow concurrently in both directions.\n- [ ] Each inbound request runs in its own `Task`; a slow handler does not stall others.\n- [ ] Disconnect rejects all pending continuations and finishes all streams -- no hangs.\n- [ ] Per-request timeouts and `Task` cancellation honored.\n- [ ] Batch JSON-RPC messages supported (v2 states batch support).\n- [ ] `$/cancel_request` is served at the connection layer on both sides, not on either role protocol.\n- [ ] The connection and transport test suites listed above exist again, retargeted to v2.\n\n## Tests\n\n- [ ] A slow `session/prompt` handler does not delay a concurrent `session/cancel`.\n- [ ] EOF mid-request rejects the pending continuation promptly rather than hanging.\n- [ ] Out-of-order and late notifications are delivered without reordering assumptions.\n- [ ] A reverse request from inside a handler reaches the peer (factory-closure capture works).\n- [ ] Malformed ndJSON frame produces a clean protocol error, not a crashed read loop.\n- [ ] Batched messages are handled.\n\n## Review Findings (2026-07-27 17:35)\n\nScope: `HEAD~1..HEAD` (6eb810d). Engine returned 7 findings; 6 were dropped under the review skill's blanket test-refactor exception (they asked only to deduplicate/restructure existing test code in `FactoryClosureTests.swift`, `InMemoryTransportTests.swift`, `StdioTransportTests.swift`, `SubprocessReapTests.swift` — recovered v1 tests retargeted to v2, out of scope per policy). One production-code finding stands:\n\n- [x] `Sources/FoundationModelsACP/Connection/RoleDispatch.swift` — `serveEmpty` is added but never called anywhere in the codebase. It is not part of the public API surface (not marked `public`), not an entry point, and not a test. This is dead code that should be deleted. Delete the `serveEmpty` function definition and its docstring. If future handlers that return void are planned, add them and their calls in a follow-up task with that work, rather than shipping unused scaffolding now.\n
