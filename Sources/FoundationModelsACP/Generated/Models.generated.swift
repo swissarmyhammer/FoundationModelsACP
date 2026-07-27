@@ -2014,7 +2014,7 @@ public struct ACPError: Codable, Hashable, Sendable {
 }
 
 /// An HTTP header to set when making requests to the MCP server.
-public struct HttpHeader: Codable, Hashable, Sendable {
+public struct HTTPHeader: Codable, Hashable, Sendable {
     /// The name of the HTTP header.
     public var name: String
 
@@ -2028,7 +2028,7 @@ public struct HttpHeader: Codable, Hashable, Sendable {
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
 
-    /// Creates a `HttpHeader`.
+    /// Creates a `HTTPHeader`.
     public init(
         name: String,
         value: String,
@@ -2045,7 +2045,7 @@ public struct HttpHeader: Codable, Hashable, Sendable {
         case meta = "_meta"
     }
 
-    /// Decodes a `HttpHeader`; forgiving fields degrade to their
+    /// Decodes a `HTTPHeader`; forgiving fields degrade to their
     /// schema defaults instead of failing the message.
     ///
     /// - Parameter decoder: The decoder positioned at the object.
@@ -2058,7 +2058,7 @@ public struct HttpHeader: Codable, Hashable, Sendable {
         self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
     }
 
-    /// Encodes a `HttpHeader`, omitting nil optional fields — never
+    /// Encodes a `HTTPHeader`, omitting nil optional fields — never
     /// emitting JSON null for an absent capability-gated field.
     ///
     /// - Parameter encoder: The encoder to write the object into.
@@ -2799,18 +2799,18 @@ public struct LogoutAuthResponse: Codable, Hashable, Sendable {
 }
 
 /// MCP capabilities supported by the agent for session lifecycle requests.
-public struct McpCapabilities: Codable, Hashable, Sendable {
+public struct MCPCapabilities: Codable, Hashable, Sendable {
     /// Agent supports [`McpServer::Http`].
     ///
     /// Optional. Omitted or `null` both mean the agent does not advertise support.
     /// Supplying `{}` means the agent supports HTTP MCP server transports.
-    public var http: McpHttpCapabilities?
+    public var http: MCPHTTPCapabilities?
 
     /// Agent supports [`McpServer::Stdio`].
     ///
     /// Optional. Omitted or `null` both mean the agent does not advertise support.
     /// Supplying `{}` means the agent supports stdio MCP server transports.
-    public var stdio: McpStdioCapabilities?
+    public var stdio: MCPStdioCapabilities?
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
     /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
@@ -2819,10 +2819,10 @@ public struct McpCapabilities: Codable, Hashable, Sendable {
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
 
-    /// Creates a `McpCapabilities`.
+    /// Creates a `MCPCapabilities`.
     public init(
-        http: McpHttpCapabilities? = nil,
-        stdio: McpStdioCapabilities? = nil,
+        http: MCPHTTPCapabilities? = nil,
+        stdio: MCPStdioCapabilities? = nil,
         meta: JSONValue? = nil
     ) {
         self.http = http
@@ -2836,7 +2836,7 @@ public struct McpCapabilities: Codable, Hashable, Sendable {
         case meta = "_meta"
     }
 
-    /// Decodes a `McpCapabilities`; forgiving fields degrade to their
+    /// Decodes a `MCPCapabilities`; forgiving fields degrade to their
     /// schema defaults instead of failing the message.
     ///
     /// - Parameter decoder: The decoder positioned at the object.
@@ -2844,12 +2844,12 @@ public struct McpCapabilities: Codable, Hashable, Sendable {
     ///   or violates a wire invariant.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.http = container.forgivingDecodeIfPresent(McpHttpCapabilities.self, forKey: .http)
-        self.stdio = container.forgivingDecodeIfPresent(McpStdioCapabilities.self, forKey: .stdio)
+        self.http = container.forgivingDecodeIfPresent(MCPHTTPCapabilities.self, forKey: .http)
+        self.stdio = container.forgivingDecodeIfPresent(MCPStdioCapabilities.self, forKey: .stdio)
         self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
     }
 
-    /// Encodes a `McpCapabilities`, omitting nil optional fields — never
+    /// Encodes a `MCPCapabilities`, omitting nil optional fields — never
     /// emitting JSON null for an absent capability-gated field.
     ///
     /// - Parameter encoder: The encoder to write the object into.
@@ -2865,7 +2865,7 @@ public struct McpCapabilities: Codable, Hashable, Sendable {
 /// Capabilities for HTTP MCP server transports.
 ///
 /// Supplying `{}` means the agent supports HTTP MCP server transports.
-public struct McpHttpCapabilities: Codable, Hashable, Sendable {
+public struct MCPHTTPCapabilities: Codable, Hashable, Sendable {
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
     /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
     /// these keys.
@@ -2873,7 +2873,7 @@ public struct McpHttpCapabilities: Codable, Hashable, Sendable {
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
 
-    /// Creates a `McpHttpCapabilities`.
+    /// Creates a `MCPHTTPCapabilities`.
     public init(
         meta: JSONValue? = nil
     ) {
@@ -2884,7 +2884,7 @@ public struct McpHttpCapabilities: Codable, Hashable, Sendable {
         case meta = "_meta"
     }
 
-    /// Decodes a `McpHttpCapabilities`; forgiving fields degrade to their
+    /// Decodes a `MCPHTTPCapabilities`; forgiving fields degrade to their
     /// schema defaults instead of failing the message.
     ///
     /// - Parameter decoder: The decoder positioned at the object.
@@ -2895,7 +2895,7 @@ public struct McpHttpCapabilities: Codable, Hashable, Sendable {
         self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
     }
 
-    /// Encodes a `McpHttpCapabilities`, omitting nil optional fields — never
+    /// Encodes a `MCPHTTPCapabilities`, omitting nil optional fields — never
     /// emitting JSON null for an absent capability-gated field.
     ///
     /// - Parameter encoder: The encoder to write the object into.
@@ -2907,7 +2907,7 @@ public struct McpHttpCapabilities: Codable, Hashable, Sendable {
 }
 
 /// HTTP transport configuration for MCP.
-public struct McpServerHttp: Codable, Hashable, Sendable {
+public struct MCPServerHTTP: Codable, Hashable, Sendable {
     /// Human-readable name identifying this MCP server.
     public var name: String
 
@@ -2915,7 +2915,7 @@ public struct McpServerHttp: Codable, Hashable, Sendable {
     public var url: String
 
     /// HTTP headers to set when making requests to the MCP server.
-    public var headers: [HttpHeader]?
+    public var headers: [HTTPHeader]?
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
     /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
@@ -2924,11 +2924,11 @@ public struct McpServerHttp: Codable, Hashable, Sendable {
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
 
-    /// Creates a `McpServerHttp`.
+    /// Creates a `MCPServerHTTP`.
     public init(
         name: String,
         url: String,
-        headers: [HttpHeader]? = nil,
+        headers: [HTTPHeader]? = nil,
         meta: JSONValue? = nil
     ) {
         self.name = name
@@ -2944,7 +2944,7 @@ public struct McpServerHttp: Codable, Hashable, Sendable {
         case meta = "_meta"
     }
 
-    /// Decodes a `McpServerHttp`; forgiving fields degrade to their
+    /// Decodes a `MCPServerHTTP`; forgiving fields degrade to their
     /// schema defaults instead of failing the message.
     ///
     /// - Parameter decoder: The decoder positioned at the object.
@@ -2954,11 +2954,11 @@ public struct McpServerHttp: Codable, Hashable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.name = try container.decode(String.self, forKey: .name)
         self.url = try container.decode(String.self, forKey: .url)
-        self.headers = try container.decodeIfPresent([HttpHeader].self, forKey: .headers)
+        self.headers = try container.decodeIfPresent([HTTPHeader].self, forKey: .headers)
         self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
     }
 
-    /// Encodes a `McpServerHttp`, omitting nil optional fields — never
+    /// Encodes a `MCPServerHTTP`, omitting nil optional fields — never
     /// emitting JSON null for an absent capability-gated field.
     ///
     /// - Parameter encoder: The encoder to write the object into.
@@ -2973,7 +2973,7 @@ public struct McpServerHttp: Codable, Hashable, Sendable {
 }
 
 /// Stdio transport configuration for MCP.
-public struct McpServerStdio: Codable, Hashable, Sendable {
+public struct MCPServerStdio: Codable, Hashable, Sendable {
     /// Absolute path to the MCP server executable.
     public var command: AbsolutePath
 
@@ -2993,7 +2993,7 @@ public struct McpServerStdio: Codable, Hashable, Sendable {
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
 
-    /// Creates a `McpServerStdio`.
+    /// Creates a `MCPServerStdio`.
     public init(
         command: AbsolutePath,
         name: String,
@@ -3016,7 +3016,7 @@ public struct McpServerStdio: Codable, Hashable, Sendable {
         case meta = "_meta"
     }
 
-    /// Decodes a `McpServerStdio`; forgiving fields degrade to their
+    /// Decodes a `MCPServerStdio`; forgiving fields degrade to their
     /// schema defaults instead of failing the message.
     ///
     /// - Parameter decoder: The decoder positioned at the object.
@@ -3031,7 +3031,7 @@ public struct McpServerStdio: Codable, Hashable, Sendable {
         self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
     }
 
-    /// Encodes a `McpServerStdio`, omitting nil optional fields — never
+    /// Encodes a `MCPServerStdio`, omitting nil optional fields — never
     /// emitting JSON null for an absent capability-gated field.
     ///
     /// - Parameter encoder: The encoder to write the object into.
@@ -3049,7 +3049,7 @@ public struct McpServerStdio: Codable, Hashable, Sendable {
 /// Capabilities for stdio MCP server transports.
 ///
 /// Supplying `{}` means the agent supports stdio MCP server transports.
-public struct McpStdioCapabilities: Codable, Hashable, Sendable {
+public struct MCPStdioCapabilities: Codable, Hashable, Sendable {
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
     /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
     /// these keys.
@@ -3057,7 +3057,7 @@ public struct McpStdioCapabilities: Codable, Hashable, Sendable {
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
 
-    /// Creates a `McpStdioCapabilities`.
+    /// Creates a `MCPStdioCapabilities`.
     public init(
         meta: JSONValue? = nil
     ) {
@@ -3068,7 +3068,7 @@ public struct McpStdioCapabilities: Codable, Hashable, Sendable {
         case meta = "_meta"
     }
 
-    /// Decodes a `McpStdioCapabilities`; forgiving fields degrade to their
+    /// Decodes a `MCPStdioCapabilities`; forgiving fields degrade to their
     /// schema defaults instead of failing the message.
     ///
     /// - Parameter decoder: The decoder positioned at the object.
@@ -3079,7 +3079,7 @@ public struct McpStdioCapabilities: Codable, Hashable, Sendable {
         self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
     }
 
-    /// Encodes a `McpStdioCapabilities`, omitting nil optional fields — never
+    /// Encodes a `MCPStdioCapabilities`, omitting nil optional fields — never
     /// emitting JSON null for an absent capability-gated field.
     ///
     /// - Parameter encoder: The encoder to write the object into.
@@ -3105,7 +3105,7 @@ public struct NewSessionRequest: Codable, Hashable, Sendable {
     public var additionalDirectories: [AbsolutePath]?
 
     /// List of MCP (Model Context Protocol) servers the agent should connect to.
-    public var mcpServers: [McpServer]?
+    public var mcpServers: [MCPServer]?
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
     /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
@@ -3118,7 +3118,7 @@ public struct NewSessionRequest: Codable, Hashable, Sendable {
     public init(
         cwd: AbsolutePath,
         additionalDirectories: [AbsolutePath]? = nil,
-        mcpServers: [McpServer]? = nil,
+        mcpServers: [MCPServer]? = nil,
         meta: JSONValue? = nil
     ) {
         self.cwd = cwd
@@ -3144,7 +3144,7 @@ public struct NewSessionRequest: Codable, Hashable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.cwd = try container.decode(AbsolutePath.self, forKey: .cwd)
         self.additionalDirectories = container.forgivingDecodeArrayIfPresent(of: AbsolutePath.self, forKey: .additionalDirectories)
-        self.mcpServers = container.forgivingDecodeArrayIfPresent(of: McpServer.self, forKey: .mcpServers)
+        self.mcpServers = container.forgivingDecodeArrayIfPresent(of: MCPServer.self, forKey: .mcpServers)
         self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
     }
 
@@ -4216,7 +4216,7 @@ public struct ResumeSessionRequest: Codable, Hashable, Sendable {
     public var additionalDirectories: [AbsolutePath]?
 
     /// List of MCP servers to connect to for this session.
-    public var mcpServers: [McpServer]?
+    public var mcpServers: [MCPServer]?
 
     /// Inclusive cursor describing where conversation replay should begin.
     ///
@@ -4239,7 +4239,7 @@ public struct ResumeSessionRequest: Codable, Hashable, Sendable {
         cwd: AbsolutePath,
         sessionId: SessionId,
         additionalDirectories: [AbsolutePath]? = nil,
-        mcpServers: [McpServer]? = nil,
+        mcpServers: [MCPServer]? = nil,
         replayFrom: ReplayFrom? = nil,
         meta: JSONValue? = nil
     ) {
@@ -4271,7 +4271,7 @@ public struct ResumeSessionRequest: Codable, Hashable, Sendable {
         self.cwd = try container.decode(AbsolutePath.self, forKey: .cwd)
         self.sessionId = try container.decode(SessionId.self, forKey: .sessionId)
         self.additionalDirectories = container.forgivingDecodeArrayIfPresent(of: AbsolutePath.self, forKey: .additionalDirectories)
-        self.mcpServers = container.forgivingDecodeArrayIfPresent(of: McpServer.self, forKey: .mcpServers)
+        self.mcpServers = container.forgivingDecodeArrayIfPresent(of: MCPServer.self, forKey: .mcpServers)
         self.replayFrom = container.forgivingDecodeIfPresent(ReplayFrom.self, forKey: .replayFrom)
         self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
     }
@@ -4513,7 +4513,7 @@ public struct SessionCapabilities: Codable, Hashable, Sendable {
     ///
     /// Optional. Omitted or `null` both mean the agent does not advertise MCP
     /// server transport support for sessions.
-    public var mcp: McpCapabilities?
+    public var mcp: MCPCapabilities?
 
     /// Prompt capabilities supported by the agent in `session/prompt` requests.
     ///
@@ -4533,7 +4533,7 @@ public struct SessionCapabilities: Codable, Hashable, Sendable {
     public init(
         additionalDirectories: SessionAdditionalDirectoriesCapabilities? = nil,
         delete: SessionDeleteCapabilities? = nil,
-        mcp: McpCapabilities? = nil,
+        mcp: MCPCapabilities? = nil,
         prompt: PromptCapabilities? = nil,
         meta: JSONValue? = nil
     ) {
@@ -4562,7 +4562,7 @@ public struct SessionCapabilities: Codable, Hashable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.additionalDirectories = container.forgivingDecodeIfPresent(SessionAdditionalDirectoriesCapabilities.self, forKey: .additionalDirectories)
         self.delete = container.forgivingDecodeIfPresent(SessionDeleteCapabilities.self, forKey: .delete)
-        self.mcp = container.forgivingDecodeIfPresent(McpCapabilities.self, forKey: .mcp)
+        self.mcp = container.forgivingDecodeIfPresent(MCPCapabilities.self, forKey: .mcp)
         self.prompt = container.forgivingDecodeIfPresent(PromptCapabilities.self, forKey: .prompt)
         self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
     }

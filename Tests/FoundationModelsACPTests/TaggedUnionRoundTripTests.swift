@@ -46,7 +46,7 @@ import Testing
         UnionUnderTest(definition: "AuthMethod", roundTrip: roundTrip(AuthMethod.self)),
         UnionUnderTest(definition: "AvailableCommandInput", roundTrip: roundTrip(AvailableCommandInput.self)),
         UnionUnderTest(definition: "ContentBlock", roundTrip: roundTrip(ContentBlock.self)),
-        UnionUnderTest(definition: "McpServer", roundTrip: roundTrip(McpServer.self)),
+        UnionUnderTest(definition: "McpServer", roundTrip: roundTrip(MCPServer.self)),
         UnionUnderTest(definition: "PlanUpdateContent", roundTrip: roundTrip(PlanUpdateContent.self)),
         UnionUnderTest(definition: "ReplayFrom", roundTrip: roundTrip(ReplayFrom.self)),
         UnionUnderTest(definition: "RequestPermissionOutcome", roundTrip: roundTrip(RequestPermissionOutcome.self)),
@@ -253,7 +253,7 @@ import Testing
         #expect(toolCall.toolCallId == ToolCallId(rawValue: "call-1"))
         #expect(toolCall.status == .completed)
 
-        let server = try WireRoundTrip.expectLossless(McpServer.self, """
+        let server = try WireRoundTrip.expectLossless(MCPServer.self, """
             {"type":"stdio","name":"local","command":"/usr/bin/server","args":["--flag"]}
             """)
         guard case .stdio(let stdio) = server else {

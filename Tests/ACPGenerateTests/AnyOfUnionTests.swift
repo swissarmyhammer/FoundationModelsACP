@@ -184,6 +184,7 @@ import Testing
         // rather than each carrying its own copy of the literal.
         #expect(models.contains(#"private static let excludedMembers = ["operation", "id"]"#))
         #expect(models.contains("try JSONValue(from: decoder, excludingMembers: Self.excludedMembers)"))
+        #expect(models.contains("encodeMembers(to: encoder, reserving: Self.excludedMembers)"))
         let unresolved = try #require(files.first { $0.name == "Unresolved.generated.swift" }).contents
         #expect(!unresolved.contains("typealias Change"))
     }

@@ -203,7 +203,7 @@ import FoundationModelsACP
             Self.declaredTypeNames(in: unions).filter {
                 Self.declaration(named: $0, in: unions)?.contains("case unknown(String, JSONValue)") == true
             } == [
-                "AuthMethod", "AvailableCommandInput", "ContentBlock", "McpServer", "PlanUpdateContent",
+                "AuthMethod", "AvailableCommandInput", "ContentBlock", "MCPServer", "PlanUpdateContent",
                 "ReplayFrom", "RequestPermissionOutcome", "RequestPermissionSubject", "SessionUpdate",
                 "StateUpdate", "ToolCallContent",
             ]
@@ -298,7 +298,7 @@ import FoundationModelsACP
                 "DiffPathPairChange.oldPath: AbsolutePath",
                 "DiffPathPairChange.path: AbsolutePath",
                 "ListSessionsRequest.cwd: AbsolutePath?",
-                "McpServerStdio.command: AbsolutePath",
+                "MCPServerStdio.command: AbsolutePath",
                 "NewSessionRequest.cwd: AbsolutePath",
                 "NewSessionRequest.additionalDirectories: [AbsolutePath]?",
                 "ResumeSessionRequest.cwd: AbsolutePath",

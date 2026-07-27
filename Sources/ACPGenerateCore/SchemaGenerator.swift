@@ -270,7 +270,34 @@ public struct SchemaGenerator: Sendable {
     /// - Parameter name: The schema definition name.
     /// - Returns: The renamed Swift type name, or the name unchanged.
     private func emittedName(name: String) -> String {
-        config.typeRenames[name] ?? name
+        applyKnownAcronymCasing(to: config.typeRenames[name] ?? name)
+    }
+
+    /// Uppercases every PascalCase word of `name` that matches a
+    /// `GeneratorConfig.knownAcronyms` entry, case-insensitively.
+    ///
+    /// Splits at each capital-letter boundary, so `McpServerHttp` becomes the
+    /// words `Mcp`, `Server`, `Http`; a word whose uppercased form is a known
+    /// acronym (`MCP`, `HTTP`) is replaced by that all-caps form, and every
+    /// other word — including one that is already all-caps, such as an
+    /// earlier `typeRenames` result — passes through unchanged.
+    ///
+    /// - Parameter name: A PascalCase Swift type name.
+    /// - Returns: `name` with every recognized acronym word uppercased.
+    private func applyKnownAcronymCasing(to name: String) -> String {
+        guard !config.knownAcronyms.isEmpty else { return name }
+        let acronyms = Set(config.knownAcronyms.map { $0.uppercased() })
+        var words: [String] = []
+        var word = ""
+        for character in name {
+            if character.isUppercase, !word.isEmpty {
+                words.append(word)
+                word = ""
+            }
+            word.append(character)
+        }
+        if !word.isEmpty { words.append(word) }
+        return words.map { acronyms.contains($0.uppercased()) ? $0.uppercased() : $0 }.joined()
     }
 
     /// Decodes raw input bytes as a JSON value.

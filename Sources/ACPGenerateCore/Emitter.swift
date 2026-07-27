@@ -181,8 +181,7 @@ enum Emitter {
         return parameter
     }
 
-    /// Renders a parenthesized parameter list's body: one item per line,
-    /// indented one level, comma-terminated except the last.
+    /// Renders a parenthesized parameter list's body: one item per line, indented one level, comma-terminated except the last.
     ///
     /// Shared by every initializer emitter so the comma bookkeeping lives in
     /// one place rather than being repeated at each call site.
@@ -333,8 +332,7 @@ enum Emitter {
         ]
     }
 
-    /// Renders the array literal of member names an unrecognized variant's
-    /// payload must not hold, because something else encodes them.
+    /// Renders the array literal of member names an unrecognized variant's payload must not hold, because something else encodes them.
     ///
     /// - Parameters:
     ///   - discriminator: The union's discriminator wire name.
@@ -345,8 +343,7 @@ enum Emitter {
         "[\(([discriminator] + siblingMembers).map(stringLiteral).joined(separator: ", "))]"
     }
 
-    /// Renders the private constant naming the members an unrecognized
-    /// variant's payload must not hold.
+    /// Renders the private constant naming the members an unrecognized variant's payload must not hold.
     ///
     /// The decode arm excludes this list and the encode arm reserves it; both
     /// read the one constant declared here instead of each carrying its own

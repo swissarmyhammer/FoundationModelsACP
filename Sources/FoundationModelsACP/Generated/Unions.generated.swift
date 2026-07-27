@@ -483,16 +483,16 @@ public enum IconTheme: Codable, Hashable, Sendable {
 /// processing prompts.
 ///
 /// See protocol docs: [MCP Servers](https://agentclientprotocol.com/protocol/v2/session-setup#mcp-servers)
-public enum McpServer: Codable, Hashable, Sendable {
+public enum MCPServer: Codable, Hashable, Sendable {
     /// HTTP transport configuration
     ///
     /// Only available when the Agent capabilities include `session.mcp.http`.
-    case http(McpServerHttp)
+    case http(MCPServerHTTP)
 
     /// Stdio transport configuration
     ///
     /// Only available when the Agent capabilities include `session.mcp.stdio`.
-    case stdio(McpServerStdio)
+    case stdio(MCPServerStdio)
 
     /// An unrecognized `type` value, captured alongside the members
     /// of the object that no other property owns, so a variant this revision
@@ -520,9 +520,9 @@ public enum McpServer: Codable, Hashable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(String.self, forKey: .type) {
         case "http":
-            self = .http(try McpServerHttp(from: decoder))
+            self = .http(try MCPServerHTTP(from: decoder))
         case "stdio":
-            self = .stdio(try McpServerStdio(from: decoder))
+            self = .stdio(try MCPServerStdio(from: decoder))
         case let other:
             self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }

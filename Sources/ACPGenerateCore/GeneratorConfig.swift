@@ -30,6 +30,20 @@ public struct GeneratorConfig: Sendable {
     /// Definition names never appear on the wire, so renames are coding-safe.
     public var typeRenames: [String: String]
 
+    /// Acronyms that must read as a single all-caps word in an emitted
+    /// UpperCamelCase type name (e.g. `HTTP`, not `Http`).
+    ///
+    /// A schema definition name carries the schema author's own casing
+    /// (`McpServerHttp`), not Swift's convention for acronyms. Every
+    /// generated type name is normalized against this set uniformly —
+    /// wherever the acronym appears in the name, not only at one recorded
+    /// call site — rather than special-casing individual definitions in
+    /// `typeRenames`, which would only catch the names someone remembered to
+    /// list. Matching is case-insensitive per word; only whole PascalCase
+    /// words are checked, so a word merely containing an entry (e.g.
+    /// `Https` against `HTTP`) is left alone.
+    public var knownAcronyms: Set<String>
+
     /// Definitions whose Swift types are hand-written in the library's Core
     /// directory; the generator resolves references to them but never emits
     /// them.
@@ -55,18 +69,21 @@ public struct GeneratorConfig: Sendable {
     /// - Parameters:
     ///   - wireInvariantFields: Field→invariant-type overrides.
     ///   - typeRenames: Definition-name renames.
+    ///   - knownAcronyms: Acronyms normalized to all-caps in type names.
     ///   - handwrittenDefinitions: Definitions to skip emitting.
     ///   - deprecatedMethods: Wire method → deprecation message markers.
     ///   - manifestVersion: The version the routing manifests must declare.
     public init(
         wireInvariantFields: [String: InvariantType] = [:],
         typeRenames: [String: String] = [:],
+        knownAcronyms: Set<String> = [],
         handwrittenDefinitions: Set<String> = [],
         deprecatedMethods: [String: String] = [:],
         manifestVersion: Int = 1
     ) {
         self.wireInvariantFields = wireInvariantFields
         self.typeRenames = typeRenames
+        self.knownAcronyms = knownAcronyms
         self.handwrittenDefinitions = handwrittenDefinitions
         self.deprecatedMethods = deprecatedMethods
         self.manifestVersion = manifestVersion
@@ -91,6 +108,13 @@ public struct GeneratorConfig: Sendable {
             "Error": "ACPError",
             // Swift API Design Guidelines cased acronym (`entryID`-style).
             "RequestId": "RequestID",
+        ],
+        knownAcronyms: [
+            // ACP's transport for `McpServer` variants; not an Apple-guideline
+            // acronym, but the same all-caps convention applies to any
+            // acronym, and the schema spells it mixed-case throughout.
+            "MCP",
+            "HTTP",
         ],
         handwrittenDefinitions: [
             // Hand-written in Core, rejecting relative paths at decode.
