@@ -25,13 +25,31 @@ extension JSONValue {
         }
     }
 
+    /// Re-encodes one Codable value as another by round-tripping through JSON.
+    ///
+    /// Both `encode` and `decoded` need to move a value from one Codable type
+    /// to another; this helper holds the shared encode-then-decode mechanics
+    /// so they only differ in what is encoded and what type to decode to.
+    ///
+    /// - Parameters:
+    ///   - value: The value to encode.
+    ///   - toType: The type to decode the encoded bytes into.
+    /// - Returns: The decoded value.
+    /// - Throws: Rethrows any encoding or decoding failure.
+    private static func transcode<From: Encodable, To: Decodable>(
+        _ value: From,
+        as toType: To.Type
+    ) throws -> To {
+        try JSONDecoder().decode(toType, from: JSONEncoder().encode(value))
+    }
+
     /// Encodes a handler's typed result into a structural value for the wire.
     ///
     /// - Parameter result: The model to encode.
     /// - Returns: The encoded structural value.
     /// - Throws: Rethrows any encoding or re-parse failure.
     static func encode<Model: Encodable>(result: Model) throws -> JSONValue {
-        try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(result))
+        try transcode(result, as: JSONValue.self)
     }
 
     /// Decodes this structural value into a caller's expected response model.
@@ -40,7 +58,7 @@ extension JSONValue {
     /// - Returns: The decoded model.
     /// - Throws: Rethrows any decode failure from a malformed peer response.
     func decoded<Model: Decodable>(as modelType: Model.Type) throws -> Model {
-        try JSONDecoder().decode(Model.self, from: JSONEncoder().encode(self))
+        try Self.transcode(self, as: modelType)
     }
 }
 
