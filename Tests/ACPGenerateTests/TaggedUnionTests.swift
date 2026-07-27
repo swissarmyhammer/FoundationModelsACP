@@ -90,8 +90,11 @@ private func assertRoundTrips<T: Codable & Equatable>(_ type: T.Type, fixture: S
 
     @Test func quoteBearingTagEscapesInEmittedSource() throws {
         // `swiftCaseName` rejects such tags at the generator boundary, but
-        // the emitter must be safe on its own terms: a quote or backslash
-        // in a tag may never break out of the generated string literal.
+        // the emitter must be safe on its own terms: a quote or backslash in
+        // a tag may never break out of the generated string literal. The tag
+        // is written once, as the `Tag` enum's raw value — both decode
+        // (`Tag(rawValue:)`) and encode (`Tag.aBC.rawValue`) read that one
+        // literal back rather than each carrying their own copy.
         let model = TaggedUnionModel(
             name: "Weird",
             documentation: nil,
@@ -102,9 +105,9 @@ private func assertRoundTrips<T: Codable & Equatable>(_ type: T.Type, fixture: S
             ]
         )
         let source = Emitter.taggedUnionDeclaration(model)
-        #expect(source.contains(#"case "a\"b\\c":"#))
-        #expect(source.contains(#"try container.encode("a\"b\\c", forKey: .type)"#))
-        #expect(!source.contains(#"case "a"b\c":"#))
+        #expect(source.contains(#"case aBC = "a\"b\\c""#))
+        #expect(source.contains("try container.encode(Tag.aBC.rawValue, forKey: .type)"))
+        #expect(!source.contains(#"case aBC = "a"b\c""#))
     }
 
     @Test func swiftKeywordWireValueFailsLoudly() throws {

@@ -1584,6 +1584,14 @@ public struct DiffChange: Codable, Hashable, Sendable {
             case operation
         }
 
+        private enum Tag: String {
+            case add = "add"
+            case delete = "delete"
+            case modify = "modify"
+            case move = "move"
+            case copy = "copy"
+        }
+
         private static let excludedMembers = ["operation", "fileType", "mimeType", "_meta"]
 
         /// Decodes by the `operation` discriminator, routing
@@ -1594,19 +1602,20 @@ public struct DiffChange: Codable, Hashable, Sendable {
         ///   known variant's payload is malformed.
         public init(from decoder: any Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            switch try container.decode(String.self, forKey: .operation) {
-            case "add":
+            let discriminator = try container.decode(String.self, forKey: .operation)
+            switch Tag(rawValue: discriminator) {
+            case .add:
                 self = .add(try DiffPathChange(from: decoder))
-            case "delete":
+            case .delete:
                 self = .delete(try DiffPathChange(from: decoder))
-            case "modify":
+            case .modify:
                 self = .modify(try DiffPathChange(from: decoder))
-            case "move":
+            case .move:
                 self = .move(try DiffPathPairChange(from: decoder))
-            case "copy":
+            case .copy:
                 self = .copy(try DiffPathPairChange(from: decoder))
-            case let other:
-                self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
+            case nil:
+                self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
             }
         }
 
@@ -1619,19 +1628,19 @@ public struct DiffChange: Codable, Hashable, Sendable {
             var container = encoder.container(keyedBy: CodingKeys.self)
             switch self {
             case .add(let payload):
-                try container.encode("add", forKey: .operation)
+                try container.encode(Tag.add.rawValue, forKey: .operation)
                 try payload.encode(to: encoder)
             case .delete(let payload):
-                try container.encode("delete", forKey: .operation)
+                try container.encode(Tag.delete.rawValue, forKey: .operation)
                 try payload.encode(to: encoder)
             case .modify(let payload):
-                try container.encode("modify", forKey: .operation)
+                try container.encode(Tag.modify.rawValue, forKey: .operation)
                 try payload.encode(to: encoder)
             case .move(let payload):
-                try container.encode("move", forKey: .operation)
+                try container.encode(Tag.move.rawValue, forKey: .operation)
                 try payload.encode(to: encoder)
             case .copy(let payload):
-                try container.encode("copy", forKey: .operation)
+                try container.encode(Tag.copy.rawValue, forKey: .operation)
                 try payload.encode(to: encoder)
             case .unknown(let discriminator, let payload):
                 try container.encode(discriminator, forKey: .operation)
@@ -2800,13 +2809,13 @@ public struct LogoutAuthResponse: Codable, Hashable, Sendable {
 
 /// MCP capabilities supported by the agent for session lifecycle requests.
 public struct MCPCapabilities: Codable, Hashable, Sendable {
-    /// Agent supports [`McpServer::Http`].
+    /// Agent supports [`MCPServer::HTTP`].
     ///
     /// Optional. Omitted or `null` both mean the agent does not advertise support.
     /// Supplying `{}` means the agent supports HTTP MCP server transports.
     public var http: MCPHTTPCapabilities?
 
-    /// Agent supports [`McpServer::Stdio`].
+    /// Agent supports [`MCPServer::Stdio`].
     ///
     /// Optional. Omitted or `null` both mean the agent does not advertise support.
     /// Supplying `{}` means the agent supports stdio MCP server transports.
@@ -4644,6 +4653,11 @@ public struct SessionConfigOption: Codable, Hashable, Sendable {
             case type
         }
 
+        private enum Tag: String {
+            case select = "select"
+            case boolean = "boolean"
+        }
+
         private static let excludedMembers = ["type", "configId", "name", "category", "description", "_meta"]
 
         /// Decodes by the `type` discriminator, routing
@@ -4654,13 +4668,14 @@ public struct SessionConfigOption: Codable, Hashable, Sendable {
         ///   known variant's payload is malformed.
         public init(from decoder: any Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            switch try container.decode(String.self, forKey: .type) {
-            case "select":
+            let discriminator = try container.decode(String.self, forKey: .type)
+            switch Tag(rawValue: discriminator) {
+            case .select:
                 self = .select(try SessionConfigSelect(from: decoder))
-            case "boolean":
+            case .boolean:
                 self = .boolean(try SessionConfigBoolean(from: decoder))
-            case let other:
-                self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
+            case nil:
+                self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
             }
         }
 
@@ -4673,10 +4688,10 @@ public struct SessionConfigOption: Codable, Hashable, Sendable {
             var container = encoder.container(keyedBy: CodingKeys.self)
             switch self {
             case .select(let payload):
-                try container.encode("select", forKey: .type)
+                try container.encode(Tag.select.rawValue, forKey: .type)
                 try payload.encode(to: encoder)
             case .boolean(let payload):
-                try container.encode("boolean", forKey: .type)
+                try container.encode(Tag.boolean.rawValue, forKey: .type)
                 try payload.encode(to: encoder)
             case .unknown(let discriminator, let payload):
                 try container.encode(discriminator, forKey: .type)
@@ -5154,6 +5169,11 @@ public struct SetSessionConfigOptionRequest: Codable, Hashable, Sendable {
             case value
         }
 
+        private enum Tag: String {
+            case id = "id"
+            case boolean = "boolean"
+        }
+
         /// Decodes the value by its `type` discriminator,
         /// routing an unrecognized value to the default variant, which
         /// captures it so it round-trips unchanged on re-encode.
@@ -5162,13 +5182,14 @@ public struct SetSessionConfigOptionRequest: Codable, Hashable, Sendable {
         /// - Throws: `DecodingError` when the payload is missing or mistyped.
         public init(from decoder: any Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            switch try container.decode(String.self, forKey: .type) {
-            case "id":
+            let discriminator = try container.decode(String.self, forKey: .type)
+            switch Tag(rawValue: discriminator) {
+            case .id:
                 self = .id(try container.decode(SessionConfigValueId.self, forKey: .value))
-            case "boolean":
+            case .boolean:
                 self = .boolean(try container.decode(Bool.self, forKey: .value))
-            case let other:
-                self = .other(other, try container.decode(JSONValue.self, forKey: .value))
+            case nil:
+                self = .other(discriminator, try container.decode(JSONValue.self, forKey: .value))
             }
         }
 
@@ -5181,10 +5202,10 @@ public struct SetSessionConfigOptionRequest: Codable, Hashable, Sendable {
             var container = encoder.container(keyedBy: CodingKeys.self)
             switch self {
             case .id(let payload):
-                try container.encode("id", forKey: .type)
+                try container.encode(Tag.id.rawValue, forKey: .type)
                 try container.encode(payload, forKey: .value)
             case .boolean(let payload):
-                try container.encode("boolean", forKey: .type)
+                try container.encode(Tag.boolean.rawValue, forKey: .type)
                 try container.encode(payload, forKey: .value)
             case .other(let discriminator, let payload):
                 try container.encode(discriminator, forKey: .type)

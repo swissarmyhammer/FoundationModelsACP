@@ -85,7 +85,7 @@ public struct SchemaGenerator: Sendable {
         var placeholders: [String] = []
 
         for (name, fragment) in Self.orderedEntries(of: definitions) {
-            let documentation = fragment[Self.descriptionKey]?.stringValue
+            let documentation = description(of: fragment)
             switch try classify(name: name, fragment: fragment) {
             case .handwritten:
                 continue
@@ -298,6 +298,60 @@ public struct SchemaGenerator: Sendable {
         }
         if !word.isEmpty { words.append(word) }
         return words.map { acronyms.contains($0.uppercased()) ? $0.uppercased() : $0 }.joined()
+    }
+
+    /// A schema fragment's `description`, acronym-cased the same way
+    /// `emittedName` cases an identifier.
+    ///
+    /// A description can quote a renamed definition by its original schema
+    /// spelling (`McpServer::Http`), and that quote goes stale the moment the
+    /// definition's own emitted name picks up `knownAcronyms` casing
+    /// (`MCPServer::HTTP`) while the doc comment does not. Every call site
+    /// that used to read a fragment's `description` directly now routes
+    /// through here instead, so a doc comment can never fall behind the
+    /// identifiers it quotes.
+    ///
+    /// - Parameter fragment: The schema fragment carrying the description.
+    /// - Returns: The description text with acronyms cased, or `nil` when
+    ///   the fragment has none.
+    private func description(of fragment: JSONValue) -> String? {
+        fragment[Self.descriptionKey]?.stringValue.map(applyKnownAcronymCasingToProse)
+    }
+
+    /// Applies `applyKnownAcronymCasing` to every capitalized identifier-like
+    /// word in free text, rather than to one whole PascalCase type name.
+    ///
+    /// A description's quoted reference to a renamed type does not occupy
+    /// the whole string (`Agent supports [\`McpServer::Http\`].`), so each
+    /// maximal run of letters and digits is cased independently and every
+    /// other character — spaces, backticks, brackets, `::` — passes through
+    /// unchanged. Only a word starting with an uppercase letter is a
+    /// candidate: the schema also quotes lowercase, dotted wire-member paths
+    /// like `session.mcp.http`, and those name actual JSON keys rather than
+    /// a renamed type, so they must not pick up the type-name casing.
+    ///
+    /// - Parameter text: The free-form documentation text.
+    /// - Returns: `text` with every recognized acronym word capitalized as a
+    ///   type name, wherever it already reads as one.
+    private func applyKnownAcronymCasingToProse(_ text: String) -> String {
+        guard !config.knownAcronyms.isEmpty else { return text }
+        var result = ""
+        var word = ""
+        func flushWord() {
+            guard !word.isEmpty else { return }
+            result += word.first?.isUppercase == true ? applyKnownAcronymCasing(to: word) : word
+            word = ""
+        }
+        for character in text {
+            if character.isLetter || character.isNumber {
+                word.append(character)
+            } else {
+                flushWord()
+                result.append(character)
+            }
+        }
+        flushWord()
+        return result
     }
 
     /// Decodes raw input bytes as a JSON value.
@@ -557,7 +611,7 @@ public struct SchemaGenerator: Sendable {
         try validateCaseNames(names: cases.map(\.swiftName), context: name)
         return ScalarEnumModel(
             name: emittedName(name: name),
-            documentation: fragment[Self.descriptionKey]?.stringValue,
+            documentation: description(of: fragment),
             rawKind: rawKind,
             cases: cases
         )
@@ -577,7 +631,7 @@ public struct SchemaGenerator: Sendable {
     /// - Throws: `GeneratorError.unsupportedShape` when the constant is not of
     ///   the enum's raw kind, or the case cannot be named.
     private func enumCaseModel(of variant: JSONValue, rawKind: EnumRawKind, context: String) throws -> EnumCaseModel {
-        let documentation = variant[Self.descriptionKey]?.stringValue
+        let documentation = description(of: variant)
         switch rawKind {
         case .string:
             guard let wireValue = variant[Self.constKey]?.stringValue else {
@@ -628,7 +682,7 @@ public struct SchemaGenerator: Sendable {
                 tag: tag,
                 swiftName: try swiftCaseName(fromWire: tag, context: context),
                 payloadType: payloadType,
-                documentation: variant[Self.descriptionKey]?.stringValue
+                documentation: description(of: variant)
             )
         }
         guard let discriminator else {
@@ -640,7 +694,7 @@ public struct SchemaGenerator: Sendable {
         _ = try swiftCaseName(fromWire: discriminator, context: "\(name) discriminator")
         return TaggedUnionModel(
             name: emittedName(name: name),
-            documentation: fragment[Self.descriptionKey]?.stringValue,
+            documentation: description(of: fragment),
             discriminator: discriminator,
             siblingMembers: [],
             cases: cases
@@ -810,7 +864,7 @@ public struct SchemaGenerator: Sendable {
         let cases = try variants.enumerated().map { index, variant -> DiscriminatedCaseModel in
             let context = "\(name) variant \(index)"
             let payloadType = try discriminatedPayloadType(of: variant, context: context)
-            let documentation = variant[Self.descriptionKey]?.stringValue
+            let documentation = description(of: variant)
             let properties = variant[Self.propertiesKey]?.objectValue ?? [:]
             guard !properties.isEmpty else {
                 defaultCount += 1
@@ -840,7 +894,7 @@ public struct SchemaGenerator: Sendable {
         _ = try swiftCaseName(fromWire: discriminator, context: "\(name) discriminator")
         return DiscriminatedUnionModel(
             name: emittedName(name: name),
-            documentation: fragment[Self.descriptionKey]?.stringValue,
+            documentation: description(of: fragment),
             discriminator: discriminator,
             cases: cases
         )
@@ -906,7 +960,7 @@ public struct SchemaGenerator: Sendable {
             }
             valueWireName = valueKey
             let valueType = try resolveType(fragment: valueFragment, override: nil, context: "\(context).\(valueKey)").base
-            let documentation = variant[Self.descriptionKey]?.stringValue
+            let documentation = description(of: variant)
             guard let tag = properties[discriminator]?[Self.constKey]?.stringValue else {
                 defaultCount += 1
                 // A default declaring the discriminator is selected by any
@@ -1175,7 +1229,7 @@ public struct SchemaGenerator: Sendable {
         }
         return StructModel(
             name: emittedName(name: name),
-            documentation: fragment[Self.descriptionKey]?.stringValue,
+            documentation: description(of: fragment),
             properties: models
         )
     }
@@ -1236,7 +1290,7 @@ public struct SchemaGenerator: Sendable {
             defaultsToEmptyInstance: defaults.isEmptyInstance,
             objectDefaultMembers: defaults.objectMembers,
             strategy: strategy,
-            documentation: fragment[Self.descriptionKey]?.stringValue
+            documentation: description(of: fragment)
         )
     }
 

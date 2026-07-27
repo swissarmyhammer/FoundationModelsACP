@@ -24,6 +24,10 @@ public enum AuthMethod: Codable, Hashable, Sendable {
         case type
     }
 
+    private enum Tag: String {
+        case agent = "agent"
+    }
+
     private static let excludedMembers = ["type"]
 
     /// Decodes by the `type` discriminator, routing
@@ -34,11 +38,12 @@ public enum AuthMethod: Codable, Hashable, Sendable {
     ///   known variant's payload is malformed.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .type) {
-        case "agent":
+        let discriminator = try container.decode(String.self, forKey: .type)
+        switch Tag(rawValue: discriminator) {
+        case .agent:
             self = .agent(try AuthMethodAgent(from: decoder))
-        case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
+        case nil:
+            self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -51,7 +56,7 @@ public enum AuthMethod: Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .agent(let payload):
-            try container.encode("agent", forKey: .type)
+            try container.encode(Tag.agent.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)
@@ -79,6 +84,10 @@ public enum AvailableCommandInput: Codable, Hashable, Sendable {
         case type
     }
 
+    private enum Tag: String {
+        case text = "text"
+    }
+
     private static let excludedMembers = ["type"]
 
     /// Decodes by the `type` discriminator, routing
@@ -89,11 +98,12 @@ public enum AvailableCommandInput: Codable, Hashable, Sendable {
     ///   known variant's payload is malformed.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .type) {
-        case "text":
+        let discriminator = try container.decode(String.self, forKey: .type)
+        switch Tag(rawValue: discriminator) {
+        case .text:
             self = .text(try TextCommandInput(from: decoder))
-        case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
+        case nil:
+            self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -106,7 +116,7 @@ public enum AvailableCommandInput: Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .text(let payload):
-            try container.encode("text", forKey: .type)
+            try container.encode(Tag.text.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)
@@ -173,6 +183,14 @@ public enum ContentBlock: Codable, Hashable, Sendable {
         case type
     }
 
+    private enum Tag: String {
+        case text = "text"
+        case image = "image"
+        case audio = "audio"
+        case resourceLink = "resource_link"
+        case resource = "resource"
+    }
+
     private static let excludedMembers = ["type"]
 
     /// Decodes by the `type` discriminator, routing
@@ -183,19 +201,20 @@ public enum ContentBlock: Codable, Hashable, Sendable {
     ///   known variant's payload is malformed.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .type) {
-        case "text":
+        let discriminator = try container.decode(String.self, forKey: .type)
+        switch Tag(rawValue: discriminator) {
+        case .text:
             self = .text(try TextContent(from: decoder))
-        case "image":
+        case .image:
             self = .image(try ImageContent(from: decoder))
-        case "audio":
+        case .audio:
             self = .audio(try AudioContent(from: decoder))
-        case "resource_link":
+        case .resourceLink:
             self = .resourceLink(try ResourceLink(from: decoder))
-        case "resource":
+        case .resource:
             self = .resource(try EmbeddedResource(from: decoder))
-        case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
+        case nil:
+            self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -208,19 +227,19 @@ public enum ContentBlock: Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .text(let payload):
-            try container.encode("text", forKey: .type)
+            try container.encode(Tag.text.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .image(let payload):
-            try container.encode("image", forKey: .type)
+            try container.encode(Tag.image.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .audio(let payload):
-            try container.encode("audio", forKey: .type)
+            try container.encode(Tag.audio.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .resourceLink(let payload):
-            try container.encode("resource_link", forKey: .type)
+            try container.encode(Tag.resourceLink.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .resource(let payload):
-            try container.encode("resource", forKey: .type)
+            try container.encode(Tag.resource.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)
@@ -508,6 +527,11 @@ public enum MCPServer: Codable, Hashable, Sendable {
         case type
     }
 
+    private enum Tag: String {
+        case http = "http"
+        case stdio = "stdio"
+    }
+
     private static let excludedMembers = ["type"]
 
     /// Decodes by the `type` discriminator, routing
@@ -518,13 +542,14 @@ public enum MCPServer: Codable, Hashable, Sendable {
     ///   known variant's payload is malformed.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .type) {
-        case "http":
+        let discriminator = try container.decode(String.self, forKey: .type)
+        switch Tag(rawValue: discriminator) {
+        case .http:
             self = .http(try MCPServerHTTP(from: decoder))
-        case "stdio":
+        case .stdio:
             self = .stdio(try MCPServerStdio(from: decoder))
-        case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
+        case nil:
+            self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -537,10 +562,10 @@ public enum MCPServer: Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .http(let payload):
-            try container.encode("http", forKey: .type)
+            try container.encode(Tag.http.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .stdio(let payload):
-            try container.encode("stdio", forKey: .type)
+            try container.encode(Tag.stdio.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)
@@ -755,6 +780,10 @@ public enum PlanUpdateContent: Codable, Hashable, Sendable {
         case type
     }
 
+    private enum Tag: String {
+        case items = "items"
+    }
+
     private static let excludedMembers = ["type"]
 
     /// Decodes by the `type` discriminator, routing
@@ -765,11 +794,12 @@ public enum PlanUpdateContent: Codable, Hashable, Sendable {
     ///   known variant's payload is malformed.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .type) {
-        case "items":
+        let discriminator = try container.decode(String.self, forKey: .type)
+        switch Tag(rawValue: discriminator) {
+        case .items:
             self = .items(try PlanItems(from: decoder))
-        case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
+        case nil:
+            self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -782,7 +812,7 @@ public enum PlanUpdateContent: Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .items(let payload):
-            try container.encode("items", forKey: .type)
+            try container.encode(Tag.items.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)
@@ -812,6 +842,10 @@ public enum ReplayFrom: Codable, Hashable, Sendable {
         case type
     }
 
+    private enum Tag: String {
+        case start = "start"
+    }
+
     private static let excludedMembers = ["type"]
 
     /// Decodes by the `type` discriminator, routing
@@ -822,11 +856,12 @@ public enum ReplayFrom: Codable, Hashable, Sendable {
     ///   known variant's payload is malformed.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .type) {
-        case "start":
+        let discriminator = try container.decode(String.self, forKey: .type)
+        switch Tag(rawValue: discriminator) {
+        case .start:
             self = .start(try ReplayFromStart(from: decoder))
-        case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
+        case nil:
+            self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -839,7 +874,7 @@ public enum ReplayFrom: Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .start(let payload):
-            try container.encode("start", forKey: .type)
+            try container.encode(Tag.start.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)
@@ -876,6 +911,11 @@ public enum RequestPermissionOutcome: Codable, Hashable, Sendable {
         case outcome
     }
 
+    private enum Tag: String {
+        case cancelled = "cancelled"
+        case selected = "selected"
+    }
+
     private static let excludedMembers = ["outcome"]
 
     /// Decodes by the `outcome` discriminator, routing
@@ -886,13 +926,14 @@ public enum RequestPermissionOutcome: Codable, Hashable, Sendable {
     ///   known variant's payload is malformed.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .outcome) {
-        case "cancelled":
+        let discriminator = try container.decode(String.self, forKey: .outcome)
+        switch Tag(rawValue: discriminator) {
+        case .cancelled:
             self = .cancelled
-        case "selected":
+        case .selected:
             self = .selected(try SelectedPermissionOutcome(from: decoder))
-        case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
+        case nil:
+            self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -905,9 +946,9 @@ public enum RequestPermissionOutcome: Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .cancelled:
-            try container.encode("cancelled", forKey: .outcome)
+            try container.encode(Tag.cancelled.rawValue, forKey: .outcome)
         case .selected(let payload):
-            try container.encode("selected", forKey: .outcome)
+            try container.encode(Tag.selected.rawValue, forKey: .outcome)
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .outcome)
@@ -938,6 +979,11 @@ public enum RequestPermissionSubject: Codable, Hashable, Sendable {
         case type
     }
 
+    private enum Tag: String {
+        case toolCall = "tool_call"
+        case command = "command"
+    }
+
     private static let excludedMembers = ["type"]
 
     /// Decodes by the `type` discriminator, routing
@@ -948,13 +994,14 @@ public enum RequestPermissionSubject: Codable, Hashable, Sendable {
     ///   known variant's payload is malformed.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .type) {
-        case "tool_call":
+        let discriminator = try container.decode(String.self, forKey: .type)
+        switch Tag(rawValue: discriminator) {
+        case .toolCall:
             self = .toolCall(try ToolCallPermissionSubject(from: decoder))
-        case "command":
+        case .command:
             self = .command(try CommandPermissionSubject(from: decoder))
-        case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
+        case nil:
+            self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -967,10 +1014,10 @@ public enum RequestPermissionSubject: Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .toolCall(let payload):
-            try container.encode("tool_call", forKey: .type)
+            try container.encode(Tag.toolCall.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .command(let payload):
-            try container.encode("command", forKey: .type)
+            try container.encode(Tag.command.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)
@@ -1180,6 +1227,25 @@ public enum SessionUpdate: Codable, Hashable, Sendable {
         case sessionUpdate
     }
 
+    private enum Tag: String {
+        case userMessageChunk = "user_message_chunk"
+        case userMessage = "user_message"
+        case agentMessageChunk = "agent_message_chunk"
+        case agentMessage = "agent_message"
+        case agentThoughtChunk = "agent_thought_chunk"
+        case agentThought = "agent_thought"
+        case stateUpdate = "state_update"
+        case toolCallContentChunk = "tool_call_content_chunk"
+        case toolCallUpdate = "tool_call_update"
+        case terminalUpdate = "terminal_update"
+        case terminalOutputChunk = "terminal_output_chunk"
+        case planUpdate = "plan_update"
+        case availableCommandsUpdate = "available_commands_update"
+        case configOptionUpdate = "config_option_update"
+        case sessionInfoUpdate = "session_info_update"
+        case usageUpdate = "usage_update"
+    }
+
     private static let excludedMembers = ["sessionUpdate"]
 
     /// Decodes by the `sessionUpdate` discriminator, routing
@@ -1190,41 +1256,42 @@ public enum SessionUpdate: Codable, Hashable, Sendable {
     ///   known variant's payload is malformed.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .sessionUpdate) {
-        case "user_message_chunk":
+        let discriminator = try container.decode(String.self, forKey: .sessionUpdate)
+        switch Tag(rawValue: discriminator) {
+        case .userMessageChunk:
             self = .userMessageChunk(try ContentChunk(from: decoder))
-        case "user_message":
+        case .userMessage:
             self = .userMessage(try UserMessage(from: decoder))
-        case "agent_message_chunk":
+        case .agentMessageChunk:
             self = .agentMessageChunk(try ContentChunk(from: decoder))
-        case "agent_message":
+        case .agentMessage:
             self = .agentMessage(try AgentMessage(from: decoder))
-        case "agent_thought_chunk":
+        case .agentThoughtChunk:
             self = .agentThoughtChunk(try ContentChunk(from: decoder))
-        case "agent_thought":
+        case .agentThought:
             self = .agentThought(try AgentThought(from: decoder))
-        case "state_update":
+        case .stateUpdate:
             self = .stateUpdate(try StateUpdate(from: decoder))
-        case "tool_call_content_chunk":
+        case .toolCallContentChunk:
             self = .toolCallContentChunk(try ToolCallContentChunk(from: decoder))
-        case "tool_call_update":
+        case .toolCallUpdate:
             self = .toolCallUpdate(try ToolCallUpdate(from: decoder))
-        case "terminal_update":
+        case .terminalUpdate:
             self = .terminalUpdate(try TerminalUpdate(from: decoder))
-        case "terminal_output_chunk":
+        case .terminalOutputChunk:
             self = .terminalOutputChunk(try TerminalOutputChunk(from: decoder))
-        case "plan_update":
+        case .planUpdate:
             self = .planUpdate(try PlanUpdate(from: decoder))
-        case "available_commands_update":
+        case .availableCommandsUpdate:
             self = .availableCommandsUpdate(try AvailableCommandsUpdate(from: decoder))
-        case "config_option_update":
+        case .configOptionUpdate:
             self = .configOptionUpdate(try ConfigOptionUpdate(from: decoder))
-        case "session_info_update":
+        case .sessionInfoUpdate:
             self = .sessionInfoUpdate(try SessionInfoUpdate(from: decoder))
-        case "usage_update":
+        case .usageUpdate:
             self = .usageUpdate(try UsageUpdate(from: decoder))
-        case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
+        case nil:
+            self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -1237,52 +1304,52 @@ public enum SessionUpdate: Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .userMessageChunk(let payload):
-            try container.encode("user_message_chunk", forKey: .sessionUpdate)
+            try container.encode(Tag.userMessageChunk.rawValue, forKey: .sessionUpdate)
             try payload.encode(to: encoder)
         case .userMessage(let payload):
-            try container.encode("user_message", forKey: .sessionUpdate)
+            try container.encode(Tag.userMessage.rawValue, forKey: .sessionUpdate)
             try payload.encode(to: encoder)
         case .agentMessageChunk(let payload):
-            try container.encode("agent_message_chunk", forKey: .sessionUpdate)
+            try container.encode(Tag.agentMessageChunk.rawValue, forKey: .sessionUpdate)
             try payload.encode(to: encoder)
         case .agentMessage(let payload):
-            try container.encode("agent_message", forKey: .sessionUpdate)
+            try container.encode(Tag.agentMessage.rawValue, forKey: .sessionUpdate)
             try payload.encode(to: encoder)
         case .agentThoughtChunk(let payload):
-            try container.encode("agent_thought_chunk", forKey: .sessionUpdate)
+            try container.encode(Tag.agentThoughtChunk.rawValue, forKey: .sessionUpdate)
             try payload.encode(to: encoder)
         case .agentThought(let payload):
-            try container.encode("agent_thought", forKey: .sessionUpdate)
+            try container.encode(Tag.agentThought.rawValue, forKey: .sessionUpdate)
             try payload.encode(to: encoder)
         case .stateUpdate(let payload):
-            try container.encode("state_update", forKey: .sessionUpdate)
+            try container.encode(Tag.stateUpdate.rawValue, forKey: .sessionUpdate)
             try payload.encode(to: encoder)
         case .toolCallContentChunk(let payload):
-            try container.encode("tool_call_content_chunk", forKey: .sessionUpdate)
+            try container.encode(Tag.toolCallContentChunk.rawValue, forKey: .sessionUpdate)
             try payload.encode(to: encoder)
         case .toolCallUpdate(let payload):
-            try container.encode("tool_call_update", forKey: .sessionUpdate)
+            try container.encode(Tag.toolCallUpdate.rawValue, forKey: .sessionUpdate)
             try payload.encode(to: encoder)
         case .terminalUpdate(let payload):
-            try container.encode("terminal_update", forKey: .sessionUpdate)
+            try container.encode(Tag.terminalUpdate.rawValue, forKey: .sessionUpdate)
             try payload.encode(to: encoder)
         case .terminalOutputChunk(let payload):
-            try container.encode("terminal_output_chunk", forKey: .sessionUpdate)
+            try container.encode(Tag.terminalOutputChunk.rawValue, forKey: .sessionUpdate)
             try payload.encode(to: encoder)
         case .planUpdate(let payload):
-            try container.encode("plan_update", forKey: .sessionUpdate)
+            try container.encode(Tag.planUpdate.rawValue, forKey: .sessionUpdate)
             try payload.encode(to: encoder)
         case .availableCommandsUpdate(let payload):
-            try container.encode("available_commands_update", forKey: .sessionUpdate)
+            try container.encode(Tag.availableCommandsUpdate.rawValue, forKey: .sessionUpdate)
             try payload.encode(to: encoder)
         case .configOptionUpdate(let payload):
-            try container.encode("config_option_update", forKey: .sessionUpdate)
+            try container.encode(Tag.configOptionUpdate.rawValue, forKey: .sessionUpdate)
             try payload.encode(to: encoder)
         case .sessionInfoUpdate(let payload):
-            try container.encode("session_info_update", forKey: .sessionUpdate)
+            try container.encode(Tag.sessionInfoUpdate.rawValue, forKey: .sessionUpdate)
             try payload.encode(to: encoder)
         case .usageUpdate(let payload):
-            try container.encode("usage_update", forKey: .sessionUpdate)
+            try container.encode(Tag.usageUpdate.rawValue, forKey: .sessionUpdate)
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .sessionUpdate)
@@ -1319,6 +1386,12 @@ public enum StateUpdate: Codable, Hashable, Sendable {
         case state
     }
 
+    private enum Tag: String {
+        case running = "running"
+        case idle = "idle"
+        case requiresAction = "requires_action"
+    }
+
     private static let excludedMembers = ["state"]
 
     /// Decodes by the `state` discriminator, routing
@@ -1329,15 +1402,16 @@ public enum StateUpdate: Codable, Hashable, Sendable {
     ///   known variant's payload is malformed.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .state) {
-        case "running":
+        let discriminator = try container.decode(String.self, forKey: .state)
+        switch Tag(rawValue: discriminator) {
+        case .running:
             self = .running(try RunningStateUpdate(from: decoder))
-        case "idle":
+        case .idle:
             self = .idle(try IdleStateUpdate(from: decoder))
-        case "requires_action":
+        case .requiresAction:
             self = .requiresAction(try RequiresActionStateUpdate(from: decoder))
-        case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
+        case nil:
+            self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -1350,13 +1424,13 @@ public enum StateUpdate: Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .running(let payload):
-            try container.encode("running", forKey: .state)
+            try container.encode(Tag.running.rawValue, forKey: .state)
             try payload.encode(to: encoder)
         case .idle(let payload):
-            try container.encode("idle", forKey: .state)
+            try container.encode(Tag.idle.rawValue, forKey: .state)
             try payload.encode(to: encoder)
         case .requiresAction(let payload):
-            try container.encode("requires_action", forKey: .state)
+            try container.encode(Tag.requiresAction.rawValue, forKey: .state)
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .state)
@@ -1470,6 +1544,12 @@ public enum ToolCallContent: Codable, Hashable, Sendable {
         case type
     }
 
+    private enum Tag: String {
+        case content = "content"
+        case diff = "diff"
+        case terminal = "terminal"
+    }
+
     private static let excludedMembers = ["type"]
 
     /// Decodes by the `type` discriminator, routing
@@ -1480,15 +1560,16 @@ public enum ToolCallContent: Codable, Hashable, Sendable {
     ///   known variant's payload is malformed.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .type) {
-        case "content":
+        let discriminator = try container.decode(String.self, forKey: .type)
+        switch Tag(rawValue: discriminator) {
+        case .content:
             self = .content(try Content(from: decoder))
-        case "diff":
+        case .diff:
             self = .diff(try Diff(from: decoder))
-        case "terminal":
+        case .terminal:
             self = .terminal(try Terminal(from: decoder))
-        case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
+        case nil:
+            self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -1501,13 +1582,13 @@ public enum ToolCallContent: Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .content(let payload):
-            try container.encode("content", forKey: .type)
+            try container.encode(Tag.content.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .diff(let payload):
-            try container.encode("diff", forKey: .type)
+            try container.encode(Tag.diff.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .terminal(let payload):
-            try container.encode("terminal", forKey: .type)
+            try container.encode(Tag.terminal.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)

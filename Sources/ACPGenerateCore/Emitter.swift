@@ -360,14 +360,37 @@ enum Emitter {
 
     /// Renders the decode arm that captures an unrecognized discriminator.
     ///
-    /// - Parameter pattern: The `switch` pattern binding the matched
-    ///   discriminator.
+    /// - Parameters:
+    ///   - pattern: The `switch` pattern selecting the fallback arm.
+    ///   - variable: The name holding the unrecognized discriminator's raw
+    ///     string where `pattern` runs — either bound by the pattern itself,
+    ///     or captured ahead of the `switch` it belongs to.
     /// - Returns: The arm's two lines, indented two levels.
-    private static func unknownDecodeArm(pattern: String) -> [String] {
+    private static func unknownDecodeArm(pattern: String, variable: String = "other") -> [String] {
         [
             "        \(pattern):",
-            "            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))",
+            "            self = .unknown(\(variable), try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))",
         ]
+    }
+
+    /// Renders the private enum mapping each known tagged-union variant to
+    /// the wire discriminator that selects it.
+    ///
+    /// Decode looks a discriminator up via `Tag(rawValue:)` and encode reads
+    /// `Tag.<case>.rawValue` back, so a tag string is written once per case
+    /// no matter how many arms use it — the same single-source-of-truth
+    /// shape `excludedMembers` gives the sibling-member list, applied here to
+    /// the discriminator instead.
+    ///
+    /// - Parameter cases: The union's cases in schema order.
+    /// - Returns: The declaration lines, indented one level.
+    private static func tagDeclaration(cases: [UnionCaseModel]) -> [String] {
+        var lines = ["    private enum Tag: String {"]
+        for unionCase in cases {
+            lines.append("        case \(unionCase.swiftName) = \(stringLiteral(unionCase.tag))")
+        }
+        lines.append("    }")
+        return lines
     }
 
     /// Renders the encode arm that restores an unrecognized variant.
@@ -502,7 +525,11 @@ enum Emitter {
             "        case \(model.discriminator)",
             "    }",
             "",
-            excludedMembersDeclaration(discriminator: model.discriminator, siblingMembers: model.siblingMembers),
+        ])
+        lines.append(contentsOf: tagDeclaration(cases: model.cases))
+        lines.append("")
+        lines.append(excludedMembersDeclaration(discriminator: model.discriminator, siblingMembers: model.siblingMembers))
+        lines.append(contentsOf: [
             "",
             "    /// Decodes by the `\(model.discriminator)` discriminator, routing",
             "    /// unrecognized values to `.unknown`.",
@@ -512,17 +539,18 @@ enum Emitter {
             "    ///   known variant's payload is malformed.",
             "    public init(from decoder: any Decoder) throws {",
             "        let container = try decoder.container(keyedBy: CodingKeys.self)",
-            "        switch try container.decode(String.self, forKey: .\(model.discriminator)) {",
+            "        let discriminator = try container.decode(String.self, forKey: .\(model.discriminator))",
+            "        switch Tag(rawValue: discriminator) {",
         ])
         for unionCase in model.cases {
-            lines.append("        case \(stringLiteral(unionCase.tag)):")
+            lines.append("        case .\(unionCase.swiftName):")
             if let payload = unionCase.payloadType {
                 lines.append("            self = .\(unionCase.swiftName)(try \(payload)(from: decoder))")
             } else {
                 lines.append("            self = .\(unionCase.swiftName)")
             }
         }
-        lines.append(contentsOf: unknownDecodeArm(pattern: "case let other"))
+        lines.append(contentsOf: unknownDecodeArm(pattern: "case nil", variable: "discriminator"))
         lines.append(contentsOf: [
             "        }",
             "    }",
@@ -539,11 +567,11 @@ enum Emitter {
         for unionCase in model.cases {
             if unionCase.payloadType != nil {
                 lines.append("        case .\(unionCase.swiftName)(let payload):")
-                lines.append("            try container.encode(\(stringLiteral(unionCase.tag)), forKey: .\(model.discriminator))")
+                lines.append("            try container.encode(Tag.\(unionCase.swiftName).rawValue, forKey: .\(model.discriminator))")
                 lines.append("            try payload.encode(to: encoder)")
             } else {
                 lines.append("        case .\(unionCase.swiftName):")
-                lines.append("            try container.encode(\(stringLiteral(unionCase.tag)), forKey: .\(model.discriminator))")
+                lines.append("            try container.encode(Tag.\(unionCase.swiftName).rawValue, forKey: .\(model.discriminator))")
             }
         }
         lines.append(contentsOf: unknownEncodeArm(discriminator: model.discriminator))
@@ -755,10 +783,39 @@ enum Emitter {
             "        }",
             "",
         ])
+        let tagDeclaration = valueUnionTagDeclaration(cases: model.cases)
+        if !tagDeclaration.isEmpty {
+            lines.append(contentsOf: tagDeclaration)
+            lines.append("")
+        }
         lines.append(contentsOf: valueUnionDecoder(model))
         lines.append("")
         lines.append(contentsOf: valueUnionEncoder(model))
         lines.append("    }")
+        return lines
+    }
+
+    /// Renders the private enum mapping each `const`-pinned value-union
+    /// variant to its wire discriminator, or no lines when no variant pins
+    /// one (an all-default union has no tag to deduplicate).
+    ///
+    /// Decode looks a discriminator up via `Tag(rawValue:)` and encode reads
+    /// `Tag.<case>.rawValue` back — the same single-source-of-truth shape
+    /// `tagDeclaration` gives the flattened tagged-union family.
+    ///
+    /// - Parameter cases: The value union's cases in schema order.
+    /// - Returns: The declaration lines, indented two levels, or empty.
+    private static func valueUnionTagDeclaration(cases: [ValueUnionCaseModel]) -> [String] {
+        let tagged = cases.compactMap { unionCase -> (swiftName: String, tag: String)? in
+            guard case .tag(let tag) = unionCase.selector else { return nil }
+            return (unionCase.swiftName, tag)
+        }
+        guard !tagged.isEmpty else { return [] }
+        var lines = ["        private enum Tag: String {"]
+        for entry in tagged {
+            lines.append("            case \(entry.swiftName) = \(stringLiteral(entry.tag))")
+        }
+        lines.append("        }")
         return lines
     }
 
@@ -809,15 +866,73 @@ enum Emitter {
             "        public init(from decoder: any Decoder) throws {",
             "            let container = try decoder.container(keyedBy: CodingKeys.self)",
         ])
+        let hasTaggedCases = model.cases.contains {
+            if case .tag = $0.selector { return true }
+            return false
+        }
+        lines.append(contentsOf: hasTaggedCases
+            ? valueUnionDecoderBody(model, capturesTag: capturesTag)
+            : valueUnionDecoderBodyWithoutTaggedCases(model, capturesTag: capturesTag))
+        return lines
+    }
+
+    /// Renders the `switch`, one arm per `.tag` case, that decodes a value
+    /// union with at least one `const`-pinned variant.
+    ///
+    /// Reads the discriminator into a local once, so both the `Tag` lookup
+    /// and the fallback arm that needs the raw string share one decode.
+    ///
+    /// - Parameters:
+    ///   - model: The object-value-union emission model.
+    ///   - capturesTag: Whether the default variant captures the tag it
+    ///     matched, deciding whether the discriminator decodes strictly.
+    /// - Returns: The `switch` and its closing braces, indented three levels.
+    private static func valueUnionDecoderBody(_ model: ObjectValueUnionModel, capturesTag: Bool) -> [String] {
+        var lines: [String] = []
+        if capturesTag {
+            lines.append("            let discriminator = try container.decode(String.self, forKey: .\(model.discriminator))")
+            lines.append("            switch Tag(rawValue: discriminator) {")
+        } else {
+            lines.append("            let discriminator = try container.decodeIfPresent(String.self, forKey: .\(model.discriminator))")
+            lines.append("            switch discriminator.flatMap(Tag.init(rawValue:)) {")
+        }
+        for unionCase in model.cases {
+            guard case .tag = unionCase.selector else { continue }
+            lines.append("            case .\(unionCase.swiftName):")
+            lines.append("                self = .\(unionCase.swiftName)(\(valueDecodeCall(unionCase, model)))")
+        }
+        for unionCase in model.cases {
+            switch unionCase.selector {
+            case .tag:
+                continue
+            case .untagged:
+                lines.append("            case nil:")
+                lines.append("                self = .\(unionCase.swiftName)(\(valueDecodeCall(unionCase, model)))")
+            case .capturedTag:
+                lines.append("            case nil:")
+                lines.append("                self = .\(unionCase.swiftName)(discriminator, \(valueDecodeCall(unionCase, model)))")
+            }
+        }
+        lines.append(contentsOf: ["            }", "        }"])
+        return lines
+    }
+
+    /// Renders the `switch` that decodes a value union with no `.tag` case —
+    /// a lone discriminator-less default, with no `Tag` table to read from.
+    ///
+    /// - Parameters:
+    ///   - model: The object-value-union emission model.
+    ///   - capturesTag: Whether the default variant captures the tag it
+    ///     matched, deciding whether the discriminator decodes strictly.
+    /// - Returns: The `switch` and its closing braces, indented three levels.
+    private static func valueUnionDecoderBodyWithoutTaggedCases(
+        _ model: ObjectValueUnionModel,
+        capturesTag: Bool
+    ) -> [String] {
         let subject = capturesTag
             ? "try container.decode(String.self, forKey: .\(model.discriminator))"
             : "try container.decodeIfPresent(String.self, forKey: .\(model.discriminator))"
-        lines.append("            switch \(subject) {")
-        for unionCase in model.cases {
-            guard case .tag(let tag) = unionCase.selector else { continue }
-            lines.append("            case \(stringLiteral(tag))\(capturesTag ? "" : "?"):")
-            lines.append("                self = .\(unionCase.swiftName)(\(valueDecodeCall(unionCase, model)))")
-        }
+        var lines = ["            switch \(subject) {"]
         for unionCase in model.cases {
             switch unionCase.selector {
             case .tag:
@@ -861,9 +976,9 @@ enum Emitter {
         ]
         for unionCase in model.cases {
             switch unionCase.selector {
-            case .tag(let tag):
+            case .tag:
                 lines.append("            case .\(unionCase.swiftName)(let payload):")
-                lines.append("                try container.encode(\(stringLiteral(tag)), forKey: .\(model.discriminator))")
+                lines.append("                try container.encode(Tag.\(unionCase.swiftName).rawValue, forKey: .\(model.discriminator))")
             case .untagged:
                 lines.append("            case .\(unionCase.swiftName)(let payload):")
             case .capturedTag:
