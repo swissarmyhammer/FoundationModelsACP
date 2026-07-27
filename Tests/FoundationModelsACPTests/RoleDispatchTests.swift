@@ -32,13 +32,13 @@ import Testing
 
     @Test func wireResolvesEveryAgentHandlerToItsRoutingTableWireMethod() {
         for entry in ACPMethodTable.methods where entry.side == .agent {
-            #expect(RoleRouting.wire(handler: entry.handlerName, on: .agent) == entry.wireMethod)
+            #expect(RoleRouting.wireMethod(for: entry.handlerName, on: .agent) == entry.wireMethod)
         }
     }
 
     @Test func wireResolvesEveryClientHandlerToItsRoutingTableWireMethod() {
         for entry in ACPMethodTable.methods where entry.side == .client {
-            #expect(RoleRouting.wire(handler: entry.handlerName, on: .client) == entry.wireMethod)
+            #expect(RoleRouting.wireMethod(for: entry.handlerName, on: .client) == entry.wireMethod)
         }
     }
 

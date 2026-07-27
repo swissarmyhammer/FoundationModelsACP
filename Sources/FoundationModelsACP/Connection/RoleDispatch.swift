@@ -88,7 +88,7 @@ enum RoleRouting {
     ///   - handler: The Swift handler name from the routing table.
     ///   - side: The serving participant.
     /// - Returns: The wire method name.
-    static func wire(handler: String, on side: MethodSide) -> String {
+    static func wireMethod(for handler: String, on side: MethodSide) -> String {
         guard
             let match = ACPMethodTable.methods.first(where: {
                 $0.side == side && $0.handlerName == handler
@@ -109,7 +109,7 @@ enum RoleRouting {
     ///   - side: The side that serves the method.
     /// - Returns: The `-32601` error carrying the method's wire name.
     static func methodNotFound(handler: String, on side: MethodSide) -> RequestError {
-        .methodNotFound(wire(handler: handler, on: side))
+        .methodNotFound(wireMethod(for: handler, on: side))
     }
 }
 
@@ -196,10 +196,8 @@ enum RoleDispatch {
         on side: MethodSide,
         _ params: Params
     ) async throws {
-        try await connection.notify(
-            method: RoleRouting.wire(handler: handler, on: side),
-            params: JSONValue.encode(result: params)
-        )
+        let wire = try wireCall(handler: handler, on: side, params)
+        try await connection.notify(method: wire.method, params: wire.params)
     }
 
     /// The single encode-resolve-request path behind `callResult`.
@@ -218,9 +216,26 @@ enum RoleDispatch {
         on side: MethodSide,
         _ params: Request
     ) async throws -> JSONValue {
-        try await connection.request(
-            method: RoleRouting.wire(handler: handler, on: side),
-            params: JSONValue.encode(result: params)
-        )
+        let wire = try wireCall(handler: handler, on: side, params)
+        return try await connection.request(method: wire.method, params: wire.params)
+    }
+
+    /// Resolves a handler to its wire method and encodes its typed payload.
+    ///
+    /// Shared by `notify` and `call`, whose parameter preparation is
+    /// otherwise identical, so the two paths cannot drift out of sync.
+    ///
+    /// - Parameters:
+    ///   - handler: The Swift handler name to resolve to a wire method.
+    ///   - side: The serving side of the target method.
+    ///   - params: The typed payload to encode.
+    /// - Returns: The resolved wire method name and its encoded payload.
+    /// - Throws: Rethrows any encoding failure.
+    private static func wireCall<Params: Encodable>(
+        handler: String,
+        on side: MethodSide,
+        _ params: Params
+    ) throws -> (method: String, params: JSONValue) {
+        (RoleRouting.wireMethod(for: handler, on: side), try JSONValue.encode(result: params))
     }
 }

@@ -164,10 +164,124 @@ comments:
 
     Note: an unrelated tooling mishap occurred mid-task — two placeholder background agents were accidentally launched with empty/no-op prompts while waiting on the real double-check agent's result; neither touched any files or the kanban board, and both were harmless no-ops (one correctly returned REVISE for lacking a real task, one returned "ack"). Logged here for transparency; no code or task impact.
   timestamp: 2026-07-27T23:21:13.185238+00:00
+- actor: claude-code
+  id: 01kyjytnm8d9pbcaph8f349pm4
+  text: |-
+    Resolved the 2026-07-27 18:23 review findings on RoleDispatch.swift (round 4, both items).
+
+    1. Renamed `RoleRouting.wire(handler:on:)` to `RoleRouting.wireMethod(for:on:)` — the `for:` label reads as "wire method for handler on side," removing the verb/noun ambiguity of the bare `wire` name. Updated every call site: the internal call inside `methodNotFound`, both call sites now routed through the new shared helper (see below), and the two test call sites in RoleDispatchTests.swift (`wireResolvesEveryAgentHandlerToItsRoutingTableWireMethod` / `wireResolvesEveryClientHandlerToItsRoutingTableWireMethod`). Repo-wide grep for `wire(handler:` and `RoleRouting.wire\b` after the change found zero remaining references outside this task's own historical description text. Confirmed AgentSideConnection.swift/ClientSideConnection.swift never called `wire` directly (they use the higher-level `notify`/`callResult`), so they needed no changes.
+
+    2. Extracted the duplicated wire-method-resolution + params-encoding logic shared by `notify` and `call` into a new `private static func wireCall<Params: Encodable>(handler:on:_:) throws -> (method: String, params: JSONValue)`. Both `notify` and `call` now call it and only differ in which `connection` method (`notify` vs `request`) they hand the resolved tuple to.
+
+    Verified current signatures/line numbers before editing rather than trusting the finding's cited numbers (per the note on this round) — matched what was there.
+
+    Verified (clean rebuild, `rm -rf .build`): `swift build --build-tests` — 0 errors, 0 warnings. `swift test` — 139 tests/11 suites + 75 tests/10 suites = 214 tests/21 suites, 0 failures — identical to the pre-existing baseline, confirming pure rename/refactor. No swift format run. Diff scoped to RoleDispatch.swift + RoleDispatchTests.swift (plus kanban bookkeeping).
+
+    Swept the rest of the file for further findings of this same class (dead code / naming ambiguity / duplicated encode-decode or param-prep logic): none found. `decodeParams`/`decoded`/`transcode`/`served`/`methodNotFound`/`serveResult`/`serve`/`callResult` all read clean with no remaining duplication.
+
+    Adversarial double-check dispatched; will record its verdict once it returns.
+  timestamp: 2026-07-27T23:33:42.664934+00:00
+- actor: claude-code
+  id: 01kyjz218rabrafdg1jjha32ar
+  text: |-
+    Adversarial double-check round 1 verdict: REVISE, one finding — not in the Swift code, but in this task's own bookkeeping. The finding confirmed the rename and wireCall extraction are correct, complete, consistent, and behavior-preserving (traced every call site, confirmed no ordering/error-type change since wireMethod cannot throw and encode is the only throwing step, and confirmed a fresh whole-file read found no further findings of this class). Its one actionable finding: the new "Review Findings (2026-07-27 18:23)" checklist items were added to the task description as unchecked ([ ]) even though both were fixed in the same diff and the accompanying progress comment said so — breaking the checked-off convention every prior round (17:35, 18:02, 18:13) followed.
+
+    Fixed: flipped both 18:23 checklist bullets in the task description to [x], matching the established pattern.
+
+    Re-verification not needed for this fix (kanban description edit only, no code touched). Swift verification from the prior comment stands: swift build --build-tests 0 errors/0 warnings; swift test 214 tests/21 suites/0 failures, matching baseline.
+
+    Task is done and green. Leaving in doing for /review.
+  timestamp: 2026-07-27T23:37:43.960900+00:00
+- actor: claude-code
+  id: 01kyjz4vyf848jeqe0vc3jc4ry
+  text: |-
+    Correction to the prior comment: my kanban `update task` call to flip the 18:23 checkboxes accidentally passed the description with literal backslash-n escape sequences instead of real newlines, collapsing the whole body into one line (visible as `\n` text in the raw .md file) and dropping progress to 0. Caught this by re-reading the task after the edit rather than trusting the "ok: true" response.
+
+    Fixed by editing `.kanban/tasks/01KYD58WR23B5R69691FKDWJSG.md` directly (files op, not kanban update task) to restore proper multi-line markdown with real newlines, keeping both 18:23 checkboxes as `[x]`. Re-verified via `get task`: description now renders with real newlines, progress is back to a sane value (0.263, reflecting 5 of 19 total checklist items checked — the 6 resolved review findings across all four rounds, with Acceptance Criteria/Tests checkboxes still open as expected since those track the parent milestone, not this file's review rounds), and the task is still in the `doing` column.
+
+    No code was touched by this correction — Sources/FoundationModelsACP/Connection/RoleDispatch.swift and RoleDispatchTests.swift are unaffected, and the prior swift build/test verification (214 tests/21 suites/0 failures, matching baseline) still stands.
+
+    Task is done and green. Leaving in doing for /review.
+  timestamp: 2026-07-27T23:39:16.815788+00:00
 depends_on:
 - 01KYD58WPKKF4BAN3AKFZV61KY
 position_column: doing
 position_ordinal: '80'
 title: 'M3 Connections and transports: full-duplex, fail loud'
 ---
-## Starting point\n\n**This is a rewrite, and the most salvageable one on the board.** `plan.md` -> *Starting point* has the full inventory.\n\nA working v1 implementation of nearly everything in this task was deleted and is in git history: `Connection/Connection.swift`, `RoleConnectionCore.swift`, `RoleDispatch.swift`, `AgentSideConnection.swift`, `ClientSideConnection.swift`, `SessionUpdateRouter.swift`, and `Transport/{NDJSONCodec, StdioTransport, InMemoryTransport, SubprocessTransport, DescriptorIO}.swift`, plus their tests (`ConnectionTests`, `DisconnectTests`, `StdioTransportTests`, `InMemoryTransportTests`, `NDJSONCodecTests`, `SubprocessReapTests`, `SessionUpdateStreamTests`, `RoleDispatchTests`, `FactoryClosureTests`).\n\n**Read that code before writing new code.** The read loop, continuation correlation, per-request `Task` dispatch, fail-loud disconnect, ndJSON framing, and the factory-closure pattern are all **protocol-version-agnostic** and were reviewed and tested. The v2 delta here is genuinely small: the payload types change, and `session/prompt` stops being long-lived. Recovering and re-typing this is the expected approach — not a from-scratch rewrite.\n\nThe `acp-test-agent` executable target (a subprocess fixture for stdio transport tests) was also deleted; restore it if the stdio tests need it.\n\n## What\n\n`plan.md` -> **Connection model: full-duplex, notification-first**.\n\nTwo symmetric connection objects over one byte stream, each taking a **factory closure** so a handler can capture its own connection for reverse calls:\n\n```swift\nAgentSideConnection(stream:)  { conn  in RoutedACPAgent(conn, router) }\nClientSideConnection(stream:) { agent in MyClient(agent) }\n```\n\nImplementation:\n\n- **One read loop per connection.** Correlation by monotonic request id and `[RequestID: CheckedContinuation]` inside the connection actor, which also serializes writes.\n- **Each inbound request dispatches as its own `Task`**, so a slow handler cannot head-of-line-block a `session/cancel` or a reverse request.\n- **v2 makes this simpler:** `session/prompt` acknowledges immediately, so no request is held open for a whole turn. The one remaining long-lived request in the stable surface is the one that genuinely waits on a human -- `session/request_permission` -- and it must never block the read loop. (`elicitation/create` would join it if and when elicitation becomes stable; it is unstable-only in the vendored `schema-v2.0.0-alpha.2`, so do not design around it now.)\n- **`$/cancel_request`** is protocol-level rather than a role method, so it belongs to this layer, not to `Agent`/`Client`.\n- **Fail loud on disconnect** (a real gap in other SDKs): on EOF or error, reject every pending continuation and finish every stream. Per-request timeouts. Honor `Task` cancellation.\n- **Tolerate late and out-of-order notifications.** Correlation is by `messageId` / `toolCallId` / `terminalId`, never arrival order; an upsert may arrive after the state it refers to has moved on.\n\n**Transports:** stdio with ndJSON framing, and `InMemoryTransport.pair()`. The in-process pair is **production**, not just a fixture: it is how a SwiftUI app runs an agent in the same process while still speaking the protocol.\n\n## Acceptance Criteria\n\n- [ ] Both connection sides work over both transports.\n- [ ] Requests and notifications flow concurrently in both directions.\n- [ ] Each inbound request runs in its own `Task`; a slow handler does not stall others.\n- [ ] Disconnect rejects all pending continuations and finishes all streams -- no hangs.\n- [ ] Per-request timeouts and `Task` cancellation honored.\n- [ ] Batch JSON-RPC messages supported (v2 states batch support).\n- [ ] `$/cancel_request` is served at the connection layer on both sides, not on either role protocol.\n- [ ] The connection and transport test suites listed above exist again, retargeted to v2.\n\n## Tests\n\n- [ ] A slow `session/prompt` handler does not delay a concurrent `session/cancel`.\n- [ ] EOF mid-request rejects the pending continuation promptly rather than hanging.\n- [ ] Out-of-order and late notifications are delivered without reordering assumptions.\n- [ ] A reverse request from inside a handler reaches the peer (factory-closure capture works).\n- [ ] Malformed ndJSON frame produces a clean protocol error, not a crashed read loop.\n- [ ] Batched messages are handled.\n\n## Review Findings (2026-07-27 17:35)\n\nScope: `HEAD~1..HEAD` (6eb810d). Engine returned 7 findings; 6 were dropped under the review skill's blanket test-refactor exception (they asked only to deduplicate/restructure existing test code in `FactoryClosureTests.swift`, `InMemoryTransportTests.swift`, `StdioTransportTests.swift`, `SubprocessReapTests.swift` — recovered v1 tests retargeted to v2, out of scope per policy). One production-code finding stands:\n\n- [x] `Sources/FoundationModelsACP/Connection/RoleDispatch.swift` — `serveEmpty` is added but never called anywhere in the codebase. It is not part of the public API surface (not marked `public`), not an entry point, and not a test. This is dead code that should be deleted. Delete the `serveEmpty` function definition and its docstring. If future handlers that return void are planned, add them and their calls in a follow-up task with that work, rather than shipping unused scaffolding now.\n\n## Review Findings (2026-07-27 18:02)\n\nScope: `HEAD~1..HEAD` (05fc275).\n\n- [x] `Sources/FoundationModelsACP/Connection/RoleDispatch.swift:17` — `decodeParams` reimplements the encode-decode pattern that the `decoded` instance method already provides. Both encode their input with JSONEncoder and decode it as a model type; `decodeParams` should call `decoded` instead to avoid duplication. Rewrite the function body to reuse `decoded`: `return try (params ?? .object([:]))` called with `.decoded(as: modelType)` to eliminate the duplicated encode-decode logic.\n\n## Review Findings (2026-07-27 18:13)\n\nScope: `HEAD~1..HEAD` (bbe4d49).\n\n- [x] `Sources/FoundationModelsACP/Connection/RoleDispatch.swift:24` — JSONValue.encode (line 24) and JSONValue.decoded (line 32) both contain the identical transcode pattern: `JSONDecoder().decode(TargetType, from: JSONEncoder().encode(source))`. These differ only in what is encoded and what type to decode to — one function with an argument waiting to be extracted. Extract a shared generic helper: `private static func transcode<From: Encodable, To: Decodable>(_ value: From, as toType: To.Type) throws -> To { try JSONDecoder().decode(toType, from: JSONEncoder().encode(value)) }`. Then update encode (line 24) to `return try transcode(result, as: JSONValue.self)` and decoded (line 32) to `return try transcode(self, as: modelType)`.\n
+## Starting point
+
+**This is a rewrite, and the most salvageable one on the board.** `plan.md` -> *Starting point* has the full inventory.
+
+A working v1 implementation of nearly everything in this task was deleted and is in git history: `Connection/Connection.swift`, `RoleConnectionCore.swift`, `RoleDispatch.swift`, `AgentSideConnection.swift`, `ClientSideConnection.swift`, `SessionUpdateRouter.swift`, and `Transport/{NDJSONCodec, StdioTransport, InMemoryTransport, SubprocessTransport, DescriptorIO}.swift`, plus their tests (`ConnectionTests`, `DisconnectTests`, `StdioTransportTests`, `InMemoryTransportTests`, `NDJSONCodecTests`, `SubprocessReapTests`, `SessionUpdateStreamTests`, `RoleDispatchTests`, `FactoryClosureTests`).
+
+**Read that code before writing new code.** The read loop, continuation correlation, per-request `Task` dispatch, fail-loud disconnect, ndJSON framing, and the factory-closure pattern are all **protocol-version-agnostic** and were reviewed and tested. The v2 delta here is genuinely small: the payload types change, and `session/prompt` stops being long-lived. Recovering and re-typing this is the expected approach — not a from-scratch rewrite.
+
+The `acp-test-agent` executable target (a subprocess fixture for stdio transport tests) was also deleted; restore it if the stdio tests need it.
+
+## What
+
+`plan.md` -> **Connection model: full-duplex, notification-first**.
+
+Two symmetric connection objects over one byte stream, each taking a **factory closure** so a handler can capture its own connection for reverse calls:
+
+```swift
+AgentSideConnection(stream:)  { conn  in RoutedACPAgent(conn, router) }
+ClientSideConnection(stream:) { agent in MyClient(agent) }
+```
+
+Implementation:
+
+- **One read loop per connection.** Correlation by monotonic request id and `[RequestID: CheckedContinuation]` inside the connection actor, which also serializes writes.
+- **Each inbound request dispatches as its own `Task`**, so a slow handler cannot head-of-line-block a `session/cancel` or a reverse request.
+- **v2 makes this simpler:** `session/prompt` acknowledges immediately, so no request is held open for a whole turn. The one remaining long-lived request in the stable surface is the one that genuinely waits on a human -- `session/request_permission` -- and it must never block the read loop. (`elicitation/create` would join it if and when elicitation becomes stable; it is unstable-only in the vendored `schema-v2.0.0-alpha.2`, so do not design around it now.)
+- **`$/cancel_request`** is protocol-level rather than a role method, so it belongs to this layer, not to `Agent`/`Client`.
+- **Fail loud on disconnect** (a real gap in other SDKs): on EOF or error, reject every pending continuation and finish every stream. Per-request timeouts. Honor `Task` cancellation.
+- **Tolerate late and out-of-order notifications.** Correlation is by `messageId` / `toolCallId` / `terminalId`, never arrival order; an upsert may arrive after the state it refers to has moved on.
+
+**Transports:** stdio with ndJSON framing, and `InMemoryTransport.pair()`. The in-process pair is **production**, not just a fixture: it is how a SwiftUI app runs an agent in the same process while still speaking the protocol.
+
+## Acceptance Criteria
+
+- [ ] Both connection sides work over both transports.
+- [ ] Requests and notifications flow concurrently in both directions.
+- [ ] Each inbound request runs in its own `Task`; a slow handler does not stall others.
+- [ ] Disconnect rejects all pending continuations and finishes all streams -- no hangs.
+- [ ] Per-request timeouts and `Task` cancellation honored.
+- [ ] Batch JSON-RPC messages supported (v2 states batch support).
+- [ ] `$/cancel_request` is served at the connection layer on both sides, not on either role protocol.
+- [ ] The connection and transport test suites listed above exist again, retargeted to v2.
+
+## Tests
+
+- [ ] A slow `session/prompt` handler does not delay a concurrent `session/cancel`.
+- [ ] EOF mid-request rejects the pending continuation promptly rather than hanging.
+- [ ] Out-of-order and late notifications are delivered without reordering assumptions.
+- [ ] A reverse request from inside a handler reaches the peer (factory-closure capture works).
+- [ ] Malformed ndJSON frame produces a clean protocol error, not a crashed read loop.
+- [ ] Batched messages are handled.
+
+## Review Findings (2026-07-27 17:35)
+
+Scope: `HEAD~1..HEAD` (6eb810d). Engine returned 7 findings; 6 were dropped under the review skill's blanket test-refactor exception (they asked only to deduplicate/restructure existing test code in `FactoryClosureTests.swift`, `InMemoryTransportTests.swift`, `StdioTransportTests.swift`, `SubprocessReapTests.swift` — recovered v1 tests retargeted to v2, out of scope per policy). One production-code finding stands:
+
+- [x] `Sources/FoundationModelsACP/Connection/RoleDispatch.swift` — `serveEmpty` is added but never called anywhere in the codebase. It is not part of the public API surface (not marked `public`), not an entry point, and not a test. This is dead code that should be deleted. Delete the `serveEmpty` function definition and its docstring. If future handlers that return void are planned, add them and their calls in a follow-up task with that work, rather than shipping unused scaffolding now.
+
+## Review Findings (2026-07-27 18:02)
+
+Scope: `HEAD~1..HEAD` (05fc275).
+
+- [x] `Sources/FoundationModelsACP/Connection/RoleDispatch.swift:17` — `decodeParams` reimplements the encode-decode pattern that the `decoded` instance method already provides. Both encode their input with JSONEncoder and decode it as a model type; `decodeParams` should call `decoded` instead to avoid duplication. Rewrite the function body to reuse `decoded`: `return try (params ?? .object([:]))` called with `.decoded(as: modelType)` to eliminate the duplicated encode-decode logic.
+
+## Review Findings (2026-07-27 18:13)
+
+Scope: `HEAD~1..HEAD` (bbe4d49).
+
+- [x] `Sources/FoundationModelsACP/Connection/RoleDispatch.swift:24` — JSONValue.encode (line 24) and JSONValue.decoded (line 32) both contain the identical transcode pattern: `JSONDecoder().decode(TargetType, from: JSONEncoder().encode(source))`. These differ only in what is encoded and what type to decode to — one function with an argument waiting to be extracted. Extract a shared generic helper: `private static func transcode<From: Encodable, To: Decodable>(_ value: From, as toType: To.Type) throws -> To { try JSONDecoder().decode(toType, from: JSONEncoder().encode(value)) }`. Then update encode (line 24) to `return try transcode(result, as: JSONValue.self)` and decoded (line 32) to `return try transcode(self, as: modelType)`.
+
+## Review Findings (2026-07-27 18:23)
+
+Scope: `HEAD~1..HEAD` (90e5feb).
+
+- [x] `Sources/FoundationModelsACP/Connection/RoleDispatch.swift:81` — Method `wire(handler:on:)` does not form a clear grammatical phrase at the call site. Reading 'wire handler on side' aloud is ambiguous; it's unclear whether 'wire' is a verb or noun, and the phrase lacks the clarity of idiomatic Swift method naming. Rename to `wireMethod(handler:on:)` (reads 'wire method [for] handler on side') or add a preposition like `wireMethod(for:on:)` to clarify the structure and improve readability at the call site.
+- [x] `Sources/FoundationModelsACP/Connection/RoleDispatch.swift:191` — The parameter preparation logic (wire method resolution and params encoding) is duplicated between `notify` (lines 195–196) and `call` (lines 220–221). Both perform identical operations that could drift out of sync if one is updated but not the other. Extract a shared helper function that accepts a closure to handle the wire call difference, e.g., a `private static func wireCall<Request>(_:handler:on:_:with:)` that performs parameter preparation and then invokes the provided closure with the prepared values.
