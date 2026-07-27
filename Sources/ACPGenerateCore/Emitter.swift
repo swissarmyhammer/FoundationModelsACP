@@ -155,10 +155,7 @@ enum Emitter {
     /// - Returns: The initializer lines, indented one level.
     private static func memberwiseInit(_ model: StructModel) -> [String] {
         var lines = ["    /// Creates a `\(model.name)`.", "    public init("]
-        for (index, property) in model.properties.enumerated() {
-            let comma = index < model.properties.count - 1 ? "," : ""
-            lines.append("        " + initParameter(property) + comma)
-        }
+        lines.append(contentsOf: renderParameters(items: model.properties, render: initParameter))
         lines.append("    ) {")
         for property in model.properties {
             lines.append("        self.\(property.swiftName) = \(property.swiftName)")
@@ -182,6 +179,23 @@ enum Emitter {
             parameter += " = nil"
         }
         return parameter
+    }
+
+    /// Renders a parenthesized parameter list's body: one item per line,
+    /// indented one level, comma-terminated except the last.
+    ///
+    /// Shared by every initializer emitter so the comma bookkeeping lives in
+    /// one place rather than being repeated at each call site.
+    ///
+    /// - Parameters:
+    ///   - items: The parameters to render, in order.
+    ///   - render: Renders one item to its `name: Type[ = default]` fragment.
+    /// - Returns: The parameter lines, without the surrounding `(` and `)`.
+    private static func renderParameters<T>(items: [T], render: (T) -> String) -> [String] {
+        items.enumerated().map { index, item in
+            let comma = index < items.count - 1 ? "," : ""
+            return "        " + render(item) + comma
+        }
     }
 
     /// Renders the explicit CodingKeys enum mapping Swift names to wire names.
@@ -331,42 +345,48 @@ enum Emitter {
         "[\(([discriminator] + siblingMembers).map(stringLiteral).joined(separator: ", "))]"
     }
 
-    /// Renders the decode arm that captures an unrecognized discriminator.
+    /// Renders the private constant naming the members an unrecognized
+    /// variant's payload must not hold.
     ///
-    /// - Parameters:
-    ///   - pattern: The `switch` pattern binding the matched discriminator.
-    ///   - discriminator: The union's discriminator wire name.
-    ///   - siblingMembers: Enclosing-object members the payload excludes.
-    /// - Returns: The arm's two lines, indented two levels.
-    private static func unknownDecodeArm(
-        pattern: String,
-        discriminator: String,
-        siblingMembers: [String] = []
-    ) -> [String] {
-        let owned = ownedMembers(discriminator: discriminator, siblingMembers: siblingMembers)
-        return [
-            "        \(pattern):",
-            "            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: \(owned)))",
-        ]
-    }
-
-    /// Renders the encode arm that restores an unrecognized variant.
-    ///
-    /// Reserves the same member names the decode arm excluded, so a payload
-    /// built in Swift cannot overwrite the tag its own case holds or a member
-    /// of the object the union is nested in.
+    /// The decode arm excludes this list and the encode arm reserves it; both
+    /// read the one constant declared here instead of each carrying its own
+    /// copy of the literal, so the two cannot drift apart.
     ///
     /// - Parameters:
     ///   - discriminator: The union's discriminator wire name.
     ///   - siblingMembers: Enclosing-object members, empty for a stand-alone
     ///     union.
+    /// - Returns: The single declaration line, indented one level.
+    private static func excludedMembersDeclaration(discriminator: String, siblingMembers: [String]) -> String {
+        "    private static let excludedMembers = \(ownedMembers(discriminator: discriminator, siblingMembers: siblingMembers))"
+    }
+
+    /// Renders the decode arm that captures an unrecognized discriminator.
+    ///
+    /// - Parameter pattern: The `switch` pattern binding the matched
+    ///   discriminator.
+    /// - Returns: The arm's two lines, indented two levels.
+    private static func unknownDecodeArm(pattern: String) -> [String] {
+        [
+            "        \(pattern):",
+            "            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))",
+        ]
+    }
+
+    /// Renders the encode arm that restores an unrecognized variant.
+    ///
+    /// Reserves the same member names the decode arm excluded, reading the
+    /// same `excludedMembers` constant, so a payload built in Swift cannot
+    /// overwrite the tag its own case holds or a member of the object the
+    /// union is nested in.
+    ///
+    /// - Parameter discriminator: The union's discriminator wire name.
     /// - Returns: The arm's three lines, indented two levels.
-    private static func unknownEncodeArm(discriminator: String, siblingMembers: [String] = []) -> [String] {
-        let owned = ownedMembers(discriminator: discriminator, siblingMembers: siblingMembers)
-        return [
+    private static func unknownEncodeArm(discriminator: String) -> [String] {
+        [
             "        case .unknown(let discriminator, let payload):",
             "            try container.encode(discriminator, forKey: .\(discriminator))",
-            "            try payload.encodeMembers(to: encoder, reserving: \(owned))",
+            "            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)",
         ]
     }
 
@@ -485,6 +505,8 @@ enum Emitter {
             "        case \(model.discriminator)",
             "    }",
             "",
+            excludedMembersDeclaration(discriminator: model.discriminator, siblingMembers: model.siblingMembers),
+            "",
             "    /// Decodes by the `\(model.discriminator)` discriminator, routing",
             "    /// unrecognized values to `.unknown`.",
             "    ///",
@@ -503,13 +525,7 @@ enum Emitter {
                 lines.append("            self = .\(unionCase.swiftName)")
             }
         }
-        lines.append(
-            contentsOf: unknownDecodeArm(
-                pattern: "case let other",
-                discriminator: model.discriminator,
-                siblingMembers: model.siblingMembers
-            )
-        )
+        lines.append(contentsOf: unknownDecodeArm(pattern: "case let other"))
         lines.append(contentsOf: [
             "        }",
             "    }",
@@ -533,12 +549,7 @@ enum Emitter {
                 lines.append("            try container.encode(\(stringLiteral(unionCase.tag)), forKey: .\(model.discriminator))")
             }
         }
-        lines.append(
-            contentsOf: unknownEncodeArm(
-                discriminator: model.discriminator,
-                siblingMembers: model.siblingMembers
-            )
-        )
+        lines.append(contentsOf: unknownEncodeArm(discriminator: model.discriminator))
         lines.append(contentsOf: [
             "        }",
             "    }",
@@ -572,6 +583,8 @@ enum Emitter {
             "        case \(model.discriminator)",
             "    }",
             "",
+            excludedMembersDeclaration(discriminator: model.discriminator, siblingMembers: []),
+            "",
             "    /// Decodes by the `\(model.discriminator)` discriminator; an absent",
             "    /// discriminator selects the default variant and an unrecognized one",
             "    /// routes to `.unknown`.",
@@ -591,7 +604,7 @@ enum Emitter {
             lines.append("        case nil:")
             lines.append("            self = .\(defaultCase.swiftName)(try \(defaultCase.payloadType)(from: decoder))")
         }
-        lines.append(contentsOf: unknownDecodeArm(pattern: "case let other?", discriminator: model.discriminator))
+        lines.append(contentsOf: unknownDecodeArm(pattern: "case let other?"))
         lines.append(contentsOf: [
             "        }",
             "    }",
@@ -778,15 +791,27 @@ enum Emitter {
     /// - Returns: The initializer lines, indented two levels.
     private static func valueUnionDecoder(_ model: ObjectValueUnionModel) -> [String] {
         let capturesTag = model.cases.contains { $0.selector == .capturedTag }
-        var lines = [
-            "        /// Decodes the value by its `\(model.discriminator)` discriminator,",
-            "        /// falling back to the default variant when it is \(capturesTag ? "unrecognized" : "absent or unknown").",
+        var lines = ["        /// Decodes the value by its `\(model.discriminator)` discriminator,"]
+        if capturesTag {
+            lines.append(contentsOf: [
+                "        /// routing an unrecognized value to the default variant, which",
+                "        /// captures it so it round-trips unchanged on re-encode.",
+            ])
+        } else {
+            lines.append(contentsOf: [
+                "        /// falling back to the default variant when it is absent. That",
+                "        /// variant's own schema places no constraint on this member, so a",
+                "        /// present-but-unrecognized value also matches it — and, having no",
+                "        /// discriminator member of its own, does not round-trip on re-encode.",
+            ])
+        }
+        lines.append(contentsOf: [
             "        ///",
             "        /// - Parameter decoder: The decoder positioned at the object.",
             "        /// - Throws: `DecodingError` when the payload is missing or mistyped.",
             "        public init(from decoder: any Decoder) throws {",
             "            let container = try decoder.container(keyedBy: CodingKeys.self)",
-        ]
+        ])
         let subject = capturesTag
             ? "try container.decode(String.self, forKey: .\(model.discriminator))"
             : "try container.decodeIfPresent(String.self, forKey: .\(model.discriminator))"
@@ -874,10 +899,7 @@ enum Emitter {
             parameters.append(initParameter(meta))
         }
         var lines = ["    /// Creates a `\(base.name)`.", "    public init("]
-        for (index, parameter) in parameters.enumerated() {
-            let comma = index < parameters.count - 1 ? "," : ""
-            lines.append("        " + parameter + comma)
-        }
+        lines.append(contentsOf: renderParameters(items: parameters, render: { $0 }))
         lines.append("    ) {")
         for property in leading {
             lines.append("        self.\(property.swiftName) = \(property.swiftName)")

@@ -1584,6 +1584,8 @@ public struct DiffChange: Codable, Hashable, Sendable {
             case operation
         }
 
+        private static let excludedMembers = ["operation", "fileType", "mimeType", "_meta"]
+
         /// Decodes by the `operation` discriminator, routing
         /// unrecognized values to `.unknown`.
         ///
@@ -1604,7 +1606,7 @@ public struct DiffChange: Codable, Hashable, Sendable {
             case "copy":
                 self = .copy(try DiffPathPairChange(from: decoder))
             case let other:
-                self = .unknown(other, try JSONValue(from: decoder, excludingMembers: ["operation", "fileType", "mimeType", "_meta"]))
+                self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
             }
         }
 
@@ -1633,7 +1635,7 @@ public struct DiffChange: Codable, Hashable, Sendable {
                 try payload.encode(to: encoder)
             case .unknown(let discriminator, let payload):
                 try container.encode(discriminator, forKey: .operation)
-                try payload.encodeMembers(to: encoder, reserving: ["operation", "fileType", "mimeType", "_meta"])
+                try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
             }
         }
     }
@@ -4642,6 +4644,8 @@ public struct SessionConfigOption: Codable, Hashable, Sendable {
             case type
         }
 
+        private static let excludedMembers = ["type", "configId", "name", "category", "description", "_meta"]
+
         /// Decodes by the `type` discriminator, routing
         /// unrecognized values to `.unknown`.
         ///
@@ -4656,7 +4660,7 @@ public struct SessionConfigOption: Codable, Hashable, Sendable {
             case "boolean":
                 self = .boolean(try SessionConfigBoolean(from: decoder))
             case let other:
-                self = .unknown(other, try JSONValue(from: decoder, excludingMembers: ["type", "configId", "name", "category", "description", "_meta"]))
+                self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
             }
         }
 
@@ -4676,7 +4680,7 @@ public struct SessionConfigOption: Codable, Hashable, Sendable {
                 try payload.encode(to: encoder)
             case .unknown(let discriminator, let payload):
                 try container.encode(discriminator, forKey: .type)
-                try payload.encodeMembers(to: encoder, reserving: ["type", "configId", "name", "category", "description", "_meta"])
+                try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
             }
         }
     }
@@ -5151,7 +5155,8 @@ public struct SetSessionConfigOptionRequest: Codable, Hashable, Sendable {
         }
 
         /// Decodes the value by its `type` discriminator,
-        /// falling back to the default variant when it is unrecognized.
+        /// routing an unrecognized value to the default variant, which
+        /// captures it so it round-trips unchanged on re-encode.
         ///
         /// - Parameter decoder: The decoder positioned at the object.
         /// - Throws: `DecodingError` when the payload is missing or mistyped.

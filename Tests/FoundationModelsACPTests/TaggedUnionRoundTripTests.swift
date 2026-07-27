@@ -36,7 +36,7 @@ import Testing
     ///
     /// - Parameter type: The generated union type.
     /// - Returns: A closure mapping wire bytes to re-encoded wire bytes.
-    private static func roundTrip<T: Codable>(_ type: T.Type) -> @Sendable (Data) throws -> Data {
+    private static func roundTrip<T: Codable & Sendable>(_ type: T.Type) -> @Sendable (Data) throws -> Data {
         { data in try JSONEncoder().encode(try JSONDecoder().decode(T.self, from: data)) }
     }
 

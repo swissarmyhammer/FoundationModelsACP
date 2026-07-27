@@ -24,6 +24,8 @@ public enum AuthMethod: Codable, Hashable, Sendable {
         case type
     }
 
+    private static let excludedMembers = ["type"]
+
     /// Decodes by the `type` discriminator, routing
     /// unrecognized values to `.unknown`.
     ///
@@ -36,7 +38,7 @@ public enum AuthMethod: Codable, Hashable, Sendable {
         case "agent":
             self = .agent(try AuthMethodAgent(from: decoder))
         case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: ["type"]))
+            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -53,7 +55,7 @@ public enum AuthMethod: Codable, Hashable, Sendable {
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)
-            try payload.encodeMembers(to: encoder, reserving: ["type"])
+            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
         }
     }
 }
@@ -77,6 +79,8 @@ public enum AvailableCommandInput: Codable, Hashable, Sendable {
         case type
     }
 
+    private static let excludedMembers = ["type"]
+
     /// Decodes by the `type` discriminator, routing
     /// unrecognized values to `.unknown`.
     ///
@@ -89,7 +93,7 @@ public enum AvailableCommandInput: Codable, Hashable, Sendable {
         case "text":
             self = .text(try TextCommandInput(from: decoder))
         case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: ["type"]))
+            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -106,7 +110,7 @@ public enum AvailableCommandInput: Codable, Hashable, Sendable {
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)
-            try payload.encodeMembers(to: encoder, reserving: ["type"])
+            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
         }
     }
 }
@@ -169,6 +173,8 @@ public enum ContentBlock: Codable, Hashable, Sendable {
         case type
     }
 
+    private static let excludedMembers = ["type"]
+
     /// Decodes by the `type` discriminator, routing
     /// unrecognized values to `.unknown`.
     ///
@@ -189,7 +195,7 @@ public enum ContentBlock: Codable, Hashable, Sendable {
         case "resource":
             self = .resource(try EmbeddedResource(from: decoder))
         case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: ["type"]))
+            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -218,7 +224,7 @@ public enum ContentBlock: Codable, Hashable, Sendable {
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)
-            try payload.encodeMembers(to: encoder, reserving: ["type"])
+            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
         }
     }
 }
@@ -502,6 +508,8 @@ public enum McpServer: Codable, Hashable, Sendable {
         case type
     }
 
+    private static let excludedMembers = ["type"]
+
     /// Decodes by the `type` discriminator, routing
     /// unrecognized values to `.unknown`.
     ///
@@ -516,7 +524,7 @@ public enum McpServer: Codable, Hashable, Sendable {
         case "stdio":
             self = .stdio(try McpServerStdio(from: decoder))
         case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: ["type"]))
+            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -536,7 +544,7 @@ public enum McpServer: Codable, Hashable, Sendable {
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)
-            try payload.encodeMembers(to: encoder, reserving: ["type"])
+            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
         }
     }
 }
@@ -747,6 +755,8 @@ public enum PlanUpdateContent: Codable, Hashable, Sendable {
         case type
     }
 
+    private static let excludedMembers = ["type"]
+
     /// Decodes by the `type` discriminator, routing
     /// unrecognized values to `.unknown`.
     ///
@@ -759,7 +769,7 @@ public enum PlanUpdateContent: Codable, Hashable, Sendable {
         case "items":
             self = .items(try PlanItems(from: decoder))
         case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: ["type"]))
+            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -776,7 +786,7 @@ public enum PlanUpdateContent: Codable, Hashable, Sendable {
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)
-            try payload.encodeMembers(to: encoder, reserving: ["type"])
+            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
         }
     }
 }
@@ -802,6 +812,8 @@ public enum ReplayFrom: Codable, Hashable, Sendable {
         case type
     }
 
+    private static let excludedMembers = ["type"]
+
     /// Decodes by the `type` discriminator, routing
     /// unrecognized values to `.unknown`.
     ///
@@ -814,7 +826,7 @@ public enum ReplayFrom: Codable, Hashable, Sendable {
         case "start":
             self = .start(try ReplayFromStart(from: decoder))
         case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: ["type"]))
+            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -831,7 +843,7 @@ public enum ReplayFrom: Codable, Hashable, Sendable {
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)
-            try payload.encodeMembers(to: encoder, reserving: ["type"])
+            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
         }
     }
 }
@@ -864,6 +876,8 @@ public enum RequestPermissionOutcome: Codable, Hashable, Sendable {
         case outcome
     }
 
+    private static let excludedMembers = ["outcome"]
+
     /// Decodes by the `outcome` discriminator, routing
     /// unrecognized values to `.unknown`.
     ///
@@ -878,7 +892,7 @@ public enum RequestPermissionOutcome: Codable, Hashable, Sendable {
         case "selected":
             self = .selected(try SelectedPermissionOutcome(from: decoder))
         case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: ["outcome"]))
+            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -897,7 +911,7 @@ public enum RequestPermissionOutcome: Codable, Hashable, Sendable {
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .outcome)
-            try payload.encodeMembers(to: encoder, reserving: ["outcome"])
+            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
         }
     }
 }
@@ -924,6 +938,8 @@ public enum RequestPermissionSubject: Codable, Hashable, Sendable {
         case type
     }
 
+    private static let excludedMembers = ["type"]
+
     /// Decodes by the `type` discriminator, routing
     /// unrecognized values to `.unknown`.
     ///
@@ -938,7 +954,7 @@ public enum RequestPermissionSubject: Codable, Hashable, Sendable {
         case "command":
             self = .command(try CommandPermissionSubject(from: decoder))
         case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: ["type"]))
+            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -958,7 +974,7 @@ public enum RequestPermissionSubject: Codable, Hashable, Sendable {
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)
-            try payload.encodeMembers(to: encoder, reserving: ["type"])
+            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
         }
     }
 }
@@ -1164,6 +1180,8 @@ public enum SessionUpdate: Codable, Hashable, Sendable {
         case sessionUpdate
     }
 
+    private static let excludedMembers = ["sessionUpdate"]
+
     /// Decodes by the `sessionUpdate` discriminator, routing
     /// unrecognized values to `.unknown`.
     ///
@@ -1206,7 +1224,7 @@ public enum SessionUpdate: Codable, Hashable, Sendable {
         case "usage_update":
             self = .usageUpdate(try UsageUpdate(from: decoder))
         case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: ["sessionUpdate"]))
+            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -1268,7 +1286,7 @@ public enum SessionUpdate: Codable, Hashable, Sendable {
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .sessionUpdate)
-            try payload.encodeMembers(to: encoder, reserving: ["sessionUpdate"])
+            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
         }
     }
 }
@@ -1301,6 +1319,8 @@ public enum StateUpdate: Codable, Hashable, Sendable {
         case state
     }
 
+    private static let excludedMembers = ["state"]
+
     /// Decodes by the `state` discriminator, routing
     /// unrecognized values to `.unknown`.
     ///
@@ -1317,7 +1337,7 @@ public enum StateUpdate: Codable, Hashable, Sendable {
         case "requires_action":
             self = .requiresAction(try RequiresActionStateUpdate(from: decoder))
         case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: ["state"]))
+            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -1340,7 +1360,7 @@ public enum StateUpdate: Codable, Hashable, Sendable {
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .state)
-            try payload.encodeMembers(to: encoder, reserving: ["state"])
+            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
         }
     }
 }
@@ -1450,6 +1470,8 @@ public enum ToolCallContent: Codable, Hashable, Sendable {
         case type
     }
 
+    private static let excludedMembers = ["type"]
+
     /// Decodes by the `type` discriminator, routing
     /// unrecognized values to `.unknown`.
     ///
@@ -1466,7 +1488,7 @@ public enum ToolCallContent: Codable, Hashable, Sendable {
         case "terminal":
             self = .terminal(try Terminal(from: decoder))
         case let other:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: ["type"]))
+            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
     }
 
@@ -1489,7 +1511,7 @@ public enum ToolCallContent: Codable, Hashable, Sendable {
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)
-            try payload.encodeMembers(to: encoder, reserving: ["type"])
+            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
         }
     }
 }

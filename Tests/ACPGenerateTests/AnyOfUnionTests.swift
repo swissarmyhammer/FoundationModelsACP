@@ -179,8 +179,11 @@ import Testing
         #expect(models.contains("    public var id: String"))
         // The base members travel beside the payload, so they are not part of
         // an unrecognized variant's capture — re-encoding them from both the
-        // struct and the captured payload is how a stale copy wins.
-        #expect(models.contains(#"try JSONValue(from: decoder, excludingMembers: ["operation", "id"])"#))
+        // struct and the captured payload is how a stale copy wins. Both the
+        // decode and encode arms read the same `excludedMembers` constant
+        // rather than each carrying its own copy of the literal.
+        #expect(models.contains(#"private static let excludedMembers = ["operation", "id"]"#))
+        #expect(models.contains("try JSONValue(from: decoder, excludingMembers: Self.excludedMembers)"))
         let unresolved = try #require(files.first { $0.name == "Unresolved.generated.swift" }).contents
         #expect(!unresolved.contains("typealias Change"))
     }
