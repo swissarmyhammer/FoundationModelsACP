@@ -75,3 +75,45 @@ extension RequestError {
         )
     }
 }
+
+extension RequestError {
+    /// Decodes a peer's wire error object into a typed error.
+    ///
+    /// Tolerant by design: a peer's error object is untrusted input, so a
+    /// missing or mistyped `code` degrades to `internalError`'s code and a
+    /// missing or mistyped `message` degrades to a generic placeholder,
+    /// rather than this connection layer refusing to surface the error at
+    /// all.
+    ///
+    /// - Parameter wire: The response envelope's `error` member.
+    init(wire: JSONValue) {
+        guard case .object(let fields) = wire else {
+            self = .internalError(detail: "malformed error response")
+            return
+        }
+        let code: ErrorCode
+        if case .number(let value) = fields["code", default: .null] {
+            code = ErrorCode(wireValue: Int(value))
+        } else {
+            code = .internalError
+        }
+        let message: String
+        if case .string(let value) = fields["message", default: .null] {
+            message = value
+        } else {
+            message = "Unknown error"
+        }
+        self = RequestError(code: code, message: message, data: fields["data"])
+    }
+
+    /// The JSON-RPC wire form of the error, for embedding as a response's
+    /// `error` member. Absent `data` is omitted, never encoded as JSON null.
+    var wireValue: JSONValue {
+        var fields: [String: JSONValue] = [
+            "code": .number(Double(code.wireValue)),
+            "message": .string(message),
+        ]
+        fields["data"] = data
+        return .object(fields)
+    }
+}

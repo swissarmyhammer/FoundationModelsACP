@@ -34,6 +34,11 @@ let package = Package(
             dependencies: ["ACPGenerateCore"],
             path: "Sources/acp-generate"
         ),
+        .executableTarget(
+            name: "acp-test-agent",
+            dependencies: ["FoundationModelsACP"],
+            path: "Sources/acp-test-agent"
+        ),
         .plugin(
             name: "GenerateACP",
             capability: .command(
@@ -52,7 +57,7 @@ let package = Package(
         ),
         .testTarget(
             name: "FoundationModelsACPTests",
-            dependencies: ["FoundationModelsACP"],
+            dependencies: ["FoundationModelsACP", "acp-test-agent"],
             path: "Tests/FoundationModelsACPTests"
         ),
         .testTarget(

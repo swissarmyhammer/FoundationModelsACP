@@ -13,10 +13,78 @@ comments:
 
     Nothing else touched. The connection design in this card is protocol-version-agnostic and was not affected by the vendor.
   timestamp: 2026-07-26T15:26:18.193637+00:00
+- actor: claude-code
+  id: 01kyjhmt0705aysh1hjn6s5p71
+  text: |-
+    Implementation landed. Recovered the v1 connection/transport design from git history (commit 02964e2^, the reset-branch deletion commit) and re-typed it against v2:
+
+    - Transport/{NDJSONCodec,DescriptorIO,StdioTransport,InMemoryTransport,SubprocessTransport}.swift restored near-verbatim from git history (protocol-version-agnostic as the card predicted), with one enhancement: NDJSONCodec now yields NDJSONFrame {.message, .malformed} instead of silently dropping unparseable lines, so Connection can answer a malformed frame with a clean -32700 parse-error response (id: null) instead of dropping it — this is what the "malformed ndJSON frame produces a clean protocol error, not a crashed read loop" acceptance test needed; v1 only logged-and-dropped.
+    - Connection.swift: same actor design as v1 (monotonic id, [RequestID: PendingRequest], per-request Task, fail-loud shutdown, timeout tasks) plus two v2-only additions: batch JSON-RPC (dispatchBatch/owesResponse/deliver collect owed responses into one aggregate array reply; notification-only batches get no reply) and $/cancel_request handling at the connection layer (inboundTasks now keyed by RequestID instead of a monotonic counter so a cancel notification can look a running handler up and cancel it; outbound Task cancellation now also fires a best-effort $/cancel_request to the peer, only when there was still something pending to cancel).
+    - RoleConnectionCore/RoleDispatch: straight port; dropped v1's DeprecatedRouting (session/set_mode has no v2 equivalent) and callEmpty (every v2 Agent method returns a typed response, so the "response the caller discards" case doesn't exist in v2).
+    - AgentSideConnection/ClientSideConnection: rebuilt against v2's much smaller method set (10 Agent methods + sessionCancel notification; Client has only sessionUpdate + requestPermission) — no fs/*, no terminal/*, no authenticate/loadSession/setSessionMode holdovers from v1.
+    - SessionUpdateRouter: kept (per-session AsyncStream demux), retyped to SessionId/UpdateSessionNotification/SessionUpdate.
+    - RequestError.swift: added wireValue/init(wire:) (tolerant decode of a peer's error object) since v2's RequestError is the generated ACPError, not v1's hand-rolled struct with those already on it.
+    - acp-test-agent fixture restored, Package.swift updated (executable target + test dependency).
+
+    Test suites re-established, all retargeted to v2 types: ConnectionTests, DisconnectTests, NDJSONCodecTests, InMemoryTransportTests, StdioTransportTests, SubprocessReapTests, SessionUpdateStreamTests, RoleDispatchTests, FactoryClosureTests, plus WireTestSupport/TransportProcessSupport helpers. Added tests beyond straight v1 ports for the two v2-only behaviors (batch handling, $/cancel_request) and for the malformed-frame parse-error change.
+
+    Verified: `swift build --build-tests` — 0 errors, 0 warnings. `swift test` — 213 tests / 21 suites passing (138/11 in FoundationModelsACPTests, 75/10 in ACPGenerateTests), 0 failures. Baseline before this task was 136/19, so net +77 tests / +2 suites (the two new suites are RoleDispatchTests.swift's two @Suite structs; every other new file uses plain top-level @Test funcs, which swift-testing doesn't count as a suite).
+
+    Adversarial double-check dispatched; will record its verdict once it returns.
+  timestamp: 2026-07-27T19:43:19.047396+00:00
+- actor: claude-code
+  id: 01kyjq85ny4ye2y2j6qfaze6zn
+  text: |-
+    Adversarial double-check round 1 verdict: REVISE, two actionable findings, both in Connection.swift:
+
+    1. Medium: dispatchRequest's inboundTasks[id] = task could silently overwrite an already-in-flight task sharing the same wire id (two batch items with the same id, or a peer reusing an id before the first resolved) -- misdirecting a later $/cancel_request and losing track of the first task.
+    2. Low: deliver's fallback branch silently wrote a spurious standalone frame instead of failing loud when a batchToken was missing from `batches`, which would mask a future batch-accounting bug rather than surface it.
+
+    Both fixed:
+    - dispatchRequest is now async and checks `inboundTasks[id] != nil` before registering; a colliding id gets an immediate `invalidRequest` response (via respond, honoring batch accounting) instead of overwriting the first task's slot. First task is untouched and completes normally.
+    - deliver now distinguishes "no batchToken" (standalone write, unchanged) from "batchToken present but not found in `batches`" (now logs a diagnostic instead of silently falling through to a standalone write).
+    - Added regression test `duplicateInboundRequestIdWhileFirstIsInFlightIsRejectedNotMisdirected` (ConnectionTests.swift) proving the second colliding request gets -32600 immediately and the first completes normally afterward.
+
+    Third finding (blocking synchronous write(2) under a mutex in DescriptorIO/StdioTransport/SubprocessTransport, no suspension point) was explicitly called "no fix required" by the reviewer -- it matches the historical v1 design this task was told to recover from git history, and changing it would be scope creep (a different concurrency architecture for the transport layer, not a v2 delta). Left as-is, logged here per the review contract rather than silently ignored.
+
+    Re-verified after the fix: `swift build --build-tests` 0 errors/0 warnings; `swift test` 214 tests / 21 suites passing (139/11 + 75/10), up from 213/21. Bounded second double-check round dispatched to confirm the fix and give final sign-off; will record its verdict next.
+  timestamp: 2026-07-27T21:21:16.478869+00:00
+- actor: claude-code
+  id: 01kyjqzyp9tgfmv8jke5a94s0b
+  text: |-
+    Adversarial double-check round 2 (bounded final pass) verdict: PASS.
+
+    Confirmed against the actual current source: the id-collision check in dispatchRequest runs synchronously before any suspension point, with the sole call site already serialized inside the single-threaded read loop, so no window exists for a second same-id request to slip in before the first's registration completes; $/cancel_request still keys off the untouched inboundTasks entry for the original task. deliver's two fallback paths (no batchToken vs. batchToken present but missing) are now distinct, with the latter logging instead of silently emitting a stray frame. The new regression test was confirmed non-tautological -- without the fix both handler invocations would block on the same gate and the test would hang to its 1-minute limit rather than pass.
+
+    Final fresh verification: `swift build --build-tests` -- 0 errors, 0 warnings. `swift test` -- 214 tests / 21 suites passing (139/11 FoundationModelsACPTests + 75/10 ACPGenerateTests), 0 failures. Baseline before this task was 136/19.
+
+    Task is done and green. Leaving in `doing` for `/review` per the /implement contract.
+  timestamp: 2026-07-27T21:34:15.753071+00:00
+- actor: claude-code
+  id: 01kyjv3q1v50xetybz4v9mdnzf
+  text: |-
+    Independent test verification (rm -rf .build, clean rebuild, repeated swift test runs).
+
+    Baseline: swift build --build-tests clean, 0 warnings. swift test x3 = 214 tests / 21 suites (139+75, 11+10) / 0 failures each run. git diff/status on Sources/FoundationModelsACP/Generated/ empty -- no generated-code drift. DocC (swift package generate-documentation --target FoundationModelsACP --warnings-as-errors) clean.
+
+    Stress-testing per the task's flakiness concern (swift test --filter ... --maximum-repetitions N --repeat-until fail) found a REAL deadlock, not flakiness-that-passes-eventually: running the five subprocess-spawning tests (agentOverStdioCompletesInitializeHandshake, agentStdoutIsPureNDJSONWhileLoggingToStderr, malformedFrameOverStdioGetsACleanParseErrorNotACrash, closingTransportReapsSpawnedChild, closingConnectionReapsChildAgent) at higher repetition counts hung permanently (confirmed via `sample` on the stuck swiftpm-testing-helper process, 0% CPU, no children).
+
+    Root cause: both StdioTransportTests.swift (two tests) and the production Sources/FoundationModelsACP/Transport/SubprocessTransport.swift called the synchronous, thread-blocking `Process.waitUntilExit()` from async test/production code. On Darwin, Swift Concurrency's cooperative pool is backed by a fixed-size GCD queue (com.apple.root.default-qos.cooperative); enough concurrent blocking waits exhaust every worker thread, and nothing is left to run the notification that would free any of them -- a genuine, permanent, self-inflicted deadlock (not a race that resolves on retry).
+
+    Fixed both:
+    - Tests/FoundationModelsACPTests/TransportProcessSupport.swift: added terminateAndAwaitExit(_:), an async helper using Process.terminationHandler + withCheckedContinuation instead of blocking.
+    - Tests/FoundationModelsACPTests/StdioTransportTests.swift: both raw-Process tests now call it instead of process.terminate(); process.waitUntilExit().
+    - Sources/FoundationModelsACP/Transport/SubprocessTransport.swift: reap() no longer blocks; terminationHandler (installed at spawn) now records exit status into a new exitStatus: Mutex<Int32?> and closes stdin once the child actually exits. isRunning/terminationStatus read that recorded state. close()/deinit/stream-teardown now only signal termination (process.terminate()), never wait.
+    - Tests/FoundationModelsACPTests/SubprocessReapTests.swift: closingTransportReapsSpawnedChild now polls (waitUntil) instead of asserting synchronously right after close(), since the exit is no longer observed synchronously.
+
+    Re-verified after the fix: the same 5 subprocess tests at --maximum-repetitions 20 (100 spawns) complete in 0.49s, 0 failures. The full FoundationModelsACPTests target at --maximum-repetitions 20 --parallel (2,780 executions) completes in 1.1s, 0 failures -- previously this combination hung indefinitely. Re-ran the full default swift test 3x after the fix: still 214/21/0, 0 warnings. No swift format run.
+
+    No other flakiness observed. Two now-orphaned hung swiftpm-testing-helper processes from the pre-fix repro were killed during cleanup.
+  timestamp: 2026-07-27T22:28:44.731272+00:00
 depends_on:
 - 01KYD58WPKKF4BAN3AKFZV61KY
-position_column: todo
-position_ordinal: '8380'
+position_column: doing
+position_ordinal: '80'
 title: 'M3 Connections and transports: full-duplex, fail loud'
 ---
 ## Starting point
