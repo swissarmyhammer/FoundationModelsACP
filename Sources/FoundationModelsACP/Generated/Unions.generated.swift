@@ -266,13 +266,20 @@ public enum DiffFileType: Codable, Hashable, Sendable {
     /// value decodes without error and re-encodes unchanged.
     case unknown(String)
 
+    private enum Tag: String {
+        case text = "text"
+        case binary = "binary"
+        case directory = "directory"
+        case symlink = "symlink"
+    }
+
     /// The value as it crosses the wire.
     public var wireValue: String {
         switch self {
-        case .text: "text"
-        case .binary: "binary"
-        case .directory: "directory"
-        case .symlink: "symlink"
+        case .text: Tag.text.rawValue
+        case .binary: Tag.binary.rawValue
+        case .directory: Tag.directory.rawValue
+        case .symlink: Tag.symlink.rawValue
         case .unknown(let value): value
         }
     }
@@ -283,10 +290,10 @@ public enum DiffFileType: Codable, Hashable, Sendable {
     /// - Parameter wireValue: The value as it crosses the wire.
     public init(wireValue: String) {
         switch wireValue {
-        case "text": self = .text
-        case "binary": self = .binary
-        case "directory": self = .directory
-        case "symlink": self = .symlink
+        case Tag.text.rawValue: self = .text
+        case Tag.binary.rawValue: self = .binary
+        case Tag.directory.rawValue: self = .directory
+        case Tag.symlink.rawValue: self = .symlink
         default: self = .unknown(wireValue)
         }
     }
@@ -321,10 +328,14 @@ public enum DiffPatchFormat: Codable, Hashable, Sendable {
     /// value decodes without error and re-encodes unchanged.
     case unknown(String)
 
+    private enum Tag: String {
+        case gitPatch = "git_patch"
+    }
+
     /// The value as it crosses the wire.
     public var wireValue: String {
         switch self {
-        case .gitPatch: "git_patch"
+        case .gitPatch: Tag.gitPatch.rawValue
         case .unknown(let value): value
         }
     }
@@ -335,7 +346,7 @@ public enum DiffPatchFormat: Codable, Hashable, Sendable {
     /// - Parameter wireValue: The value as it crosses the wire.
     public init(wireValue: String) {
         switch wireValue {
-        case "git_patch": self = .gitPatch
+        case Tag.gitPatch.rawValue: self = .gitPatch
         default: self = .unknown(wireValue)
         }
     }
@@ -394,17 +405,28 @@ public enum ErrorCode: Codable, Hashable, Sendable {
     /// value decodes without error and re-encodes unchanged.
     case unknown(Int)
 
+    private enum Tag: Int {
+        case parseError = -32700
+        case invalidRequest = -32600
+        case methodNotFound = -32601
+        case invalidParams = -32602
+        case internalError = -32603
+        case requestCancelled = -32800
+        case authenticationRequired = -32000
+        case resourceNotFound = -32002
+    }
+
     /// The value as it crosses the wire.
     public var wireValue: Int {
         switch self {
-        case .parseError: -32700
-        case .invalidRequest: -32600
-        case .methodNotFound: -32601
-        case .invalidParams: -32602
-        case .internalError: -32603
-        case .requestCancelled: -32800
-        case .authenticationRequired: -32000
-        case .resourceNotFound: -32002
+        case .parseError: Tag.parseError.rawValue
+        case .invalidRequest: Tag.invalidRequest.rawValue
+        case .methodNotFound: Tag.methodNotFound.rawValue
+        case .invalidParams: Tag.invalidParams.rawValue
+        case .internalError: Tag.internalError.rawValue
+        case .requestCancelled: Tag.requestCancelled.rawValue
+        case .authenticationRequired: Tag.authenticationRequired.rawValue
+        case .resourceNotFound: Tag.resourceNotFound.rawValue
         case .unknown(let value): value
         }
     }
@@ -415,14 +437,14 @@ public enum ErrorCode: Codable, Hashable, Sendable {
     /// - Parameter wireValue: The value as it crosses the wire.
     public init(wireValue: Int) {
         switch wireValue {
-        case -32700: self = .parseError
-        case -32600: self = .invalidRequest
-        case -32601: self = .methodNotFound
-        case -32602: self = .invalidParams
-        case -32603: self = .internalError
-        case -32800: self = .requestCancelled
-        case -32000: self = .authenticationRequired
-        case -32002: self = .resourceNotFound
+        case Tag.parseError.rawValue: self = .parseError
+        case Tag.invalidRequest.rawValue: self = .invalidRequest
+        case Tag.methodNotFound.rawValue: self = .methodNotFound
+        case Tag.invalidParams.rawValue: self = .invalidParams
+        case Tag.internalError.rawValue: self = .internalError
+        case Tag.requestCancelled.rawValue: self = .requestCancelled
+        case Tag.authenticationRequired.rawValue: self = .authenticationRequired
+        case Tag.resourceNotFound.rawValue: self = .resourceNotFound
         default: self = .unknown(wireValue)
         }
     }
@@ -457,11 +479,16 @@ public enum IconTheme: Codable, Hashable, Sendable {
     /// value decodes without error and re-encodes unchanged.
     case unknown(String)
 
+    private enum Tag: String {
+        case light = "light"
+        case dark = "dark"
+    }
+
     /// The value as it crosses the wire.
     public var wireValue: String {
         switch self {
-        case .light: "light"
-        case .dark: "dark"
+        case .light: Tag.light.rawValue
+        case .dark: Tag.dark.rawValue
         case .unknown(let value): value
         }
     }
@@ -472,8 +499,8 @@ public enum IconTheme: Codable, Hashable, Sendable {
     /// - Parameter wireValue: The value as it crosses the wire.
     public init(wireValue: String) {
         switch wireValue {
-        case "light": self = .light
-        case "dark": self = .dark
+        case Tag.light.rawValue: self = .light
+        case Tag.dark.rawValue: self = .dark
         default: self = .unknown(wireValue)
         }
     }
@@ -594,13 +621,20 @@ public enum PermissionOptionKind: Codable, Hashable, Sendable {
     /// value decodes without error and re-encodes unchanged.
     case unknown(String)
 
+    private enum Tag: String {
+        case allowOnce = "allow_once"
+        case allowAlways = "allow_always"
+        case rejectOnce = "reject_once"
+        case rejectAlways = "reject_always"
+    }
+
     /// The value as it crosses the wire.
     public var wireValue: String {
         switch self {
-        case .allowOnce: "allow_once"
-        case .allowAlways: "allow_always"
-        case .rejectOnce: "reject_once"
-        case .rejectAlways: "reject_always"
+        case .allowOnce: Tag.allowOnce.rawValue
+        case .allowAlways: Tag.allowAlways.rawValue
+        case .rejectOnce: Tag.rejectOnce.rawValue
+        case .rejectAlways: Tag.rejectAlways.rawValue
         case .unknown(let value): value
         }
     }
@@ -611,10 +645,10 @@ public enum PermissionOptionKind: Codable, Hashable, Sendable {
     /// - Parameter wireValue: The value as it crosses the wire.
     public init(wireValue: String) {
         switch wireValue {
-        case "allow_once": self = .allowOnce
-        case "allow_always": self = .allowAlways
-        case "reject_once": self = .rejectOnce
-        case "reject_always": self = .rejectAlways
+        case Tag.allowOnce.rawValue: self = .allowOnce
+        case Tag.allowAlways.rawValue: self = .allowAlways
+        case Tag.rejectOnce.rawValue: self = .rejectOnce
+        case Tag.rejectAlways.rawValue: self = .rejectAlways
         default: self = .unknown(wireValue)
         }
     }
@@ -656,12 +690,18 @@ public enum PlanEntryPriority: Codable, Hashable, Sendable {
     /// value decodes without error and re-encodes unchanged.
     case unknown(String)
 
+    private enum Tag: String {
+        case high = "high"
+        case medium = "medium"
+        case low = "low"
+    }
+
     /// The value as it crosses the wire.
     public var wireValue: String {
         switch self {
-        case .high: "high"
-        case .medium: "medium"
-        case .low: "low"
+        case .high: Tag.high.rawValue
+        case .medium: Tag.medium.rawValue
+        case .low: Tag.low.rawValue
         case .unknown(let value): value
         }
     }
@@ -672,9 +712,9 @@ public enum PlanEntryPriority: Codable, Hashable, Sendable {
     /// - Parameter wireValue: The value as it crosses the wire.
     public init(wireValue: String) {
         switch wireValue {
-        case "high": self = .high
-        case "medium": self = .medium
-        case "low": self = .low
+        case Tag.high.rawValue: self = .high
+        case Tag.medium.rawValue: self = .medium
+        case Tag.low.rawValue: self = .low
         default: self = .unknown(wireValue)
         }
     }
@@ -718,13 +758,20 @@ public enum PlanEntryStatus: Codable, Hashable, Sendable {
     /// value decodes without error and re-encodes unchanged.
     case unknown(String)
 
+    private enum Tag: String {
+        case pending = "pending"
+        case inProgress = "in_progress"
+        case completed = "completed"
+        case cancelled = "cancelled"
+    }
+
     /// The value as it crosses the wire.
     public var wireValue: String {
         switch self {
-        case .pending: "pending"
-        case .inProgress: "in_progress"
-        case .completed: "completed"
-        case .cancelled: "cancelled"
+        case .pending: Tag.pending.rawValue
+        case .inProgress: Tag.inProgress.rawValue
+        case .completed: Tag.completed.rawValue
+        case .cancelled: Tag.cancelled.rawValue
         case .unknown(let value): value
         }
     }
@@ -735,10 +782,10 @@ public enum PlanEntryStatus: Codable, Hashable, Sendable {
     /// - Parameter wireValue: The value as it crosses the wire.
     public init(wireValue: String) {
         switch wireValue {
-        case "pending": self = .pending
-        case "in_progress": self = .inProgress
-        case "completed": self = .completed
-        case "cancelled": self = .cancelled
+        case Tag.pending.rawValue: self = .pending
+        case Tag.inProgress.rawValue: self = .inProgress
+        case Tag.completed.rawValue: self = .completed
+        case Tag.cancelled.rawValue: self = .cancelled
         default: self = .unknown(wireValue)
         }
     }
@@ -1038,11 +1085,16 @@ public enum Role: Codable, Hashable, Sendable {
     /// value decodes without error and re-encodes unchanged.
     case unknown(String)
 
+    private enum Tag: String {
+        case assistant = "assistant"
+        case user = "user"
+    }
+
     /// The value as it crosses the wire.
     public var wireValue: String {
         switch self {
-        case .assistant: "assistant"
-        case .user: "user"
+        case .assistant: Tag.assistant.rawValue
+        case .user: Tag.user.rawValue
         case .unknown(let value): value
         }
     }
@@ -1053,8 +1105,8 @@ public enum Role: Codable, Hashable, Sendable {
     /// - Parameter wireValue: The value as it crosses the wire.
     public init(wireValue: String) {
         switch wireValue {
-        case "assistant": self = .assistant
-        case "user": self = .user
+        case Tag.assistant.rawValue: self = .assistant
+        case Tag.user.rawValue: self = .user
         default: self = .unknown(wireValue)
         }
     }
@@ -1103,13 +1155,20 @@ public enum SessionConfigOptionCategory: Codable, Hashable, Sendable {
     /// value decodes without error and re-encodes unchanged.
     case unknown(String)
 
+    private enum Tag: String {
+        case mode = "mode"
+        case model = "model"
+        case modelConfig = "model_config"
+        case thoughtLevel = "thought_level"
+    }
+
     /// The value as it crosses the wire.
     public var wireValue: String {
         switch self {
-        case .mode: "mode"
-        case .model: "model"
-        case .modelConfig: "model_config"
-        case .thoughtLevel: "thought_level"
+        case .mode: Tag.mode.rawValue
+        case .model: Tag.model.rawValue
+        case .modelConfig: Tag.modelConfig.rawValue
+        case .thoughtLevel: Tag.thoughtLevel.rawValue
         case .unknown(let value): value
         }
     }
@@ -1120,10 +1179,10 @@ public enum SessionConfigOptionCategory: Codable, Hashable, Sendable {
     /// - Parameter wireValue: The value as it crosses the wire.
     public init(wireValue: String) {
         switch wireValue {
-        case "mode": self = .mode
-        case "model": self = .model
-        case "model_config": self = .modelConfig
-        case "thought_level": self = .thoughtLevel
+        case Tag.mode.rawValue: self = .mode
+        case Tag.model.rawValue: self = .model
+        case Tag.modelConfig.rawValue: self = .modelConfig
+        case Tag.thoughtLevel.rawValue: self = .thoughtLevel
         default: self = .unknown(wireValue)
         }
     }
@@ -1469,14 +1528,22 @@ public enum StopReason: Codable, Hashable, Sendable {
     /// value decodes without error and re-encodes unchanged.
     case unknown(String)
 
+    private enum Tag: String {
+        case endTurn = "end_turn"
+        case maxTokens = "max_tokens"
+        case maxTurnRequests = "max_turn_requests"
+        case refusal = "refusal"
+        case cancelled = "cancelled"
+    }
+
     /// The value as it crosses the wire.
     public var wireValue: String {
         switch self {
-        case .endTurn: "end_turn"
-        case .maxTokens: "max_tokens"
-        case .maxTurnRequests: "max_turn_requests"
-        case .refusal: "refusal"
-        case .cancelled: "cancelled"
+        case .endTurn: Tag.endTurn.rawValue
+        case .maxTokens: Tag.maxTokens.rawValue
+        case .maxTurnRequests: Tag.maxTurnRequests.rawValue
+        case .refusal: Tag.refusal.rawValue
+        case .cancelled: Tag.cancelled.rawValue
         case .unknown(let value): value
         }
     }
@@ -1487,11 +1554,11 @@ public enum StopReason: Codable, Hashable, Sendable {
     /// - Parameter wireValue: The value as it crosses the wire.
     public init(wireValue: String) {
         switch wireValue {
-        case "end_turn": self = .endTurn
-        case "max_tokens": self = .maxTokens
-        case "max_turn_requests": self = .maxTurnRequests
-        case "refusal": self = .refusal
-        case "cancelled": self = .cancelled
+        case Tag.endTurn.rawValue: self = .endTurn
+        case Tag.maxTokens.rawValue: self = .maxTokens
+        case Tag.maxTurnRequests.rawValue: self = .maxTurnRequests
+        case Tag.refusal.rawValue: self = .refusal
+        case Tag.cancelled.rawValue: self = .cancelled
         default: self = .unknown(wireValue)
         }
     }
@@ -1623,14 +1690,22 @@ public enum ToolCallStatus: Codable, Hashable, Sendable {
     /// value decodes without error and re-encodes unchanged.
     case unknown(String)
 
+    private enum Tag: String {
+        case pending = "pending"
+        case inProgress = "in_progress"
+        case completed = "completed"
+        case failed = "failed"
+        case cancelled = "cancelled"
+    }
+
     /// The value as it crosses the wire.
     public var wireValue: String {
         switch self {
-        case .pending: "pending"
-        case .inProgress: "in_progress"
-        case .completed: "completed"
-        case .failed: "failed"
-        case .cancelled: "cancelled"
+        case .pending: Tag.pending.rawValue
+        case .inProgress: Tag.inProgress.rawValue
+        case .completed: Tag.completed.rawValue
+        case .failed: Tag.failed.rawValue
+        case .cancelled: Tag.cancelled.rawValue
         case .unknown(let value): value
         }
     }
@@ -1641,11 +1716,11 @@ public enum ToolCallStatus: Codable, Hashable, Sendable {
     /// - Parameter wireValue: The value as it crosses the wire.
     public init(wireValue: String) {
         switch wireValue {
-        case "pending": self = .pending
-        case "in_progress": self = .inProgress
-        case "completed": self = .completed
-        case "failed": self = .failed
-        case "cancelled": self = .cancelled
+        case Tag.pending.rawValue: self = .pending
+        case Tag.inProgress.rawValue: self = .inProgress
+        case Tag.completed.rawValue: self = .completed
+        case Tag.failed.rawValue: self = .failed
+        case Tag.cancelled.rawValue: self = .cancelled
         default: self = .unknown(wireValue)
         }
     }
@@ -1709,19 +1784,32 @@ public enum ToolKind: Codable, Hashable, Sendable {
     /// value decodes without error and re-encodes unchanged.
     case unknown(String)
 
+    private enum Tag: String {
+        case read = "read"
+        case edit = "edit"
+        case delete = "delete"
+        case move = "move"
+        case search = "search"
+        case execute = "execute"
+        case think = "think"
+        case fetch = "fetch"
+        case switchMode = "switch_mode"
+        case other = "other"
+    }
+
     /// The value as it crosses the wire.
     public var wireValue: String {
         switch self {
-        case .read: "read"
-        case .edit: "edit"
-        case .delete: "delete"
-        case .move: "move"
-        case .search: "search"
-        case .execute: "execute"
-        case .think: "think"
-        case .fetch: "fetch"
-        case .switchMode: "switch_mode"
-        case .other: "other"
+        case .read: Tag.read.rawValue
+        case .edit: Tag.edit.rawValue
+        case .delete: Tag.delete.rawValue
+        case .move: Tag.move.rawValue
+        case .search: Tag.search.rawValue
+        case .execute: Tag.execute.rawValue
+        case .think: Tag.think.rawValue
+        case .fetch: Tag.fetch.rawValue
+        case .switchMode: Tag.switchMode.rawValue
+        case .other: Tag.other.rawValue
         case .unknown(let value): value
         }
     }
@@ -1732,16 +1820,16 @@ public enum ToolKind: Codable, Hashable, Sendable {
     /// - Parameter wireValue: The value as it crosses the wire.
     public init(wireValue: String) {
         switch wireValue {
-        case "read": self = .read
-        case "edit": self = .edit
-        case "delete": self = .delete
-        case "move": self = .move
-        case "search": self = .search
-        case "execute": self = .execute
-        case "think": self = .think
-        case "fetch": self = .fetch
-        case "switch_mode": self = .switchMode
-        case "other": self = .other
+        case Tag.read.rawValue: self = .read
+        case Tag.edit.rawValue: self = .edit
+        case Tag.delete.rawValue: self = .delete
+        case Tag.move.rawValue: self = .move
+        case Tag.search.rawValue: self = .search
+        case Tag.execute.rawValue: self = .execute
+        case Tag.think.rawValue: self = .think
+        case Tag.fetch.rawValue: self = .fetch
+        case Tag.switchMode.rawValue: self = .switchMode
+        case Tag.other.rawValue: self = .other
         default: self = .unknown(wireValue)
         }
     }

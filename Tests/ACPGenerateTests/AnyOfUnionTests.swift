@@ -63,6 +63,15 @@ import Testing
         #expect(unions.contains("public enum Thing: Codable, Hashable, Sendable"))
         #expect(unions.contains("case alpha(Alpha)"))
         #expect(unions.contains("case beta(Beta)"))
+        // The discriminated family gets the same Tag-enum treatment as its
+        // tagged-union and value-union siblings: the tag is written once, as
+        // the `Tag` enum's raw value, and both decode and encode read it back
+        // instead of each carrying their own copy of `"alpha"`. `beta` is the
+        // discriminator-less default, so it has no `Tag` case of its own.
+        #expect(unions.contains("private enum Tag: String {"))
+        #expect(unions.contains("case alpha = \"alpha\""))
+        #expect(unions.contains("case Tag.alpha.rawValue?:"))
+        #expect(unions.contains("try container.encode(Tag.alpha.rawValue, forKey: .type)"))
         let unresolved = try #require(files.first { $0.name == "Unresolved.generated.swift" }).contents
         #expect(!unresolved.contains("typealias Thing"))
     }

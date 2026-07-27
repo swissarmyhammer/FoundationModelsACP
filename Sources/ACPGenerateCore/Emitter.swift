@@ -373,24 +373,56 @@ enum Emitter {
         ]
     }
 
-    /// Renders the private enum mapping each known tagged-union variant to
-    /// the wire discriminator that selects it.
+    /// Renders a private `enum Tag` mapping each entry's Swift case name to
+    /// an already-rendered wire-value literal, so that literal is written
+    /// once instead of once per read site.
+    ///
+    /// Shared by every family that repeats a wire constant across a forward
+    /// and a reverse lookup: the flattened tagged-union family
+    /// (`tagDeclaration`), the discriminated `anyOf` family
+    /// (`discriminatedTagDeclaration`), the value-union family
+    /// (`valueUnionTagDeclaration`), and scalar enums
+    /// (`scalarEnumDeclaration`) — the same single-source-of-truth shape
+    /// `excludedMembers` gives the sibling-member list, applied here to a
+    /// case's wire value instead.
+    ///
+    /// - Parameters:
+    ///   - entries: Each case's Swift name paired with its literal source
+    ///     text (e.g. `"tool_call_update"` or `-32602`), in schema order.
+    ///   - rawType: The enum's raw type (`String` for every tag; `String` or
+    ///     `Int` for a scalar enum's wire kind).
+    ///   - baseIndent: The indentation before `private enum Tag`; case lines
+    ///     nest one level deeper.
+    /// - Returns: The declaration lines, or empty when there are no entries.
+    private static func tagEnumDeclaration(
+        entries: [(swiftName: String, literal: String)],
+        rawType: String,
+        baseIndent: String
+    ) -> [String] {
+        guard !entries.isEmpty else { return [] }
+        var lines = ["\(baseIndent)private enum Tag: \(rawType) {"]
+        for entry in entries {
+            lines.append("\(baseIndent)    case \(entry.swiftName) = \(entry.literal)")
+        }
+        lines.append("\(baseIndent)}")
+        return lines
+    }
+
+    /// Renders the private `Tag` enum mapping each known tagged-union variant
+    /// to the wire discriminator that selects it.
     ///
     /// Decode looks a discriminator up via `Tag(rawValue:)` and encode reads
     /// `Tag.<case>.rawValue` back, so a tag string is written once per case
-    /// no matter how many arms use it — the same single-source-of-truth
-    /// shape `excludedMembers` gives the sibling-member list, applied here to
-    /// the discriminator instead.
+    /// no matter how many arms use it.
     ///
     /// - Parameter cases: The union's cases in schema order.
     /// - Returns: The declaration lines, indented one level.
     private static func tagDeclaration(cases: [UnionCaseModel]) -> [String] {
-        var lines = ["    private enum Tag: String {"]
-        for unionCase in cases {
-            lines.append("        case \(unionCase.swiftName) = \(stringLiteral(unionCase.tag))")
-        }
-        lines.append("    }")
-        return lines
+        tagEnumDeclaration(
+            entries: cases.map { (swiftName: $0.swiftName, literal: stringLiteral($0.tag)) },
+            rawType: "String",
+            baseIndent: "    "
+        )
     }
 
     /// Renders the encode arm that restores an unrecognized variant.
@@ -413,7 +445,10 @@ enum Emitter {
     /// Renders a scalar enum with hand-rolled `Codable`.
     ///
     /// Known wire constants map to named cases, anything else decodes to
-    /// `unknown`, and `.unknown` re-encodes the value it captured.
+    /// `unknown`, and `.unknown` re-encodes the value it captured. Each
+    /// case's wire constant is written once, into the nested `Tag` enum;
+    /// `wireValue` and `init(wireValue:)` both read it back rather than each
+    /// carrying their own copy of the literal.
     ///
     /// - Parameter model: The enum's emission model.
     /// - Returns: The rendered enum declaration.
@@ -431,12 +466,20 @@ enum Emitter {
             "    /// value decodes without error and re-encodes unchanged.",
             "    case unknown(\(rawType))",
             "",
+        ])
+        lines.append(contentsOf: tagEnumDeclaration(
+            entries: model.cases.map { (swiftName: $0.swiftName, literal: wireLiteral($0, kind: model.rawKind)) },
+            rawType: rawType,
+            baseIndent: "    "
+        ))
+        lines.append(contentsOf: [
+            "",
             "    /// The value as it crosses the wire.",
             "    public var wireValue: \(rawType) {",
             "        switch self {",
         ])
         for enumCase in model.cases {
-            lines.append("        case .\(enumCase.swiftName): \(wireLiteral(enumCase, kind: model.rawKind))")
+            lines.append("        case .\(enumCase.swiftName): Tag.\(enumCase.swiftName).rawValue")
         }
         lines.append(contentsOf: [
             "        case .unknown(let value): value",
@@ -451,7 +494,7 @@ enum Emitter {
             "        switch wireValue {",
         ])
         for enumCase in model.cases {
-            lines.append("        case \(wireLiteral(enumCase, kind: model.rawKind)): self = .\(enumCase.swiftName)")
+            lines.append("        case Tag.\(enumCase.swiftName).rawValue: self = .\(enumCase.swiftName)")
         }
         lines.append(contentsOf: [
             "        default: self = .unknown(wireValue)",
@@ -583,6 +626,21 @@ enum Emitter {
         return lines.joined(separator: "\n")
     }
 
+    /// Renders the private `Tag` enum mapping each discriminated-union
+    /// variant with a `const` tag to the wire discriminator that selects it.
+    ///
+    /// The default variant (`nil` tag) has no entry, since no discriminator
+    /// string selects it — it is what an *absent* discriminator selects.
+    ///
+    /// - Parameter cases: The union's cases in schema order.
+    /// - Returns: The declaration lines, indented one level.
+    private static func discriminatedTagDeclaration(cases: [DiscriminatedCaseModel]) -> [String] {
+        let tagged = cases.compactMap { unionCase -> (swiftName: String, literal: String)? in
+            unionCase.tag.map { (unionCase.swiftName, stringLiteral($0)) }
+        }
+        return tagEnumDeclaration(entries: tagged, rawType: "String", baseIndent: "    ")
+    }
+
     /// Renders a discriminated `anyOf` union as an enum with hand-rolled
     /// `Codable`.
     ///
@@ -608,7 +666,11 @@ enum Emitter {
             "        case \(model.discriminator)",
             "    }",
             "",
-            excludedMembersDeclaration(discriminator: model.discriminator, siblingMembers: []),
+        ])
+        lines.append(contentsOf: discriminatedTagDeclaration(cases: model.cases))
+        lines.append("")
+        lines.append(excludedMembersDeclaration(discriminator: model.discriminator, siblingMembers: []))
+        lines.append(contentsOf: [
             "",
             "    /// Decodes by the `\(model.discriminator)` discriminator; an absent",
             "    /// discriminator selects the default variant and an unrecognized one",
@@ -621,8 +683,8 @@ enum Emitter {
             "        switch try container.decodeIfPresent(String.self, forKey: .\(model.discriminator)) {",
         ])
         for unionCase in model.cases {
-            guard let tag = unionCase.tag else { continue }
-            lines.append("        case \(stringLiteral(tag))?:")
+            guard unionCase.tag != nil else { continue }
+            lines.append("        case Tag.\(unionCase.swiftName).rawValue?:")
             lines.append("            self = .\(unionCase.swiftName)(try \(unionCase.payloadType)(from: decoder))")
         }
         if let defaultCase = model.cases.first(where: { $0.tag == nil }) {
@@ -646,8 +708,8 @@ enum Emitter {
         ])
         for unionCase in model.cases {
             lines.append("        case .\(unionCase.swiftName)(let payload):")
-            if let tag = unionCase.tag {
-                lines.append("            try container.encode(\(stringLiteral(tag)), forKey: .\(model.discriminator))")
+            if unionCase.tag != nil {
+                lines.append("            try container.encode(Tag.\(unionCase.swiftName).rawValue, forKey: .\(model.discriminator))")
             }
             lines.append("            try payload.encode(to: encoder)")
         }
@@ -806,17 +868,11 @@ enum Emitter {
     /// - Parameter cases: The value union's cases in schema order.
     /// - Returns: The declaration lines, indented two levels, or empty.
     private static func valueUnionTagDeclaration(cases: [ValueUnionCaseModel]) -> [String] {
-        let tagged = cases.compactMap { unionCase -> (swiftName: String, tag: String)? in
+        let tagged = cases.compactMap { unionCase -> (swiftName: String, literal: String)? in
             guard case .tag(let tag) = unionCase.selector else { return nil }
-            return (unionCase.swiftName, tag)
+            return (unionCase.swiftName, stringLiteral(tag))
         }
-        guard !tagged.isEmpty else { return [] }
-        var lines = ["        private enum Tag: String {"]
-        for entry in tagged {
-            lines.append("            case \(entry.swiftName) = \(stringLiteral(entry.tag))")
-        }
-        lines.append("        }")
-        return lines
+        return tagEnumDeclaration(entries: tagged, rawType: "String", baseIndent: "        ")
     }
 
     /// Renders one value-union case's associated-value list.

@@ -67,8 +67,10 @@ import Testing
         #expect(unions.contains("case methodNotFound"))
         #expect(unions.contains("case unknown(Int)"))
         #expect(unions.contains("public var wireValue: Int {"))
-        #expect(unions.contains("case .parseError: -32700"))
-        #expect(unions.contains("case -32601: self = .methodNotFound"))
+        #expect(unions.contains("private enum Tag: Int {"))
+        #expect(unions.contains("case parseError = -32700"))
+        #expect(unions.contains("case .parseError: Tag.parseError.rawValue"))
+        #expect(unions.contains("case Tag.methodNotFound.rawValue: self = .methodNotFound"))
         // The open tail is the fallback, never a case of its own.
         #expect(!unions.contains("case other"))
         let unresolved = try #require(files.first { $0.name == "Unresolved.generated.swift" }).contents
@@ -100,6 +102,9 @@ import Testing
         // `swiftCaseName` rejects such values at the generator boundary, but
         // the emitter must be safe on its own terms: a quote or backslash in
         // a wire value may never break out of the generated string literal.
+        // The value is written once, as the `Tag` enum's raw value — both
+        // `wireValue` and `init(wireValue:)` read that one literal back
+        // rather than each carrying their own copy.
         let model = ScalarEnumModel(
             name: "Weird",
             documentation: nil,
@@ -107,9 +112,10 @@ import Testing
             cases: [EnumCaseModel(wireValue: #"a"b\c"#, swiftName: "aBC", documentation: nil)]
         )
         let source = Emitter.scalarEnumDeclaration(model)
-        #expect(source.contains(#"case .aBC: "a\"b\\c""#))
-        #expect(source.contains(#"case "a\"b\\c": self = .aBC"#))
-        #expect(!source.contains(#"case "a"b\c""#))
+        #expect(source.contains(#"case aBC = "a\"b\\c""#))
+        #expect(source.contains("case .aBC: Tag.aBC.rawValue"))
+        #expect(source.contains("case Tag.aBC.rawValue: self = .aBC"))
+        #expect(!source.contains(#"case aBC = "a"b\c""#))
     }
 }
 

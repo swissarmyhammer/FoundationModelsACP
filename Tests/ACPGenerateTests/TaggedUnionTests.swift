@@ -106,6 +106,7 @@ private func assertRoundTrips<T: Codable & Equatable>(_ type: T.Type, fixture: S
         )
         let source = Emitter.taggedUnionDeclaration(model)
         #expect(source.contains(#"case aBC = "a\"b\\c""#))
+        #expect(source.contains("switch Tag(rawValue: discriminator) {"))
         #expect(source.contains("try container.encode(Tag.aBC.rawValue, forKey: .type)"))
         #expect(!source.contains(#"case aBC = "a"b\c""#))
     }
