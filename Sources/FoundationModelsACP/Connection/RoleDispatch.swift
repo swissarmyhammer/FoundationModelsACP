@@ -19,8 +19,7 @@ extension JSONValue {
         from params: JSONValue?
     ) throws -> Model {
         do {
-            let data = try JSONEncoder().encode(params ?? .object([:]))
-            return try JSONDecoder().decode(Model.self, from: data)
+            return try (params ?? .object([:])).decoded(as: modelType)
         } catch {
             throw RequestError.invalidParams
         }
