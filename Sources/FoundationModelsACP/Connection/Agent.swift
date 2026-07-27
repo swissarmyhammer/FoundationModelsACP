@@ -136,23 +136,34 @@ public protocol Agent: Sendable {
 extension Agent {
     /// Default implementation; throws method-not-found unless overridden.
     public func loginAuth(_ params: LoginAuthRequest) async throws -> LoginAuthResponse {
-        throw RequestError.methodNotFound("auth/login")
+        try throwMethodNotFound("auth/login")
     }
 
     /// Default implementation; throws method-not-found unless overridden.
     public func logoutAuth(_ params: LogoutAuthRequest) async throws -> LogoutAuthResponse {
-        throw RequestError.methodNotFound("auth/logout")
+        try throwMethodNotFound("auth/logout")
     }
 
     /// Default implementation; throws method-not-found unless overridden.
     public func deleteSession(_ params: DeleteSessionRequest) async throws -> DeleteSessionResponse {
-        throw RequestError.methodNotFound("session/delete")
+        try throwMethodNotFound("session/delete")
     }
 
     /// Default implementation; throws method-not-found unless overridden.
     public func setSessionConfigOption(
         _ params: SetSessionConfigOptionRequest
     ) async throws -> SetSessionConfigOptionResponse {
-        throw RequestError.methodNotFound("session/set_config_option")
+        try throwMethodNotFound("session/set_config_option")
+    }
+
+    /// Throws `RequestError.methodNotFound` naming `methodName`.
+    ///
+    /// Shared by every capability-gated default above, so each one differs
+    /// from its siblings only by the wire method name it passes here.
+    ///
+    /// - Parameter methodName: The wire method name to report as unfound.
+    /// - Throws: `RequestError.methodNotFound(methodName)`, always.
+    private func throwMethodNotFound<T>(_ methodName: String) throws -> T {
+        throw RequestError.methodNotFound(methodName)
     }
 }

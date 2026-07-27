@@ -174,6 +174,16 @@ private struct FullAgent: Agent {
         let withAuth = FullAgent()
         let response = try await withAuth.loginAuth(LoginAuthRequest(methodId: AuthMethodId(rawValue: "oauth")))
         #expect(response == LoginAuthResponse())
+
+        // The same gating/default pattern applies to `logoutAuth`, which
+        // shares `loginAuth`'s `authMethods` capability but is otherwise
+        // independent — an agent could in principle offer one without the
+        // other, so both directions are worth checking on their own.
+        await #expect(throws: RequestError.self) {
+            _ = try await withoutAuth.logoutAuth(LogoutAuthRequest())
+        }
+        let logoutResponse = try await withAuth.logoutAuth(LogoutAuthRequest())
+        #expect(logoutResponse == LogoutAuthResponse())
     }
 
     @Test func sessionDeleteIsGatedAndOverridableIndependently() async throws {

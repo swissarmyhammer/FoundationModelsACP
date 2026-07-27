@@ -118,6 +118,19 @@ private let syntheticManifest = #"""
         expectGenerationFails(schema: schema, manifest: syntheticManifest)
     }
 
+    @Test func responseWithoutRequestFails() {
+        // The symmetric case: a lone Response, with no paired Request, is
+        // just as malformed a route as a lone Request with no Response.
+        let schema = #"""
+            {
+              "$defs": {
+                "FrobWidgetResponse": {"type": "object", "properties": {}, "x-side": "agent", "x-method": "widget/frob"}
+              }
+            }
+            """#
+        expectGenerationFails(schema: schema, manifest: syntheticManifest)
+    }
+
     @Test func sideDisagreementBetweenManifestAndSchemaFails() {
         let manifest = #"""
             {
@@ -232,6 +245,7 @@ private let syntheticManifest = #"""
     @Test func compiledUnstableTableIsDisjointFromStable() {
         let stable = Set(ACPMethodTable.methods.map { SideAndWire(side: $0.side, wireMethod: $0.wireMethod) })
         let unstable = Set(Unstable.MethodTable.methods.map { SideAndWire(side: $0.side, wireMethod: $0.wireMethod) })
+        #expect(!stable.isEmpty)
         #expect(!unstable.isEmpty)
         #expect(stable.isDisjoint(with: unstable))
     }
