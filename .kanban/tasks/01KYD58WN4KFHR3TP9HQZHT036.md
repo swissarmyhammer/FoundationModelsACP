@@ -290,8 +290,8 @@ comments:
   timestamp: 2026-07-27T18:12:45.143570+00:00
 depends_on:
 - 01KYD58WKPK64VW7RWG16B89QC
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8180'
 title: M1 Types and conventions, enforced at decode time
 ---
 ## Starting point

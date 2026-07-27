@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import ACPGenerateCore
+import FoundationModelsACP
 
 /// Emitted-source assertions for the stable method-routing table.
 ///
@@ -167,5 +168,80 @@ private let syntheticManifest = #"""
             manifest: nil,
             unstableManifest: syntheticManifest
         )
+    }
+}
+
+/// Runtime acceptance for the checked-in `MethodTable.generated.swift`
+/// compiled into the library.
+///
+/// This is the regression guard for the wrong-wiring bug class this package
+/// exists to prevent: the TS-SDK bound `setSessionModel` to `session/set_mode`
+/// — a right name on the wrong handler. Because the table is generated from
+/// the vendored manifest and schema rather than hand-wired, that particular
+/// mistake cannot be made by hand; this suite is what would have caught it if
+/// it ever could be.
+@Suite struct RoutingTableAcceptanceTests {
+    /// The package root, derived from this file's location.
+    private var packageRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()  // RoutingTableTests.swift
+            .deletingLastPathComponent()  // ACPGenerateTests
+            .deletingLastPathComponent()  // Tests
+    }
+
+    /// The checked-in generated table, located relative to this file.
+    private var checkedInTableURL: URL {
+        packageRoot.appendingPathComponent("Sources/FoundationModelsACP/Generated/MethodTable.generated.swift")
+    }
+
+    @Test func checkedInTableMatchesFreshGeneration() throws {
+        let set = SchemaSet.acpV2
+        func artifact(_ treeRelativePath: String) throws -> Data {
+            try Data(contentsOf: packageRoot.appendingPathComponent(treeRelativePath))
+        }
+        let files = try SchemaGenerator(config: set.config).generate(
+            schemaJSON: try artifact(set.schemaPath),
+            metaJSON: try artifact(#require(set.metaPath)),
+            unstableMetaJSON: try artifact(#require(set.unstableMetaPath)),
+            namespace: set.outputNamespace
+        )
+        let fresh = try #require(files.first { $0.name == "MethodTable.generated.swift" }).contents
+        let checkedIn = String(decoding: try Data(contentsOf: checkedInTableURL), as: UTF8.self)
+        #expect(fresh == checkedIn, "checked-in table is stale; run swift run acp-generate")
+    }
+
+    @Test func compiledTableCoversBothSidesAndKinds() {
+        // Every cell of the (side × kind) matrix, not just three of the four:
+        // agent+request, client+notification, agent+notification, and
+        // protocolLevel+notification leave client+request unchecked unless
+        // `session/request_permission` — the only client request — is pinned
+        // too.
+        let byWire = Dictionary(uniqueKeysWithValues: ACPMethodTable.methods.map { ($0.wireMethod, $0) })
+        #expect(byWire["session/prompt"]?.side == .agent)
+        #expect(byWire["session/prompt"]?.kind == .request)
+        #expect(byWire["session/update"]?.side == .client)
+        #expect(byWire["session/update"]?.kind == .notification)
+        #expect(byWire["session/request_permission"]?.side == .client)
+        #expect(byWire["session/request_permission"]?.kind == .request)
+        #expect(byWire["session/cancel"]?.side == .agent)
+        #expect(byWire["session/cancel"]?.kind == .notification)
+        #expect(byWire["$/cancel_request"]?.side == .protocolLevel)
+        #expect(byWire["$/cancel_request"]?.kind == .notification)
+    }
+
+    @Test func compiledUnstableTableIsDisjointFromStable() {
+        let stable = Set(ACPMethodTable.methods.map { SideAndWire(side: $0.side, wireMethod: $0.wireMethod) })
+        let unstable = Set(Unstable.MethodTable.methods.map { SideAndWire(side: $0.side, wireMethod: $0.wireMethod) })
+        #expect(!unstable.isEmpty)
+        #expect(stable.isDisjoint(with: unstable))
+    }
+
+    /// A (side, wire method) routing coordinate for disjointness checks.
+    private struct SideAndWire: Hashable {
+        /// The serving participant.
+        let side: MethodSide
+
+        /// The wire method name.
+        let wireMethod: String
     }
 }
