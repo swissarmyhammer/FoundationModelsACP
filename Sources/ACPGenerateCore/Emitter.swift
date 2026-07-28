@@ -45,6 +45,49 @@ enum Emitter {
     /// banner) in a generated file.
     private static let declarationSeparator = "\n\n"
 
+    /// The opening line of `init(from:)`, shared by every hand-rolled
+    /// `Decodable` conformance this file emits: struct members
+    /// (`decoderInit`), scalar enums, tagged unions, discriminated unions,
+    /// value unions, and objects carrying a union.
+    private static let decoderInitOpening = "public init(from decoder: any Decoder) throws {"
+
+    /// The opening line of `encode(to:)`, shared by every hand-rolled
+    /// `Encodable` conformance this file emits, mirroring
+    /// `decoderInitOpening`.
+    private static let encodeMethodOpening = "public func encode(to encoder: any Encoder) throws {"
+
+    /// The doc comment on every `init(from:)`'s `decoder` parameter.
+    private static let decoderParameterDoc = "/// - Parameter decoder: The decoder positioned at the object."
+
+    /// The doc comment on every `encode(to:)`'s `encoder` parameter.
+    private static let encoderParameterDoc = "/// - Parameter encoder: The encoder to write the object into."
+
+    /// The doc comment on every `encode(to:)`'s `Throws` clause.
+    private static let encoderThrowsDoc = "/// - Throws: Rethrows any error from the underlying encoder."
+
+    /// The second line of the two-line doc comment opening a forgiving
+    /// `init(from:)` (struct members and objects carrying a union); the
+    /// first line names the type being decoded, so it still varies per call
+    /// site and is not itself a shared literal.
+    private static let schemaDefaultsDoc = "/// schema defaults instead of failing the message."
+
+    /// The statement binding the keyed container at the top of `init(from:)`.
+    private static let decoderContainerDeclaration =
+        "let container = try decoder.container(keyedBy: CodingKeys.self)"
+
+    /// The statement binding the keyed container at the top of `encode(to:)`.
+    private static let encoderContainerDeclaration =
+        "var container = encoder.container(keyedBy: CodingKeys.self)"
+
+    /// The `switch` dispatching on a discriminator already looked up via
+    /// `Tag(rawValue:)`, shared by the flattened tagged-union decoder and the
+    /// value-union decoder's tagged-case branch.
+    private static let tagSwitchOpening = "switch Tag(rawValue: discriminator) {"
+
+    /// The statement delegating encoding to a union case's payload,
+    /// flattening its fields beside the discriminator.
+    private static let payloadEncodeCall = "try payload.encode(to: encoder)"
+
     /// Assembles a generated file from rendered declarations.
     ///
     /// - Parameters:
@@ -280,13 +323,13 @@ enum Emitter {
     private static func decoderInit(_ model: StructModel) -> [String] {
         var lines = [
             indentUnit + "/// Decodes a `\(model.name)`; forgiving fields degrade to their",
-            indentUnit + "/// schema defaults instead of failing the message.",
+            indentUnit + schemaDefaultsDoc,
             indentUnit + "///",
-            indentUnit + "/// - Parameter decoder: The decoder positioned at the object.",
+            indentUnit + decoderParameterDoc,
             indentUnit + "/// - Throws: `DecodingError` when a strict field is missing, mistyped,",
             indentUnit + "///   or violates a wire invariant.",
-            indentUnit + "public init(from decoder: any Decoder) throws {",
-            indent2 + "let container = try decoder.container(keyedBy: CodingKeys.self)",
+            indentUnit + decoderInitOpening,
+            indent2 + decoderContainerDeclaration,
         ]
         for property in model.properties {
             lines.append(indent2 + decodeLine(property))
@@ -371,10 +414,10 @@ enum Emitter {
         }
         lines.append(contentsOf: [
             indentUnit + "///",
-            indentUnit + "/// - Parameter encoder: The encoder to write the object into.",
-            indentUnit + "/// - Throws: Rethrows any error from the underlying encoder.",
-            indentUnit + "public func encode(to encoder: any Encoder) throws {",
-            indent2 + "var container = encoder.container(keyedBy: CodingKeys.self)",
+            indentUnit + encoderParameterDoc,
+            indentUnit + encoderThrowsDoc,
+            indentUnit + encodeMethodOpening,
+            indent2 + encoderContainerDeclaration,
         ])
         for property in model.properties {
             lines.append(indent2 + encodeCall(property))
@@ -595,15 +638,15 @@ enum Emitter {
             indentUnit + "///",
             indentUnit + "/// - Parameter decoder: The decoder positioned at the value.",
             indentUnit + "/// - Throws: `DecodingError` when the wire value is not a \(rawType).",
-            indentUnit + "public init(from decoder: any Decoder) throws {",
+            indentUnit + decoderInitOpening,
             indent2 + "self.init(wireValue: try decoder.singleValueContainer().decode(\(rawType).self))",
             indentUnit + "}",
             "",
             indentUnit + "/// Encodes the wire value; `.unknown` re-emits the value it captured.",
             indentUnit + "///",
             indentUnit + "/// - Parameter encoder: The encoder to write the value into.",
-            indentUnit + "/// - Throws: Rethrows any error from the underlying encoder.",
-            indentUnit + "public func encode(to encoder: any Encoder) throws {",
+            indentUnit + encoderThrowsDoc,
+            indentUnit + encodeMethodOpening,
             indent2 + "var container = encoder.singleValueContainer()",
             indent2 + "try container.encode(wireValue)",
             indentUnit + "}",
@@ -680,13 +723,13 @@ enum Emitter {
             indentUnit + "/// Decodes by the `\(model.discriminator)` discriminator, routing",
             indentUnit + "/// unrecognized values to `.unknown`.",
             indentUnit + "///",
-            indentUnit + "/// - Parameter decoder: The decoder positioned at the object.",
+            indentUnit + decoderParameterDoc,
             indentUnit + "/// - Throws: `DecodingError` when the discriminator is missing or a",
             indentUnit + "///   known variant's payload is malformed.",
-            indentUnit + "public init(from decoder: any Decoder) throws {",
-            indent2 + "let container = try decoder.container(keyedBy: CodingKeys.self)",
+            indentUnit + decoderInitOpening,
+            indent2 + decoderContainerDeclaration,
             indent2 + "let discriminator = try container.decode(String.self, forKey: .\(model.discriminator))",
-            indent2 + "switch Tag(rawValue: discriminator) {",
+            indent2 + tagSwitchOpening,
         ])
         for unionCase in model.cases {
             lines.append(indent2 + "case .\(unionCase.swiftName):")
@@ -704,17 +747,17 @@ enum Emitter {
             indentUnit + "/// Encodes the `\(model.discriminator)` discriminator, flattening the",
             indentUnit + "/// payload's fields into the same object.",
             indentUnit + "///",
-            indentUnit + "/// - Parameter encoder: The encoder to write the object into.",
-            indentUnit + "/// - Throws: Rethrows any error from the underlying encoder.",
-            indentUnit + "public func encode(to encoder: any Encoder) throws {",
-            indent2 + "var container = encoder.container(keyedBy: CodingKeys.self)",
+            indentUnit + encoderParameterDoc,
+            indentUnit + encoderThrowsDoc,
+            indentUnit + encodeMethodOpening,
+            indent2 + encoderContainerDeclaration,
             indent2 + "switch self {",
         ])
         for unionCase in model.cases {
             if unionCase.payloadType != nil {
                 lines.append(indent2 + "case .\(unionCase.swiftName)(let payload):")
                 lines.append(indent3 + "try container.encode(Tag.\(unionCase.swiftName).rawValue, forKey: .\(model.discriminator))")
-                lines.append(indent3 + "try payload.encode(to: encoder)")
+                lines.append(indent3 + payloadEncodeCall)
             } else {
                 lines.append(indent2 + "case .\(unionCase.swiftName):")
                 lines.append(indent3 + "try container.encode(Tag.\(unionCase.swiftName).rawValue, forKey: .\(model.discriminator))")
@@ -775,10 +818,10 @@ enum Emitter {
             indentUnit + "/// discriminator selects the default variant and an unrecognized one",
             indentUnit + "/// routes to `.unknown`.",
             indentUnit + "///",
-            indentUnit + "/// - Parameter decoder: The decoder positioned at the object.",
+            indentUnit + decoderParameterDoc,
             indentUnit + "/// - Throws: `DecodingError` when a known variant's payload is malformed.",
-            indentUnit + "public init(from decoder: any Decoder) throws {",
-            indent2 + "let container = try decoder.container(keyedBy: CodingKeys.self)",
+            indentUnit + decoderInitOpening,
+            indent2 + decoderContainerDeclaration,
             indent2 + "switch try container.decodeIfPresent(String.self, forKey: .\(model.discriminator)) {",
         ])
         for unionCase in model.cases {
@@ -799,10 +842,10 @@ enum Emitter {
             indentUnit + "/// payload's fields into the same object; the default variant omits",
             indentUnit + "/// the discriminator.",
             indentUnit + "///",
-            indentUnit + "/// - Parameter encoder: The encoder to write the object into.",
-            indentUnit + "/// - Throws: Rethrows any error from the underlying encoder.",
-            indentUnit + "public func encode(to encoder: any Encoder) throws {",
-            indent2 + "var container = encoder.container(keyedBy: CodingKeys.self)",
+            indentUnit + encoderParameterDoc,
+            indentUnit + encoderThrowsDoc,
+            indentUnit + encodeMethodOpening,
+            indent2 + encoderContainerDeclaration,
             indent2 + "switch self {",
         ])
         for unionCase in model.cases {
@@ -810,7 +853,7 @@ enum Emitter {
             if unionCase.tag != nil {
                 lines.append(indent3 + "try container.encode(Tag.\(unionCase.swiftName).rawValue, forKey: .\(model.discriminator))")
             }
-            lines.append(indent3 + "try payload.encode(to: encoder)")
+            lines.append(indent3 + payloadEncodeCall)
         }
         lines.append(contentsOf: unknownEncodeArm(discriminator: model.discriminator))
         lines.append(contentsOf: [
@@ -1011,10 +1054,10 @@ enum Emitter {
         }
         lines.append(contentsOf: [
             indent2 + "///",
-            indent2 + "/// - Parameter decoder: The decoder positioned at the object.",
+            indent2 + decoderParameterDoc,
             indent2 + "/// - Throws: `DecodingError` when the payload is missing or mistyped.",
-            indent2 + "public init(from decoder: any Decoder) throws {",
-            indent3 + "let container = try decoder.container(keyedBy: CodingKeys.self)",
+            indent2 + decoderInitOpening,
+            indent3 + decoderContainerDeclaration,
         ])
         let hasTaggedCases = model.cases.contains {
             if case .tag = $0.selector { return true }
@@ -1041,7 +1084,7 @@ enum Emitter {
         var lines: [String] = []
         if capturesTag {
             lines.append(indent3 + "let discriminator = try container.decode(String.self, forKey: .\(model.discriminator))")
-            lines.append(indent3 + "switch Tag(rawValue: discriminator) {")
+            lines.append(indent3 + tagSwitchOpening)
         } else {
             lines.append(indent3 + "let discriminator = try container.decodeIfPresent(String.self, forKey: .\(model.discriminator))")
             lines.append(indent3 + "switch discriminator.flatMap(Tag.init(rawValue:)) {")
@@ -1118,10 +1161,10 @@ enum Emitter {
             indent2 + "/// Encodes the value, flattening its payload beside the object's own",
             indent2 + "/// members; a default variant declaring no discriminator omits it.",
             indent2 + "///",
-            indent2 + "/// - Parameter encoder: The encoder to write the object into.",
-            indent2 + "/// - Throws: Rethrows any error from the underlying encoder.",
-            indent2 + "public func encode(to encoder: any Encoder) throws {",
-            indent3 + "var container = encoder.container(keyedBy: CodingKeys.self)",
+            indent2 + encoderParameterDoc,
+            indent2 + encoderThrowsDoc,
+            indent2 + encodeMethodOpening,
+            indent3 + encoderContainerDeclaration,
             indent3 + "switch self {",
         ]
         for unionCase in model.cases {
@@ -1190,12 +1233,12 @@ enum Emitter {
     ) -> [String] {
         var lines = [
             indentUnit + "/// Decodes a `\(base.name)`; forgiving fields degrade to their",
-            indentUnit + "/// schema defaults instead of failing the message.",
+            indentUnit + schemaDefaultsDoc,
             indentUnit + "///",
-            indentUnit + "/// - Parameter decoder: The decoder positioned at the object.",
+            indentUnit + decoderParameterDoc,
             indentUnit + "/// - Throws: `DecodingError` when a strict field is missing or mistyped.",
-            indentUnit + "public init(from decoder: any Decoder) throws {",
-            indent2 + "let container = try decoder.container(keyedBy: CodingKeys.self)",
+            indentUnit + decoderInitOpening,
+            indent2 + decoderContainerDeclaration,
         ]
         for property in leading {
             lines.append(indent2 + decodeLine(property))
@@ -1225,10 +1268,10 @@ enum Emitter {
         var lines = [
             indentUnit + "/// Encodes a `\(base.name)`, omitting nil optional fields.",
             indentUnit + "///",
-            indentUnit + "/// - Parameter encoder: The encoder to write the object into.",
-            indentUnit + "/// - Throws: Rethrows any error from the underlying encoder.",
-            indentUnit + "public func encode(to encoder: any Encoder) throws {",
-            indent2 + "var container = encoder.container(keyedBy: CodingKeys.self)",
+            indentUnit + encoderParameterDoc,
+            indentUnit + encoderThrowsDoc,
+            indentUnit + encodeMethodOpening,
+            indent2 + encoderContainerDeclaration,
         ]
         for property in leading {
             lines.append(indent2 + encodeCall(property))
