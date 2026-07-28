@@ -317,5 +317,34 @@ import Testing
         #expect(!source.contains(#"case aBC = "a"b\c""#))
     }
 
+    @Test func controlCharacterBearingWireNameEscapesInCodingKeys() throws {
+        // A literal newline, tab, or carriage return inside a Swift string
+        // literal does not compile — and depending on where it lands, could
+        // break out of the string entirely. The emitter must render each as
+        // its escape sequence, not pass it through verbatim.
+        let model = StructModel(
+            name: "Weird",
+            documentation: nil,
+            properties: [
+                PropertyModel(
+                    wireName: "a\nb\tc\rd",
+                    swiftName: "aBC",
+                    typeExpression: "String",
+                    elementType: nil,
+                    isOptional: false,
+                    isRequired: true,
+                    defaultExpression: nil,
+                    defaultsToEmptyInstance: false,
+                    objectDefaultMembers: nil,
+                    strategy: .strict,
+                    documentation: nil,
+                    hasPatchSemantics: false
+                )
+            ]
+        )
+        let source = Emitter.structDeclaration(model)
+        #expect(source.contains(#"case aBC = "a\nb\tc\rd""#))
+        #expect(!source.contains("a\nb\tc\rd"))
+    }
 
 }
