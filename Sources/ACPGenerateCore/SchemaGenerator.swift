@@ -185,11 +185,22 @@ public struct SchemaGenerator: Sendable {
     /// The schema keyword naming a fragment's JSON type.
     private static let typeKey = "type"
 
+    /// The JSON Schema `type` value for an object fragment.
+    private static let objectTypeName = "object"
+
+    /// The JSON Schema `type` value for JSON's null.
+    private static let nullTypeName = "null"
+
     /// The schema keyword for exclusive unions.
     private static let oneOfKey = "oneOf"
 
     /// The error detail for a union with no variants.
-    private static let emptyUnionDetail = "empty \(oneOfKey)"
+    ///
+    /// Shared by `classifyOneOf`'s empty-`oneOf` guard and by
+    /// `taggedUnionModel`'s and `objectValueUnionModel`'s own empty-after-
+    /// filtering guards, which a `oneOf` *or* an `anyOf` can reach — so the
+    /// wording names neither keyword specifically.
+    private static let emptyUnionDetail = "empty union"
 
     /// The schema keyword for inclusive unions.
     private static let anyOfKey = "anyOf"
@@ -251,7 +262,7 @@ public struct SchemaGenerator: Sendable {
             return .deferredUnion(keyword: Self.enumKey)
         }
         switch members[Self.typeKey]?.stringValue {
-        case "object":
+        case Self.objectTypeName:
             return .objectStruct
         case "string":
             return .stringIdentifier
@@ -452,7 +463,7 @@ public struct SchemaGenerator: Sendable {
         if let rawKind = Self.agreedEnumRawKind(of: variants) {
             return .scalarEnum(rawKind)
         }
-        guard variants.allSatisfy({ $0[Self.typeKey]?.stringValue == "object" }) else {
+        guard variants.allSatisfy({ $0[Self.typeKey]?.stringValue == Self.objectTypeName }) else {
             throw GeneratorError.unsupportedShape(
                 context: name,
                 detail: "\(Self.oneOfKey) mixes variant shapes; expected all scalar consts or all discriminated objects"
@@ -465,8 +476,7 @@ public struct SchemaGenerator: Sendable {
         // survive `unionVariants(of:)` unfiltered and reach
         // `discriminatorTag`, yielding an extra case or a thrown
         // `unsupportedShape` instead of the documented deferral.
-        let fallbacks = variants.filter { $0[Self.notKey] != nil }
-        guard fallbacks.allSatisfy(isUnknownFallbackVariant) else {
+        guard fallbacksAreGenuineCatchAlls(of: variants) else {
             return .deferredUnion(keyword: Self.oneOfKey)
         }
         return .taggedUnion
@@ -537,12 +547,11 @@ public struct SchemaGenerator: Sendable {
         {
             return .scalarEnum(rawKind)
         }
-        let fallbacks = variants.filter { $0[Self.notKey] != nil }
-        guard fallbacks.allSatisfy(isUnknownFallbackVariant) else {
+        guard fallbacksAreGenuineCatchAlls(of: variants) else {
             return .deferredUnion(keyword: Self.anyOfKey)
         }
         let modeled = variants.filter { $0[Self.notKey] == nil }
-        if members[Self.typeKey]?.stringValue == "object", members[Self.propertiesKey] != nil {
+        if members[Self.typeKey]?.stringValue == Self.objectTypeName, members[Self.propertiesKey] != nil {
             if modeled.allSatisfy({ $0[Self.allOfKey] != nil }) {
                 return .objectTaggedUnion
             }
@@ -619,6 +628,20 @@ public struct SchemaGenerator: Sendable {
     ///   pins none itself.
     private func isUnknownFallbackVariant(_ variant: JSONValue) -> Bool {
         variant[Self.notKey] != nil && !hasConstDiscriminator(variant)
+    }
+
+    /// Reports whether every `not`-guarded variant in a union is the genuine
+    /// unknown-discriminator catch-all, rather than one that also pins a
+    /// `const` of its own.
+    ///
+    /// Shared by `classifyOneOf` and `classifyAnyOf`, whose fallback guards
+    /// are otherwise identical but for which keyword their caller defers.
+    ///
+    /// - Parameter variants: The union's variant fragments.
+    /// - Returns: `true` when every `not`-guarded variant is a genuine
+    ///   catch-all (vacuously true when none is `not`-guarded).
+    private func fallbacksAreGenuineCatchAlls(of variants: [JSONValue]) -> Bool {
+        variants.filter { $0[Self.notKey] != nil }.allSatisfy(isUnknownFallbackVariant)
     }
 
     /// Reports whether an `anyOf` variant pins a `const` discriminator member.
@@ -1490,8 +1513,8 @@ public struct SchemaGenerator: Sendable {
             typeName = single
         case .some(.array(let list)):
             let names = list.compactMap(\.stringValue)
-            nullable = names.contains("null")
-            let concrete = names.filter { $0 != "null" }
+            nullable = names.contains(Self.nullTypeName)
+            let concrete = names.filter { $0 != Self.nullTypeName }
             guard concrete.count == 1 else {
                 // Multi-typed values carry no single Swift shape: raw JSON.
                 return ResolvedType(base: "JSONValue", element: nil, nullable: nullable)
@@ -1538,7 +1561,7 @@ public struct SchemaGenerator: Sendable {
             return try resolveType(fragment: allOf[0], override: override, context: context)
         }
         if let anyOf = members[Self.anyOfKey]?.arrayValue {
-            let nonNull = anyOf.filter { $0[Self.typeKey]?.stringValue != "null" }
+            let nonNull = anyOf.filter { $0[Self.typeKey]?.stringValue != Self.nullTypeName }
             if anyOf.count == 2, nonNull.count == 1 {
                 var inner = try resolveType(fragment: nonNull[0], override: override, context: context)
                 inner.nullable = true
@@ -1577,7 +1600,7 @@ public struct SchemaGenerator: Sendable {
         "integer": ("Int", .lineNumber),
         "boolean": ("Bool", nil),
         "number": ("Double", nil),
-        "object": ("JSONValue", nil),
+        objectTypeName: ("JSONValue", nil),
     ]
 
     private func resolveScalarType(

@@ -186,7 +186,7 @@ import Testing
               }
             }
             """.utf8)
-        #expect(throws: GeneratorError.unsupportedShape(context: "OnlyFallback", detail: "empty oneOf")) {
+        #expect(throws: GeneratorError.unsupportedShape(context: "OnlyFallback", detail: "empty union")) {
             _ = try SchemaGenerator().generate(schemaJSON: schema)
         }
     }
