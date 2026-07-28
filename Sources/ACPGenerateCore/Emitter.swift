@@ -597,21 +597,21 @@ enum Emitter {
         }
     }
 
-    /// Renders the private `CodingKeys` enum that names a union's sole coding
-    /// key: its discriminator field. Shared by `taggedUnionDeclaration` and
-    /// `discriminatedUnionDeclaration`, which differ only in which field name
-    /// is the discriminator.
+    /// Renders the private `CodingKeys` enum that names a union's coding
+    /// keys. Shared by `taggedUnionDeclaration` and
+    /// `discriminatedUnionDeclaration`, which each pass a single-element
+    /// array naming their discriminator field, and by `valueUnionEnum`, which
+    /// passes both its discriminator and value wire-name fields.
     ///
     /// - Parameters:
-    ///   - discriminator: The discriminator field's Swift name.
+    ///   - cases: The coding keys' Swift names, in declaration order.
     ///   - baseIndent: The indentation the enum declaration itself sits at.
-    /// - Returns: The three declaration lines.
-    private static func unionCodingKeysDeclaration(discriminator: String, baseIndent: String) -> [String] {
-        [
-            baseIndent + "private enum CodingKeys: String, CodingKey {",
-            baseIndent + indentUnit + "case \(discriminator)",
-            baseIndent + "}",
-        ]
+    /// - Returns: The declaration lines: an opening brace, one `case` line
+    ///   per entry in `cases`, and a closing brace.
+    private static func unionCodingKeysDeclaration(cases: [String], baseIndent: String) -> [String] {
+        [baseIndent + "private enum CodingKeys: String, CodingKey {"]
+            + cases.map { baseIndent + indentUnit + "case \($0)" }
+            + [baseIndent + "}"]
     }
 
     /// Renders a tagged union as an enum with hand-rolled `Codable`.
@@ -638,7 +638,7 @@ enum Emitter {
         lines.append(contentsOf: unknownCaseDoc(discriminator: model.discriminator))
         lines.append(indentUnit + "case unknown(String, JSONValue)")
         lines.append("")
-        lines.append(contentsOf: unionCodingKeysDeclaration(discriminator: model.discriminator, baseIndent: indentUnit))
+        lines.append(contentsOf: unionCodingKeysDeclaration(cases: [model.discriminator], baseIndent: indentUnit))
         lines.append("")
         lines.append(contentsOf: tagDeclaration(cases: model.cases))
         lines.append("")
@@ -732,7 +732,7 @@ enum Emitter {
         lines.append(contentsOf: unknownCaseDoc(discriminator: model.discriminator))
         lines.append(indentUnit + "case unknown(String, JSONValue)")
         lines.append("")
-        lines.append(contentsOf: unionCodingKeysDeclaration(discriminator: model.discriminator, baseIndent: indentUnit))
+        lines.append(contentsOf: unionCodingKeysDeclaration(cases: [model.discriminator], baseIndent: indentUnit))
         lines.append("")
         lines.append(contentsOf: discriminatedTagDeclaration(cases: model.cases))
         lines.append("")
@@ -904,14 +904,9 @@ enum Emitter {
             lines.append(contentsOf: docLines(unionCase.documentation, indent: indent2))
             lines.append(indent2 + "case \(unionCase.swiftName)(\(caseAssociatedValues(of: unionCase)))")
         }
-        lines.append(contentsOf: [
-            "",
-            indent2 + "private enum CodingKeys: String, CodingKey {",
-            indent3 + "case \(model.discriminator)",
-            indent3 + "case \(model.valueWireName)",
-            indent2 + "}",
-            "",
-        ])
+        lines.append("")
+        lines.append(contentsOf: unionCodingKeysDeclaration(cases: [model.discriminator, model.valueWireName], baseIndent: indent2))
+        lines.append("")
         let tagDeclaration = valueUnionTagDeclaration(cases: model.cases)
         if !tagDeclaration.isEmpty {
             lines.append(contentsOf: tagDeclaration)
