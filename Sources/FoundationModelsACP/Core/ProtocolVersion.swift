@@ -24,3 +24,41 @@ public struct ProtocolVersion: WireRawValueCodable, Hashable, Sendable {
     /// surface is generated or spoken.
     public static let latest = v2
 }
+
+/// Thrown when a peer's `initialize` response names a protocol version other
+/// than the one this side sent.
+///
+/// This package is v2-only by decision (`plan.md`, *Decision: v2 only*): there
+/// is no v1 surface and no version-branching logic, so a peer that answers
+/// with any version other than the one requested — lower, higher, or
+/// otherwise unrecognized — is not a peer this side can serve. The spec's own
+/// guidance is explicit about whose job that leaves it: *"The client should
+/// disconnect, if it doesn't support this version."* Naming both versions
+/// keeps that disconnect diagnosable instead of reading as a generic
+/// handshake failure — the real-world friction point going v2-only creates.
+public struct ProtocolVersionMismatchError: Error, Hashable, Sendable, CustomStringConvertible {
+    /// The protocol version this side sent in its `initialize` request.
+    public let sent: ProtocolVersion
+
+    /// The protocol version the peer answered with.
+    public let received: ProtocolVersion
+
+    /// Creates a version-mismatch error naming both sides of the handshake.
+    ///
+    /// - Parameters:
+    ///   - sent: The version this side requested.
+    ///   - received: The version the peer answered with.
+    public init(sent: ProtocolVersion, received: ProtocolVersion) {
+        self.sent = sent
+        self.received = received
+    }
+
+    /// A diagnostic naming both versions explicitly, never a vague "handshake
+    /// failed".
+    public var description: String {
+        "ACP protocol version mismatch: sent protocolVersion \(sent.rawValue), "
+            + "peer answered protocolVersion \(received.rawValue). This side "
+            + "implements ACP v2 only and cannot serve a peer speaking a "
+            + "different protocol version."
+    }
+}

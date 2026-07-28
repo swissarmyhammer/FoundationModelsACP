@@ -139,12 +139,23 @@ public final class ClientSideConnection: Sendable {
 
     /// Negotiates protocol version and capabilities with the agent.
     ///
+    /// This package is v2-only by decision (`plan.md`, *Decision: v2 only*):
+    /// it validates that the agent answered with exactly the protocol version
+    /// this call sent, and fails loud with `ProtocolVersionMismatchError` —
+    /// naming both versions — rather than silently proceeding against a peer
+    /// that speaks a version this package does not implement.
+    ///
     /// - Parameter params: The initialization request.
     /// - Returns: The agent's initialization response.
-    /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
-    ///   disconnect.
+    /// - Throws: `RequestError` on a peer error, `ConnectionError` on
+    ///   disconnect, or `ProtocolVersionMismatchError` when the agent answers
+    ///   with a protocol version other than the one sent.
     public func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
-        try await core.call("initialize", params, returning: InitializeResponse.self)
+        let response = try await core.call("initialize", params, returning: InitializeResponse.self)
+        guard response.protocolVersion == params.protocolVersion else {
+            throw ProtocolVersionMismatchError(sent: params.protocolVersion, received: response.protocolVersion)
+        }
+        return response
     }
 
     /// Creates a new session on the agent.
