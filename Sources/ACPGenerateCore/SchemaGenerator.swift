@@ -100,20 +100,20 @@ public struct SchemaGenerator: Sendable {
                 )
             case .taggedUnion:
                 unions.append(
-                    Emitter.taggedUnionDeclaration(try taggedUnionModel(name: name, fragment: fragment))
+                    Emitter.taggedUnionDeclaration(model: try taggedUnionModel(name: name, fragment: fragment))
                 )
             case .discriminatedUnion:
                 unions.append(
-                    Emitter.discriminatedUnionDeclaration(try discriminatedUnionModel(name: name, fragment: fragment))
+                    Emitter.discriminatedUnionDeclaration(model: try discriminatedUnionModel(name: name, fragment: fragment))
                 )
             case .objectValueUnion:
                 let model = try objectValueUnionModel(name: name, fragment: fragment)
                 structModels.append(model.base)
-                modelDeclarations.append(Emitter.objectValueUnionDeclaration(model))
+                modelDeclarations.append(Emitter.objectValueUnionDeclaration(model: model))
             case .objectTaggedUnion:
                 let model = try objectTaggedUnionModel(name: name, fragment: fragment)
                 structModels.append(model.base)
-                modelDeclarations.append(Emitter.objectTaggedUnionDeclaration(model))
+                modelDeclarations.append(Emitter.objectTaggedUnionDeclaration(model: model))
             case .deferredUnion(let keyword):
                 placeholders.append(
                     Emitter.placeholder(
@@ -1788,7 +1788,7 @@ public struct SchemaGenerator: Sendable {
             }
             return (String(number), false)
         case .string(let string):
-            return (Emitter.stringLiteral(string), false)
+            return (Emitter.stringLiteral(text: string), false)
         case .array(let elements):
             guard elements.isEmpty else {
                 throw GeneratorError.unsupportedShape(context: context, detail: "non-empty array default")
@@ -2460,11 +2460,11 @@ extension Emitter {
             entryLines: { method in
                 [
                     "        MethodInfo(",
-                    "            wireMethod: \(stringLiteral(method.wireMethod)),",
-                    "            handlerName: \(stringLiteral(method.handlerName)),",
+                    "            wireMethod: \(stringLiteral(text: method.wireMethod)),",
+                    "            handlerName: \(stringLiteral(text: method.handlerName)),",
                     "            side: \(sideCase(method.side)),",
                     "            kind: .\(method.kind.rawValue),",
-                    "            paramsTypeName: \(stringLiteral(method.paramsTypeName)),",
+                    "            paramsTypeName: \(stringLiteral(text: method.paramsTypeName)),",
                     "            resultTypeName: \(method.resultTypeName.map(stringLiteral) ?? "nil"),",
                     "            deprecationMessage: \(method.deprecationMessage.map(stringLiteral) ?? "nil")",
                     "        ),",
@@ -2500,8 +2500,8 @@ extension Emitter {
             entryLines: { method in
                 [
                     "            UnstableMethodInfo(",
-                    "                wireMethod: \(stringLiteral(method.wireMethod)),",
-                    "                handlerName: \(stringLiteral(method.handlerName)),",
+                    "                wireMethod: \(stringLiteral(text: method.wireMethod)),",
+                    "                handlerName: \(stringLiteral(text: method.handlerName)),",
                     "                side: \(sideCase(method.side))",
                     "            ),",
                 ]

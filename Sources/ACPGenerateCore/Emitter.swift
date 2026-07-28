@@ -26,7 +26,7 @@ enum Emitter {
     private static let standardPublicProtocols = "Codable, Hashable, Sendable"
 
     /// The opening line of a `CodingKeys` enum, shared by the struct member
-    /// emitter (`codingKeys(_:)`) and the union coding-keys emitter
+    /// emitter (`codingKeys(model:)`) and the union coding-keys emitter
     /// (`unionCodingKeysDeclaration`), which each prefix it with their own
     /// indentation.
     private static let codingKeysEnumDeclaration = "private enum CodingKeys: String, CodingKey {"
@@ -129,7 +129,7 @@ enum Emitter {
     ///
     /// - Parameter text: The schema-derived text (wire name, value, or tag).
     /// - Returns: The quoted, escaped Swift string literal.
-    static func stringLiteral(_ text: String) -> String {
+    static func stringLiteral(text: String) -> String {
         let escaped = text
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
@@ -146,7 +146,7 @@ enum Emitter {
     ///   - documentation: The schema description, if any.
     /// - Returns: The rendered struct declaration.
     static func identifierNewtype(name: String, documentation: String?) -> String {
-        var lines = docLines(documentation, indent: "")
+        var lines = docLines(text: documentation, indent: "")
         lines.append(contentsOf: [
             "public struct \(name): WireRawValueCodable, Hashable, Sendable {",
             indentUnit + "/// The opaque identifier string as it crosses the wire.",
@@ -174,7 +174,7 @@ enum Emitter {
     ///   - documentation: The schema description, if any.
     /// - Returns: The rendered typealias declaration.
     static func placeholder(name: String, reason: String, documentation: String?) -> String {
-        var lines = docLines(documentation, indent: "")
+        var lines = docLines(text: documentation, indent: "")
         if !lines.isEmpty {
             lines.append("///")
         }
@@ -191,7 +191,7 @@ enum Emitter {
     /// - Parameter model: The struct's emission model.
     /// - Returns: The rendered struct declaration.
     static func structDeclaration(_ model: StructModel) -> String {
-        var lines = docLines(model.documentation, indent: "")
+        var lines = docLines(text: model.documentation, indent: "")
         lines.append("public struct \(model.name): \(standardPublicProtocols) {")
         guard !model.properties.isEmpty else {
             lines.append(contentsOf: [
@@ -204,18 +204,18 @@ enum Emitter {
 
         for (index, property) in model.properties.enumerated() {
             if index > 0 { lines.append("") }
-            lines.append(contentsOf: docLines(property.documentation, indent: indentUnit))
+            lines.append(contentsOf: docLines(text: property.documentation, indent: indentUnit))
             lines.append(indentUnit + "public var \(property.swiftName): \(renderedType(of: property))")
         }
 
         lines.append("")
-        lines.append(contentsOf: memberwiseInit(model))
+        lines.append(contentsOf: memberwiseInit(model: model))
         lines.append("")
-        lines.append(contentsOf: codingKeys(model))
+        lines.append(contentsOf: codingKeys(model: model))
         lines.append("")
         lines.append(contentsOf: decoderInit(model))
         lines.append("")
-        lines.append(contentsOf: encodeMethod(model))
+        lines.append(contentsOf: encodeMethod(model: model))
         lines.append("}")
         return lines.joined(separator: "\n")
     }
@@ -242,7 +242,7 @@ enum Emitter {
     ///
     /// - Parameter model: The struct's emission model.
     /// - Returns: The initializer lines, indented one level.
-    private static func memberwiseInit(_ model: StructModel) -> [String] {
+    private static func memberwiseInit(model: StructModel) -> [String] {
         var lines = [indentUnit + "/// Creates a `\(model.name)`.", indentUnit + "public init("]
         lines.append(contentsOf: renderParameters(items: model.properties, render: initParameter))
         lines.append(indentUnit + ") {")
@@ -261,7 +261,7 @@ enum Emitter {
     ///
     /// - Parameter property: The property model.
     /// - Returns: The `name: Type[ = default]` fragment, without indentation.
-    private static func initParameter(_ property: PropertyModel) -> String {
+    private static func initParameter(property: PropertyModel) -> String {
         var parameter = "\(property.swiftName): \(renderedType(of: property))"
         if property.hasPatchSemantics {
             parameter += " = .unchanged"
@@ -293,10 +293,10 @@ enum Emitter {
     ///
     /// - Parameter model: The struct's emission model.
     /// - Returns: The enum lines, indented one level.
-    private static func codingKeys(_ model: StructModel) -> [String] {
+    private static func codingKeys(model: StructModel) -> [String] {
         var lines = [indentUnit + codingKeysEnumDeclaration]
         for property in model.properties {
-            lines.append(indent2 + codingKeyCase(property))
+            lines.append(indent2 + codingKeyCase(property: property))
         }
         lines.append(indentUnit + "}")
         return lines
@@ -306,11 +306,11 @@ enum Emitter {
     ///
     /// - Parameter property: The property model.
     /// - Returns: The `case …` line, without indentation.
-    private static func codingKeyCase(_ property: PropertyModel) -> String {
+    private static func codingKeyCase(property: PropertyModel) -> String {
         if property.swiftName == property.wireName {
             return "case \(property.swiftName)"
         }
-        return "case \(property.swiftName) = \(stringLiteral(property.wireName))"
+        return "case \(property.swiftName) = \(stringLiteral(text: property.wireName))"
     }
 
     /// Renders `init(from:)`.
@@ -399,7 +399,7 @@ enum Emitter {
     ///
     /// - Parameter model: The struct's emission model.
     /// - Returns: The method lines, indented one level.
-    private static func encodeMethod(_ model: StructModel) -> [String] {
+    private static func encodeMethod(model: StructModel) -> [String] {
         var lines = [
             indentUnit + "/// Encodes a `\(model.name)`, omitting nil optional fields — never",
             indentUnit + "/// emitting JSON null for an absent capability-gated field.",
@@ -552,7 +552,7 @@ enum Emitter {
     /// - Returns: The declaration lines, indented one level.
     private static func tagDeclaration(cases: [UnionCaseModel]) -> [String] {
         tagEnumDeclaration(
-            entries: cases.map { (swiftName: $0.swiftName, literal: stringLiteral($0.tag)) },
+            entries: cases.map { (swiftName: $0.swiftName, literal: stringLiteral(text: $0.tag)) },
             rawType: unionTagRawType,
             baseIndent: indentUnit
         )
@@ -587,10 +587,10 @@ enum Emitter {
     /// - Returns: The rendered enum declaration.
     static func scalarEnumDeclaration(_ model: ScalarEnumModel) -> String {
         let rawType = model.rawKind.swiftTypeName
-        var lines = docLines(model.documentation, indent: "")
+        var lines = docLines(text: model.documentation, indent: "")
         lines.append("public enum \(model.name): \(standardPublicProtocols) {")
         for enumCase in model.cases {
-            lines.append(contentsOf: docLines(enumCase.documentation, indent: indentUnit))
+            lines.append(contentsOf: docLines(text: enumCase.documentation, indent: indentUnit))
             lines.append(indentUnit + "case \(enumCase.swiftName)")
             lines.append("")
         }
@@ -601,7 +601,7 @@ enum Emitter {
             "",
         ])
         lines.append(contentsOf: tagEnumDeclaration(
-            entries: model.cases.map { (swiftName: $0.swiftName, literal: wireLiteral($0, kind: model.rawKind)) },
+            entries: model.cases.map { (swiftName: $0.swiftName, literal: wireLiteral(enumCase: $0, kind: model.rawKind)) },
             rawType: rawType,
             baseIndent: indentUnit
         ))
@@ -665,9 +665,9 @@ enum Emitter {
     ///   - enumCase: The case model.
     ///   - kind: The enum's raw kind.
     /// - Returns: The literal's source text.
-    private static func wireLiteral(_ enumCase: EnumCaseModel, kind: EnumRawKind) -> String {
+    private static func wireLiteral(enumCase: EnumCaseModel, kind: EnumRawKind) -> String {
         switch kind {
-        case .string: stringLiteral(enumCase.wireValue)
+        case .string: stringLiteral(text: enumCase.wireValue)
         case .integer: enumCase.wireValue
         }
     }
@@ -698,11 +698,11 @@ enum Emitter {
     ///
     /// - Parameter model: The union's emission model.
     /// - Returns: The rendered enum declaration.
-    static func taggedUnionDeclaration(_ model: TaggedUnionModel) -> String {
-        var lines = docLines(model.documentation, indent: "")
+    static func taggedUnionDeclaration(model: TaggedUnionModel) -> String {
+        var lines = docLines(text: model.documentation, indent: "")
         lines.append("public enum \(model.name): \(standardPublicProtocols) {")
         for unionCase in model.cases {
-            lines.append(contentsOf: docLines(unionCase.documentation, indent: indentUnit))
+            lines.append(contentsOf: docLines(text: unionCase.documentation, indent: indentUnit))
             if let payload = unionCase.payloadType {
                 lines.append(indentUnit + "case \(unionCase.swiftName)(\(payload))")
             } else {
@@ -782,7 +782,7 @@ enum Emitter {
     /// - Returns: The declaration lines, indented one level.
     private static func discriminatedTagDeclaration(cases: [DiscriminatedCaseModel]) -> [String] {
         let tagged = cases.compactMap { unionCase -> (swiftName: String, literal: String)? in
-            unionCase.tag.map { (unionCase.swiftName, stringLiteral($0)) }
+            unionCase.tag.map { (unionCase.swiftName, stringLiteral(text: $0)) }
         }
         return tagEnumDeclaration(entries: tagged, rawType: unionTagRawType, baseIndent: indentUnit)
     }
@@ -796,11 +796,11 @@ enum Emitter {
     ///
     /// - Parameter model: The discriminated-union emission model.
     /// - Returns: The rendered enum declaration.
-    static func discriminatedUnionDeclaration(_ model: DiscriminatedUnionModel) -> String {
-        var lines = docLines(model.documentation, indent: "")
+    static func discriminatedUnionDeclaration(model: DiscriminatedUnionModel) -> String {
+        var lines = docLines(text: model.documentation, indent: "")
         lines.append("public enum \(model.name): \(standardPublicProtocols) {")
         for unionCase in model.cases {
-            lines.append(contentsOf: docLines(unionCase.documentation, indent: indentUnit))
+            lines.append(contentsOf: docLines(text: unionCase.documentation, indent: indentUnit))
             lines.append(indentUnit + "case \(unionCase.swiftName)(\(unionCase.payloadType))")
             lines.append("")
         }
@@ -894,14 +894,14 @@ enum Emitter {
     ///
     /// - Parameter model: The object-value-union emission model.
     /// - Returns: The rendered struct declaration.
-    static func objectValueUnionDeclaration(_ model: ObjectValueUnionModel) -> String {
+    static func objectValueUnionDeclaration(model: ObjectValueUnionModel) -> String {
         objectCarryingAUnion(
             base: model.base,
             union: FlattenedUnion(
                 wireName: model.valueWireName,
                 typeName: model.valueEnumName,
                 documentation: "The value carried beside the object's own members, selected by its `\(model.discriminator)` discriminator.",
-                declaration: valueUnionEnum(model)
+                declaration: valueUnionEnum(model: model)
             )
         )
     }
@@ -910,14 +910,14 @@ enum Emitter {
     ///
     /// - Parameter model: The object-tagged-union emission model.
     /// - Returns: The rendered struct declaration.
-    static func objectTaggedUnionDeclaration(_ model: ObjectTaggedUnionModel) -> String {
+    static func objectTaggedUnionDeclaration(model: ObjectTaggedUnionModel) -> String {
         objectCarryingAUnion(
             base: model.base,
             union: FlattenedUnion(
                 wireName: model.union.discriminator,
                 typeName: model.union.name,
                 documentation: "The variant payload, whose own members sit flattened beside this object's.",
-                declaration: indented(declaration: taggedUnionDeclaration(model.union))
+                declaration: indented(declaration: taggedUnionDeclaration(model: model.union))
                     .split(separator: "\n", omittingEmptySubsequences: false)
                     .map(String.init)
             )
@@ -938,26 +938,26 @@ enum Emitter {
         let meta = base.properties.first { $0.wireName == metaWireName }
         let leading = base.properties.filter { $0.wireName != metaWireName }
 
-        var lines = docLines(base.documentation, indent: "")
+        var lines = docLines(text: base.documentation, indent: "")
         lines.append("public struct \(base.name): \(standardPublicProtocols) {")
         lines.append(contentsOf: union.declaration)
         for property in leading {
             lines.append("")
-            lines.append(contentsOf: docLines(property.documentation, indent: indentUnit))
+            lines.append(contentsOf: docLines(text: property.documentation, indent: indentUnit))
             lines.append(indentUnit + "public var \(property.swiftName): \(renderedType(of: property))")
         }
         lines.append("")
-        lines.append(contentsOf: docLines(union.documentation, indent: indentUnit))
+        lines.append(contentsOf: docLines(text: union.documentation, indent: indentUnit))
         lines.append(indentUnit + "public var \(union.wireName): \(union.typeName)")
         if let meta {
             lines.append("")
-            lines.append(contentsOf: docLines(meta.documentation, indent: indentUnit))
+            lines.append(contentsOf: docLines(text: meta.documentation, indent: indentUnit))
             lines.append(indentUnit + "public var \(meta.swiftName): \(renderedType(of: meta))")
         }
         lines.append("")
         lines.append(contentsOf: unionStructInit(base: base, union: union, leading: leading, meta: meta))
         lines.append("")
-        lines.append(contentsOf: codingKeys(base))
+        lines.append(contentsOf: codingKeys(model: base))
         lines.append("")
         lines.append(contentsOf: unionStructDecoder(base: base, union: union, leading: leading, meta: meta))
         lines.append("")
@@ -970,13 +970,13 @@ enum Emitter {
     ///
     /// - Parameter model: The object-value-union emission model.
     /// - Returns: The enum lines, indented one level.
-    private static func valueUnionEnum(_ model: ObjectValueUnionModel) -> [String] {
+    private static func valueUnionEnum(model: ObjectValueUnionModel) -> [String] {
         var lines = [
             indentUnit + "/// The value payload, selected by the `\(model.discriminator)` discriminator.",
             indentUnit + "public enum \(model.valueEnumName): \(standardPublicProtocols) {",
         ]
         for unionCase in model.cases {
-            lines.append(contentsOf: docLines(unionCase.documentation, indent: indent2))
+            lines.append(contentsOf: docLines(text: unionCase.documentation, indent: indent2))
             lines.append(indent2 + "case \(unionCase.swiftName)(\(caseAssociatedValues(of: unionCase)))")
         }
         lines.append("")
@@ -987,7 +987,7 @@ enum Emitter {
             lines.append(contentsOf: tagDeclaration)
             lines.append("")
         }
-        lines.append(contentsOf: valueUnionDecoder(model))
+        lines.append(contentsOf: valueUnionDecoder(model: model))
         lines.append("")
         lines.append(contentsOf: valueUnionEncoder(model))
         lines.append(indentUnit + "}")
@@ -1007,7 +1007,7 @@ enum Emitter {
     private static func valueUnionTagDeclaration(cases: [ValueUnionCaseModel]) -> [String] {
         let tagged = cases.compactMap { unionCase -> (swiftName: String, literal: String)? in
             guard case .tag(let tag) = unionCase.selector else { return nil }
-            return (unionCase.swiftName, stringLiteral(tag))
+            return (unionCase.swiftName, stringLiteral(text: tag))
         }
         return tagEnumDeclaration(entries: tagged, rawType: unionTagRawType, baseIndent: indent2)
     }
@@ -1036,7 +1036,7 @@ enum Emitter {
     ///
     /// - Parameter model: The object-value-union emission model.
     /// - Returns: The initializer lines, indented two levels.
-    private static func valueUnionDecoder(_ model: ObjectValueUnionModel) -> [String] {
+    private static func valueUnionDecoder(model: ObjectValueUnionModel) -> [String] {
         let capturesTag = model.cases.contains { $0.selector == .capturedTag }
         var lines = [indent2 + "/// Decodes the value by its `\(model.discriminator)` discriminator,"]
         if capturesTag {
@@ -1064,8 +1064,8 @@ enum Emitter {
             return false
         }
         lines.append(contentsOf: hasTaggedCases
-            ? valueUnionDecoderBody(model, capturesTag: capturesTag)
-            : valueUnionDecoderBodyWithoutTaggedCases(model, capturesTag: capturesTag))
+            ? valueUnionDecoderBody(model: model, capturesTag: capturesTag)
+            : valueUnionDecoderBodyWithoutTaggedCases(model: model, capturesTag: capturesTag))
         return lines
     }
 
@@ -1080,7 +1080,7 @@ enum Emitter {
     ///   - capturesTag: Whether the default variant captures the tag it
     ///     matched, deciding whether the discriminator decodes strictly.
     /// - Returns: The `switch` and its closing braces, indented three levels.
-    private static func valueUnionDecoderBody(_ model: ObjectValueUnionModel, capturesTag: Bool) -> [String] {
+    private static func valueUnionDecoderBody(model: ObjectValueUnionModel, capturesTag: Bool) -> [String] {
         var lines: [String] = []
         if capturesTag {
             lines.append(indent3 + "let discriminator = try container.decode(String.self, forKey: .\(model.discriminator))")
@@ -1092,7 +1092,7 @@ enum Emitter {
         for unionCase in model.cases {
             guard case .tag = unionCase.selector else { continue }
             lines.append(indent3 + "case .\(unionCase.swiftName):")
-            lines.append(indent4 + "self = .\(unionCase.swiftName)(\(valueDecodeCall(unionCase, model)))")
+            lines.append(indent4 + "self = .\(unionCase.swiftName)(\(valueDecodeCall(unionCase: unionCase, model: model)))")
         }
         for unionCase in model.cases {
             switch unionCase.selector {
@@ -1100,10 +1100,10 @@ enum Emitter {
                 continue
             case .untagged:
                 lines.append(indent3 + "case nil:")
-                lines.append(indent4 + "self = .\(unionCase.swiftName)(\(valueDecodeCall(unionCase, model)))")
+                lines.append(indent4 + "self = .\(unionCase.swiftName)(\(valueDecodeCall(unionCase: unionCase, model: model)))")
             case .capturedTag:
                 lines.append(indent3 + "case nil:")
-                lines.append(indent4 + "self = .\(unionCase.swiftName)(discriminator, \(valueDecodeCall(unionCase, model)))")
+                lines.append(indent4 + "self = .\(unionCase.swiftName)(discriminator, \(valueDecodeCall(unionCase: unionCase, model: model)))")
             }
         }
         lines.append(contentsOf: [indent3 + "}", indent2 + "}"])
@@ -1119,7 +1119,7 @@ enum Emitter {
     ///     matched, deciding whether the discriminator decodes strictly.
     /// - Returns: The `switch` and its closing braces, indented three levels.
     private static func valueUnionDecoderBodyWithoutTaggedCases(
-        _ model: ObjectValueUnionModel,
+        model: ObjectValueUnionModel,
         capturesTag: Bool
     ) -> [String] {
         let subject = capturesTag
@@ -1132,10 +1132,10 @@ enum Emitter {
                 continue
             case .untagged:
                 lines.append(indent3 + "default:")
-                lines.append(indent4 + "self = .\(unionCase.swiftName)(\(valueDecodeCall(unionCase, model)))")
+                lines.append(indent4 + "self = .\(unionCase.swiftName)(\(valueDecodeCall(unionCase: unionCase, model: model)))")
             case .capturedTag:
                 lines.append(indent3 + "case let other:")
-                lines.append(indent4 + "self = .\(unionCase.swiftName)(other, \(valueDecodeCall(unionCase, model)))")
+                lines.append(indent4 + "self = .\(unionCase.swiftName)(other, \(valueDecodeCall(unionCase: unionCase, model: model)))")
             }
         }
         lines.append(contentsOf: [indent3 + "}", indent2 + "}"])
@@ -1148,7 +1148,7 @@ enum Emitter {
     ///   - unionCase: The value-union case model.
     ///   - model: The object-value-union emission model.
     /// - Returns: The `try container.decode…` expression.
-    private static func valueDecodeCall(_ unionCase: ValueUnionCaseModel, _ model: ObjectValueUnionModel) -> String {
+    private static func valueDecodeCall(unionCase: ValueUnionCaseModel, model: ObjectValueUnionModel) -> String {
         "try container.decode(\(unionCase.valueType).self, forKey: .\(model.valueWireName))"
     }
 
@@ -1201,7 +1201,7 @@ enum Emitter {
         var parameters = leading.map(initParameter)
         parameters.append("\(union.wireName): \(union.typeName)")
         if let meta {
-            parameters.append(initParameter(meta))
+            parameters.append(initParameter(property: meta))
         }
         var lines = [indentUnit + "/// Creates a `\(base.name)`.", indentUnit + "public init("]
         lines.append(contentsOf: renderParameters(items: parameters, render: { $0 }))
@@ -1292,7 +1292,7 @@ enum Emitter {
     ///   - text: The schema `description`, if any.
     ///   - indent: The indentation prefix for each line.
     /// - Returns: `///` lines, or empty when there is no description.
-    private static func docLines(_ text: String?, indent: String) -> [String] {
+    private static func docLines(text: String?, indent: String) -> [String] {
         guard let text, !text.isEmpty else { return [] }
         return text.split(separator: "\n", omittingEmptySubsequences: false).map { line in
             line.isEmpty ? "\(indent)///" : "\(indent)/// \(line)"

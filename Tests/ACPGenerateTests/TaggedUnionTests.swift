@@ -80,7 +80,7 @@ import Testing
                 UnionCaseModel(tag: #"a"b\c"#, swiftName: "aBC", payloadType: nil, documentation: nil)
             ]
         )
-        let source = Emitter.taggedUnionDeclaration(model)
+        let source = Emitter.taggedUnionDeclaration(model: model)
         #expect(source.contains(#"case aBC = "a\"b\\c""#))
         #expect(source.contains("switch Tag(rawValue: discriminator) {"))
         #expect(source.contains("try container.encode(Tag.aBC.rawValue, forKey: .type)"))
