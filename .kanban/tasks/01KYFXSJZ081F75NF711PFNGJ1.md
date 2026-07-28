@@ -35,6 +35,38 @@ comments:
 
     Leaving in `doing` per /implement convention -- ready for /review.
   timestamp: 2026-07-28T04:53:35.670706+00:00
+- actor: claude-code
+  id: 01kykjznjenmbk95kr51m04mby
+  text: |-
+    Pulled back to doing to work the 5 review findings.
+
+    1. Emitter.swift: added a new `indent2 = indentUnit + indentUnit` constant beside the existing `indentUnit`. Swept every hardcoded one/two-level indent literal used as an indentation parameter (docLines `indent:` args, tagEnumDeclaration/valueUnionTagDeclaration `baseIndent:` args, and the "        " + line concatenations in memberwiseInit/codingKeys/decoderInit/encodeMethod/unionStructDecoder/unionStructEncoder) to use indentUnit/indent2, plus one embedded case inside tagEnumDeclaration ("\(baseIndent)    case" -> "\(baseIndent)\(indentUnit)case"). Left the many literal template strings that mix code content with baked-in indentation (e.g. "    public var \(name): ...") untouched -- those aren't standalone "indentation," they're specific source-line templates at a fixed nesting depth, and rewriting them would be a much larger, out-of-scope restructuring not what the finding asked for.
+
+    2. PatchField.swift: extracted a private `forgivingDecodePatch<Value>(forKey:decodeValue:)` helper running the shared contains/decodeNil/nil-check guard sequence, parameterized over a `() -> Value?` closure for the final decode+transform step. `forgivingDecodePatchField` and `forgivingDecodePatchArray` now both call it with their own closure.
+
+    3,4,5. Root cause: GeneratorConfig.swift's `.acpV2` config had an explicit `typeRenames: ["RequestId": "RequestID"]` entry (comment claimed "Swift API Design Guidelines cased acronym" justification) that deliberately overrode the schema's own `RequestId` definition name to the wrong casing -- confirmed via Schema/acp-v2.json (definition is literally named "RequestId" already). Deleted that typeRenames entry entirely; no replacement entry needed since removing the override lets the normal pipeline emit "RequestId" directly. Regenerated Models.generated.swift and Unresolved.generated.swift via `swift run acp-generate` (had to delete the checked-in Generated/.schema-hash stamp first, since the schema bytes didn't change -- only the generator config did -- so the hash-based skip would otherwise have no-op'd). Verified via grep that RequestID was the ONLY generated identifier type with the uppercase-ID inconsistency: grepped Models.generated.swift for `\b[A-Za-z]*ID\b` and every other hit was doc-comment prose ("The ID of the request"), never a type declaration; grepped for `(struct|enum|typealias) [A-Za-z]*ID\b` across Generated/ and got zero matches after the fix. Updated hand-written RequestID type references (NOT the unrelated nextRequestId variable) in Connection.swift (9 sites) and VendoredSchemaTests.swift (2 sites: a doc comment plus the pinned onlyTheDeliberatelyFreeFormDefinitionsStayUntyped type list).
+
+    Verification: `swift build --build-tests` clean (0 errors, 0 warnings). `swift test` fresh run: 198 tests/16 suites (FoundationModelsACPTests) + 93 tests/12 suites (ACPGenerateTests) = 291 tests/28 suites, 0 failures, 0 warnings -- matches baseline exactly, no regression or unexpected growth. `git diff --stat -- Sources/FoundationModelsACP/Generated/` shows exactly the expected scope: 18 changed lines in Models.generated.swift, 2 in Unresolved.generated.swift, all RequestID->RequestId. VendoredSchemaTests.checkedInOutputMatchesAFreshRun and declarationsAreEmittedInSortedSchemaNameOrder (the codegen diff/order gates) both pass, confirming the regenerated output is deterministic and the checked-in files match a fresh run byte-for-byte.
+
+    Adversarial double-check dispatched via really-done; verdict pending -- will follow up with result before final handoff. Left in `doing` per /implement convention.
+  timestamp: 2026-07-28T05:25:57.966158+00:00
+- actor: claude-code
+  id: 01kykk4js75wqbdysczbezgh11
+  text: |-
+    Adversarial double-check (via really-done) returned PASS. Independently verified (not just trusting the claims above):
+
+    - Emitter.swift: confirmed via diff that every indent-parameter hardcode (`indent:`, `baseIndent:`, and the "        " + line concatenations) was replaced with indentUnit/indent2, including the embedded `"\(baseIndent)    case ..."` fix; grepped for any remaining hardcoded indent-parameter patterns and found none; confirmed the scoping judgment (leaving content templates like "    public var \(name): ..." untouched) is reasonable, not a half-measure.
+    - PatchField.swift: diffed old vs new and confirmed the extracted forgivingDecodePatch helper reproduces the original four-guard sequence byte-for-byte in control flow, with forgivingDecodePatchField/forgivingDecodePatchArray differing only in their closures (which match their original final-step logic exactly, including the array case's `.map { $0.compactMap(\.value) }`).
+    - RequestID->RequestId: confirmed the schema names the definition "RequestId" already (Schema/acp-v2.json), the typeRenames override was fully removed, Models.generated.swift shows exactly 9 renamed occurrences, Unresolved.generated.swift shows the 1 typealias rename, Connection.swift shows 9 renamed sites with nextRequestId correctly untouched, VendoredSchemaTests.swift shows both claimed sites updated. Independently grepped all of Sources/ and Tests/ for RequestID (zero hits) and for any other ...ID-suffix generated type name (zero found) -- confirming RequestID was the only such inconsistency.
+    - Independently re-ran swift build (clean) and swift test (198+93=291 tests/28 suites, 0 failures) plus checkedInOutputMatchesAFreshRun and declarationsAreEmittedInSortedSchemaNameOrder (both pass), confirming deterministic byte-identical regeneration.
+    - Confirmed the ~100 stale SourceKit diagnostics on Models.generated.swift are the documented missing-sourcekit-lsp false positives, correctly disregarded.
+
+    No scope drift, no debug artifacts, no TODOs/stubs introduced.
+
+    Final fresh verification (this agent, just now): swift build --build-tests clean (0 errors, 0 warnings); swift test 198 tests/16 suites + 93 tests/12 suites = 291/28, 0 failures, 0 warnings -- matches the pre-existing 291/28/0/0 baseline exactly.
+
+    All 5 review findings closed. Leaving in `doing` per /implement convention -- ready for /review.
+  timestamp: 2026-07-28T05:28:38.951702+00:00
 position_column: doing
 position_ordinal: '80'
 title: 'Three-state patch semantics for upsert fields: omitted, null-clears, value-replaces'
@@ -83,3 +115,13 @@ clears, 4 say omitted and `null` are equivalent, and 80 say nothing either way.
 - [ ] Omitted, `null`, and a concrete value decode to three distinct states and re-encode to three distinct documents.
 - [ ] `null` survives a decode/encode round trip as `null`, not as an omitted key.
 - [ ] A non-patch nullable field still collapses omitted and `null`, and still omits on encode.
+
+## Review Findings (2026-07-27 23:58)
+
+- [ ] `Sources/ACPGenerateCore/Emitter.swift:85` — The `indentUnit` constant defined at line 14 is barely used; hardcoded indentation strings like `"    "` and `"        "` appear throughout the file instead, violating the repeated-literals rule. Use `indentUnit` instead of hardcoded indentation strings. Either use `"\(indentUnit)"` directly, or create level-specific constants: `let indent1 = indentUnit`, `let indent2 = indentUnit + indentUnit`, `let indent3 = indentUnit + indentUnit + indentUnit`. This enables single-point maintenance if indentation width ever changes.
+- [ ] `Sources/FoundationModelsACP/Core/PatchField.swift:52` — forgivingDecodePatchField and forgivingDecodePatchArray share verbatim control flow: both open with three identical guard statements (contains, decodeNil, nil check) before diverging only in the final value decode and transformation. This shared pattern could drift independently in each copy. Extract a shared helper that handles the common key-presence-and-nil-checking logic, parameterized over how the value is decoded and transformed. For example: a helper that takes a closure for the decode+transform step, so both functions reuse the guard structure and only pass different decode strategies.
+- [ ] `Sources/FoundationModelsACP/Generated/Models.generated.swift:560` — `RequestID` type uses uppercase `ID` suffix, inconsistent with other generated ACP identifier types; see also line 1360 and line 1755 for identical violations. Rename RequestID to RequestId to match the `…Id` pattern for ACP-generated identifier types.
+- [ ] `Sources/FoundationModelsACP/Generated/Models.generated.swift:1360` — `RequestID` type uses uppercase `ID` suffix, inconsistent with other generated ACP identifier types; see also line 560 and line 1755 for identical violations. Rename RequestID to RequestId to match the `…Id` pattern for ACP-generated identifier types.
+- [ ] `Sources/FoundationModelsACP/Generated/Models.generated.swift:1755` — Type name `RequestID` uses uppercase `ID` suffix while all other generated ACP identifier types in this file use `Id` suffix (SessionId, MessageId, ToolCallId, TerminalId, PermissionOptionId, AuthMethodId, SessionConfigId, etc.). This violates uniform acronym casing per the project exception that establishes the `…Id` pattern for generated identifier types. Rename RequestID type to RequestId to match the documented `…Id` pattern for ACP-generated identifier types in the project exception.
+
+Note: two engine findings on `Tests/ACPGenerateTests/UnknownFallbackTests.swift` (dead/duplicate local `decode` helpers at lines 140 and 205) were dropped from this checklist per the review skill's blanket exception — their subject is refactoring already-existing test code, which is out of scope regardless of validator flags.

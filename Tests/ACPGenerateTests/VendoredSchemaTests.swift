@@ -240,7 +240,7 @@ import FoundationModelsACP
         //   which member is present (`result` versus `error`), and the routing
         //   table supersedes them anyway by naming each method's own result
         //   type; `EmbeddedResourceResource` and `SessionConfigSelectOptions`
-        //   by payload shape alone; and `RequestID` is JSON-RPC's id, a
+        //   by payload shape alone; and `RequestId` is JSON-RPC's id, a
         //   string, an integer, or null.
         //
         // Pinning the whole list, not a count: a definition sliding back onto
@@ -248,7 +248,7 @@ import FoundationModelsACP
         #expect(
             Self.declaredTypeNames(in: unresolved) == [
                 "AgentResponse", "ClientResponse", "EmbeddedResourceResource", "ExtNotification",
-                "ExtRequest", "ExtResponse", "RequestID", "SessionConfigSelectOptions",
+                "ExtRequest", "ExtResponse", "RequestId", "SessionConfigSelectOptions",
             ]
         )
     }

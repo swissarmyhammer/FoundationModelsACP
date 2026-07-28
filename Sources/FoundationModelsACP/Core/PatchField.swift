@@ -52,24 +52,42 @@ extension KeyedDecodingContainer {
         return .value(try decode(T.self, forKey: key))
     }
 
+    /// Runs the omitted/`null`/present guard sequence shared by every
+    /// forgiving patch-semantics decode, delegating the final decode and any
+    /// transform to `decodeValue` so `forgivingDecodePatchField` and
+    /// `forgivingDecodePatchArray` cannot drift apart on the shared part.
+    ///
+    /// Degrading to `.unchanged` rather than `.cleared` when `decodeValue`
+    /// returns `nil` is deliberate: a malformed value reads as noise, not as
+    /// a deliberate clear signal, and leaving the stored value alone is the
+    /// safer of the two degradations.
+    ///
+    /// - Parameters:
+    ///   - key: The field's coding key.
+    ///   - decodeValue: Decodes and transforms the present, non-null value;
+    ///     a `nil` result degrades the field to `.unchanged`.
+    /// - Returns: The field's patch state.
+    private func forgivingDecodePatch<Value>(
+        forKey key: Key,
+        decodeValue: () -> Value?
+    ) -> PatchField<Value> {
+        guard contains(key) else { return .unchanged }
+        guard let isNull = try? decodeNil(forKey: key) else { return .unchanged }
+        guard !isNull else { return .cleared }
+        guard let value = decodeValue() else { return .unchanged }
+        return .value(value)
+    }
+
     /// Decodes a field with patch semantics, degrading a present-but-malformed
     /// value to `.unchanged` instead of failing the message
     /// (`x-deserialize-default-on-error` combined with patch semantics).
-    ///
-    /// Degrading to `.unchanged` rather than `.cleared` is deliberate: a
-    /// malformed value reads as noise, not as a deliberate clear signal, and
-    /// leaving the stored value alone is the safer of the two degradations.
     ///
     /// - Parameters:
     ///   - type: The wrapped value type to decode.
     ///   - key: The field's coding key.
     /// - Returns: The field's patch state.
     func forgivingDecodePatchField<T: Decodable>(_ type: T.Type, forKey key: Key) -> PatchField<T> {
-        guard contains(key) else { return .unchanged }
-        guard let isNull = try? decodeNil(forKey: key) else { return .unchanged }
-        guard !isNull else { return .cleared }
-        guard let value = try? decode(T.self, forKey: key) else { return .unchanged }
-        return .value(value)
+        forgivingDecodePatch(forKey: key) { try? decode(T.self, forKey: key) }
     }
 
     /// Decodes an array field with patch semantics, dropping malformed
@@ -84,11 +102,9 @@ extension KeyedDecodingContainer {
         of elementType: Element.Type,
         forKey key: Key
     ) -> PatchField<[Element]> {
-        guard contains(key) else { return .unchanged }
-        guard let isNull = try? decodeNil(forKey: key) else { return .unchanged }
-        guard !isNull else { return .cleared }
-        guard let boxes = try? decode([FailableDecodeBox<Element>].self, forKey: key) else { return .unchanged }
-        return .value(boxes.compactMap(\.value))
+        forgivingDecodePatch(forKey: key) {
+            (try? decode([FailableDecodeBox<Element>].self, forKey: key)).map { $0.compactMap(\.value) }
+        }
     }
 }
 

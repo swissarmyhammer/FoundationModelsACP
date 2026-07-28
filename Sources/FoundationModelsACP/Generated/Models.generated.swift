@@ -243,7 +243,7 @@ public struct AgentNotification: Codable, Hashable, Sendable {
 /// A JSON-RPC request object.
 public struct AgentRequest: Codable, Hashable, Sendable {
     /// The request id used to correlate the matching response.
-    public var id: RequestID
+    public var id: RequestId
 
     /// The method name to invoke.
     public var method: String
@@ -253,7 +253,7 @@ public struct AgentRequest: Codable, Hashable, Sendable {
 
     /// Creates a `AgentRequest`.
     public init(
-        id: RequestID,
+        id: RequestId,
         method: String,
         params: JSONValue? = nil
     ) {
@@ -276,7 +276,7 @@ public struct AgentRequest: Codable, Hashable, Sendable {
     ///   or violates a wire invariant.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try container.decode(RequestID.self, forKey: .id)
+        self.id = try container.decode(RequestId.self, forKey: .id)
         self.method = try container.decode(String.self, forKey: .method)
         self.params = try container.decodeIfPresent(JSONValue.self, forKey: .params)
     }
@@ -757,7 +757,7 @@ public struct BlobResourceContents: Codable, Hashable, Sendable {
 /// See protocol docs: [Cancellation](https://agentclientprotocol.com/protocol/v2/cancellation)
 public struct CancelRequestNotification: Codable, Hashable, Sendable {
     /// The ID of the request to cancel.
-    public var requestId: RequestID
+    public var requestId: RequestId
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
     /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
@@ -768,7 +768,7 @@ public struct CancelRequestNotification: Codable, Hashable, Sendable {
 
     /// Creates a `CancelRequestNotification`.
     public init(
-        requestId: RequestID,
+        requestId: RequestId,
         meta: JSONValue? = nil
     ) {
         self.requestId = requestId
@@ -788,7 +788,7 @@ public struct CancelRequestNotification: Codable, Hashable, Sendable {
     ///   or violates a wire invariant.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.requestId = try container.decode(RequestID.self, forKey: .requestId)
+        self.requestId = try container.decode(RequestId.self, forKey: .requestId)
         self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
     }
 
@@ -952,7 +952,7 @@ public struct ClientNotification: Codable, Hashable, Sendable {
 /// A JSON-RPC request object.
 public struct ClientRequest: Codable, Hashable, Sendable {
     /// The request id used to correlate the matching response.
-    public var id: RequestID
+    public var id: RequestId
 
     /// The method name to invoke.
     public var method: String
@@ -962,7 +962,7 @@ public struct ClientRequest: Codable, Hashable, Sendable {
 
     /// Creates a `ClientRequest`.
     public init(
-        id: RequestID,
+        id: RequestId,
         method: String,
         params: JSONValue? = nil
     ) {
@@ -985,7 +985,7 @@ public struct ClientRequest: Codable, Hashable, Sendable {
     ///   or violates a wire invariant.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.id = try container.decode(RequestID.self, forKey: .id)
+        self.id = try container.decode(RequestId.self, forKey: .id)
         self.method = try container.decode(String.self, forKey: .method)
         self.params = try container.decodeIfPresent(JSONValue.self, forKey: .params)
     }

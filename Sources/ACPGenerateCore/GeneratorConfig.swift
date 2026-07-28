@@ -126,8 +126,6 @@ public struct GeneratorConfig: Sendable {
         typeRenames: [
             // `Error` would shadow `Swift.Error` inside the module.
             "Error": "ACPError",
-            // Swift API Design Guidelines cased acronym (`entryID`-style).
-            "RequestId": "RequestID",
         ],
         knownAcronyms: [
             // ACP's transport for `McpServer` variants; not an Apple-guideline

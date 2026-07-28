@@ -59,7 +59,7 @@ public enum ConnectionError: Error, Hashable, Sendable {
 /// Full-duplex JSON-RPC 2.0 engine over an `ACPTransport` (spec §5).
 ///
 /// The actor holds a monotonic numeric request id and a
-/// `[RequestID: continuation]` pending map. Every outgoing frame is produced
+/// `[RequestId: continuation]` pending map. Every outgoing frame is produced
 /// and written from actor-isolated methods, so no separate write queue is
 /// needed — but actor reentrancy means two `transport.write` calls may
 /// overlap across their suspensions, which is safe because `ACPTransport`
@@ -153,11 +153,11 @@ public actor Connection {
     /// Monotonic id for outbound requests.
     private var nextRequestId = 1
     /// Outbound requests awaiting a response, keyed by their wire id.
-    private var pending: [RequestID: PendingRequest] = [:]
+    private var pending: [RequestId: PendingRequest] = [:]
     /// In-flight inbound request handlers, keyed by the request's own wire
     /// id — the same id a `$/cancel_request` names — and cancelled on
     /// disconnect.
-    private var inboundTasks: [RequestID: Task<Void, Never>] = [:]
+    private var inboundTasks: [RequestId: Task<Void, Never>] = [:]
     /// In-flight batch calls awaiting their owed responses, keyed by a
     /// monotonic token local to this connection.
     private var batches: [Int: BatchState] = [:]
@@ -223,7 +223,7 @@ public actor Connection {
         timeout: Duration? = nil
     ) async throws -> JSONValue {
         guard !isClosed else { throw ConnectionError.closed }
-        let id: RequestID = .number(Double(nextRequestId))
+        let id: RequestId = .number(Double(nextRequestId))
         nextRequestId += 1
         var envelope: [String: JSONValue] = [
             "jsonrpc": Self.jsonrpcVersion,
@@ -444,7 +444,7 @@ public actor Connection {
     ///   - params: The request parameters, passed through verbatim.
     ///   - batchToken: The enclosing batch's collector, or `nil` when this
     ///     request arrived on its own.
-    private func dispatchRequest(id: RequestID, method: String, params: JSONValue?, batchToken: Int?) async {
+    private func dispatchRequest(id: RequestId, method: String, params: JSONValue?, batchToken: Int?) async {
         if inboundTasks[id] != nil {
             log("rejecting request with id \(id): a request with this id is already in flight")
             await respond(id: id, outcome: .failure(.invalidRequest), batchToken: batchToken)
@@ -522,7 +522,7 @@ public actor Connection {
     ///   any work deferred until "after the response."
     @discardableResult
     private func completeInbound(
-        id: RequestID,
+        id: RequestId,
         outcome: Result<JSONValue, RequestError>,
         batchToken: Int?
     ) async -> Bool {
@@ -650,7 +650,7 @@ public actor Connection {
     ///   - limit: The timeout, or `nil` for no timeout (returns `nil`).
     /// - Returns: The scheduled timeout task, or `nil` when unlimited.
     private func makeTimeoutTask(
-        for id: RequestID,
+        for id: RequestId,
         after limit: Duration?
     ) -> Task<Void, Never>? {
         guard let limit else { return nil }
@@ -669,7 +669,7 @@ public actor Connection {
     /// - Parameters:
     ///   - frame: The encoded request line.
     ///   - id: The pending entry to reject if the write fails.
-    private func write(_ frame: Data, failing id: RequestID) async {
+    private func write(_ frame: Data, failing id: RequestId) async {
         do {
             try await transport.write(frame)
         } catch {
@@ -685,7 +685,7 @@ public actor Connection {
     ///   - error: The error to throw to the awaiting caller.
     /// - Returns: Whether a pending entry was found and rejected.
     @discardableResult
-    private func fail(id: RequestID, with error: any Error) -> Bool {
+    private func fail(id: RequestId, with error: any Error) -> Bool {
         guard let entry = pending.removeValue(forKey: id) else { return false }
         entry.timeout?.cancel()
         entry.continuation.resume(throwing: error)
@@ -699,7 +699,7 @@ public actor Connection {
     /// notification landing.
     ///
     /// - Parameter id: The cancelled request's wire id.
-    private func cancelOutbound(id: RequestID) async {
+    private func cancelOutbound(id: RequestId) async {
         guard fail(id: id, with: CancellationError()) else { return }
         guard !isClosed else { return }
         let notification = JSONValue.object([

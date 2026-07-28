@@ -13,6 +13,9 @@ enum Emitter {
     /// The indentation prefix for one nesting level.
     private static let indentUnit = "    "
 
+    /// The indentation prefix for two nesting levels.
+    private static let indent2 = indentUnit + indentUnit
+
     /// Assembles a generated file from rendered declarations.
     ///
     /// - Parameters:
@@ -120,7 +123,7 @@ enum Emitter {
 
         for (index, property) in model.properties.enumerated() {
             if index > 0 { lines.append("") }
-            lines.append(contentsOf: docLines(property.documentation, indent: "    "))
+            lines.append(contentsOf: docLines(property.documentation, indent: indentUnit))
             lines.append("    public var \(property.swiftName): \(renderedType(of: property))")
         }
 
@@ -201,7 +204,7 @@ enum Emitter {
     private static func renderParameters<T>(items: [T], render: (T) -> String) -> [String] {
         items.enumerated().map { index, item in
             let comma = index < items.count - 1 ? "," : ""
-            return "        " + render(item) + comma
+            return indent2 + render(item) + comma
         }
     }
 
@@ -212,7 +215,7 @@ enum Emitter {
     private static func codingKeys(_ model: StructModel) -> [String] {
         var lines = ["    private enum CodingKeys: String, CodingKey {"]
         for property in model.properties {
-            lines.append("        " + codingKeyCase(property))
+            lines.append(indent2 + codingKeyCase(property))
         }
         lines.append("    }")
         return lines
@@ -248,7 +251,7 @@ enum Emitter {
             "        let container = try decoder.container(keyedBy: CodingKeys.self)",
         ]
         for property in model.properties {
-            lines.append("        " + decodeLine(property))
+            lines.append(indent2 + decodeLine(property))
         }
         lines.append("    }")
         return lines
@@ -336,7 +339,7 @@ enum Emitter {
             "        var container = encoder.container(keyedBy: CodingKeys.self)",
         ])
         for property in model.properties {
-            lines.append("        " + encodeCall(property))
+            lines.append(indent2 + encodeCall(property))
         }
         lines.append("    }")
         return lines
@@ -451,7 +454,7 @@ enum Emitter {
         guard !entries.isEmpty else { return [] }
         var lines = ["\(baseIndent)private enum Tag: \(rawType) {"]
         for entry in entries {
-            lines.append("\(baseIndent)    case \(entry.swiftName) = \(entry.literal)")
+            lines.append("\(baseIndent)\(indentUnit)case \(entry.swiftName) = \(entry.literal)")
         }
         lines.append("\(baseIndent)}")
         return lines
@@ -470,7 +473,7 @@ enum Emitter {
         tagEnumDeclaration(
             entries: cases.map { (swiftName: $0.swiftName, literal: stringLiteral($0.tag)) },
             rawType: "String",
-            baseIndent: "    "
+            baseIndent: indentUnit
         )
     }
 
@@ -506,7 +509,7 @@ enum Emitter {
         var lines = docLines(model.documentation, indent: "")
         lines.append("public enum \(model.name): Codable, Hashable, Sendable {")
         for enumCase in model.cases {
-            lines.append(contentsOf: docLines(enumCase.documentation, indent: "    "))
+            lines.append(contentsOf: docLines(enumCase.documentation, indent: indentUnit))
             lines.append("    case \(enumCase.swiftName)")
             lines.append("")
         }
@@ -519,7 +522,7 @@ enum Emitter {
         lines.append(contentsOf: tagEnumDeclaration(
             entries: model.cases.map { (swiftName: $0.swiftName, literal: wireLiteral($0, kind: model.rawKind)) },
             rawType: rawType,
-            baseIndent: "    "
+            baseIndent: indentUnit
         ))
         lines.append(contentsOf: [
             "",
@@ -601,7 +604,7 @@ enum Emitter {
         var lines = docLines(model.documentation, indent: "")
         lines.append("public enum \(model.name): Codable, Hashable, Sendable {")
         for unionCase in model.cases {
-            lines.append(contentsOf: docLines(unionCase.documentation, indent: "    "))
+            lines.append(contentsOf: docLines(unionCase.documentation, indent: indentUnit))
             if let payload = unionCase.payloadType {
                 lines.append("    case \(unionCase.swiftName)(\(payload))")
             } else {
@@ -687,7 +690,7 @@ enum Emitter {
         let tagged = cases.compactMap { unionCase -> (swiftName: String, literal: String)? in
             unionCase.tag.map { (unionCase.swiftName, stringLiteral($0)) }
         }
-        return tagEnumDeclaration(entries: tagged, rawType: "String", baseIndent: "    ")
+        return tagEnumDeclaration(entries: tagged, rawType: "String", baseIndent: indentUnit)
     }
 
     /// Renders a discriminated `anyOf` union as an enum with hand-rolled
@@ -703,7 +706,7 @@ enum Emitter {
         var lines = docLines(model.documentation, indent: "")
         lines.append("public enum \(model.name): Codable, Hashable, Sendable {")
         for unionCase in model.cases {
-            lines.append(contentsOf: docLines(unionCase.documentation, indent: "    "))
+            lines.append(contentsOf: docLines(unionCase.documentation, indent: indentUnit))
             lines.append("    case \(unionCase.swiftName)(\(unionCase.payloadType))")
             lines.append("")
         }
@@ -850,15 +853,15 @@ enum Emitter {
         lines.append(contentsOf: union.declaration)
         for property in leading {
             lines.append("")
-            lines.append(contentsOf: docLines(property.documentation, indent: "    "))
+            lines.append(contentsOf: docLines(property.documentation, indent: indentUnit))
             lines.append("    public var \(property.swiftName): \(renderedType(of: property))")
         }
         lines.append("")
-        lines.append(contentsOf: docLines(union.documentation, indent: "    "))
+        lines.append(contentsOf: docLines(union.documentation, indent: indentUnit))
         lines.append("    public var \(union.wireName): \(union.typeName)")
         if let meta {
             lines.append("")
-            lines.append(contentsOf: docLines(meta.documentation, indent: "    "))
+            lines.append(contentsOf: docLines(meta.documentation, indent: indentUnit))
             lines.append("    public var \(meta.swiftName): \(renderedType(of: meta))")
         }
         lines.append("")
@@ -883,7 +886,7 @@ enum Emitter {
             "    public enum \(model.valueEnumName): Codable, Hashable, Sendable {",
         ]
         for unionCase in model.cases {
-            lines.append(contentsOf: docLines(unionCase.documentation, indent: "        "))
+            lines.append(contentsOf: docLines(unionCase.documentation, indent: indent2))
             lines.append("        case \(unionCase.swiftName)(\(caseAssociatedValues(of: unionCase)))")
         }
         lines.append(contentsOf: [
@@ -921,7 +924,7 @@ enum Emitter {
             guard case .tag(let tag) = unionCase.selector else { return nil }
             return (unionCase.swiftName, stringLiteral(tag))
         }
-        return tagEnumDeclaration(entries: tagged, rawType: "String", baseIndent: "        ")
+        return tagEnumDeclaration(entries: tagged, rawType: "String", baseIndent: indent2)
     }
 
     /// Renders one value-union case's associated-value list.
@@ -1153,11 +1156,11 @@ enum Emitter {
             "        let container = try decoder.container(keyedBy: CodingKeys.self)",
         ]
         for property in leading {
-            lines.append("        " + decodeLine(property))
+            lines.append(indent2 + decodeLine(property))
         }
         lines.append("        self.\(union.wireName) = try \(union.typeName)(from: decoder)")
         if let meta {
-            lines.append("        " + decodeLine(meta))
+            lines.append(indent2 + decodeLine(meta))
         }
         lines.append("    }")
         return lines
@@ -1186,11 +1189,11 @@ enum Emitter {
             "        var container = encoder.container(keyedBy: CodingKeys.self)",
         ]
         for property in leading {
-            lines.append("        " + encodeCall(property))
+            lines.append(indent2 + encodeCall(property))
         }
         lines.append("        try \(union.wireName).encode(to: encoder)")
         if let meta {
-            lines.append("        " + encodeCall(meta))
+            lines.append(indent2 + encodeCall(meta))
         }
         lines.append("    }")
         return lines

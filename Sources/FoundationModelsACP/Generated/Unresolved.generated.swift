@@ -54,7 +54,7 @@ public typealias ExtResponse = JSONValue
 /// \[2\] Fractional parts may be problematic, since many decimal fractions cannot be represented exactly as binary fractions.
 ///
 /// Permanently deferred: no variant of this `anyOf` union pins a discriminator, so there is nothing to key a Swift enum on; raw JSON is its representation.
-public typealias RequestID = JSONValue
+public typealias RequestId = JSONValue
 
 /// Possible values for a session configuration option.
 ///
