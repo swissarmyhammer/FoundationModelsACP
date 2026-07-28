@@ -409,9 +409,65 @@ public actor Connection {
         return fields[Self.idKey] != nil && fields[Self.resultKey] == nil && fields[Self.errorKey] == nil
     }
 
+    /// One already-version-checked envelope's wire shape, so `dispatchSingle`
+    /// reduces to a single flat switch instead of interleaving shape
+    /// classification with per-shape handling.
+    private enum MessageKind {
+        /// A request: carries an `id` and a string `method`.
+        case request(id: RequestId, method: String, params: JSONValue?)
+        /// A notification: carries a string `method`, no `id`.
+        case notification(method: String, params: JSONValue?)
+        /// The protocol-level `$/cancel_request` notification — a
+        /// notification whose method names it specifically.
+        case cancelRequest(params: JSONValue?)
+        /// A response: carries an `id` and a `result` or `error` member.
+        case response(id: RequestId, fields: [String: JSONValue])
+        /// Carries an `id` but matches none of the shapes above — still owed
+        /// a reply, answered with `invalidRequest` rather than dropped.
+        case unclassifiable(id: RequestId)
+        /// No `id` and no recognized shape — logged and dropped, since
+        /// nothing is owed a reply.
+        case malformed
+    }
+
+    /// Classifies one already-version-checked envelope by wire shape: a
+    /// string `method` member makes it a request, notification, or
+    /// `$/cancel_request`; failing that, a `result`/`error` member makes it a
+    /// response; failing that, it is unclassifiable (if it still carries an
+    /// `id`) or outright malformed.
+    ///
+    /// A pure function of `fields` — it reads no actor state — so
+    /// `dispatchSingle` can call it before deciding which (if any) actor
+    /// method to await.
+    ///
+    /// - Parameter fields: The envelope's decoded members.
+    /// - Returns: The envelope's classification.
+    private static func classify(fields: [String: JSONValue]) -> MessageKind {
+        let id = fields[Self.idKey]
+        if case .string(let method) = fields[Self.methodKey, default: .null] {
+            if id == nil, method == Self.cancelRequestMethod {
+                return .cancelRequest(params: fields[Self.paramsKey])
+            }
+            if let id {
+                return .request(id: id, method: method, params: fields[Self.paramsKey])
+            }
+            return .notification(method: method, params: fields[Self.paramsKey])
+        }
+        if let id, fields[Self.resultKey] != nil || fields[Self.errorKey] != nil {
+            return .response(id: id, fields: fields)
+        }
+        if let id {
+            return .unclassifiable(id: id)
+        }
+        return .malformed
+    }
+
     /// Routes one envelope by kind: request, notification, response,
     /// `$/cancel_request`, or — failing all of those — an invalid-request
-    /// error / logged drop.
+    /// error / logged drop. Classification (`Self.classify(fields:)`) is
+    /// kept separate from handling so each stays simple on its own: the
+    /// classifier is a pure function of the envelope's shape, and this
+    /// method is a flat dispatch over its result.
     ///
     /// - Parameters:
     ///   - message: The decoded envelope.
@@ -422,43 +478,51 @@ public actor Connection {
             log("dropping non-object message")
             return
         }
-        let id = fields[Self.idKey]
         // The version check mirrors the write side, which stamps every
         // outgoing envelope with the version constant.
         guard fields[Self.jsonrpcKey, default: .null] == Self.jsonrpcVersion else {
-            log("rejecting message without jsonrpc 2.0 version")
-            if let id, fields[Self.resultKey] == nil, fields[Self.errorKey] == nil {
-                // Owed a response (request-shaped, or a detectable stand-in).
-                await respond(id: id, outcome: .failure(.invalidRequest), batchToken: batchToken)
-            } else if let id {
-                // Response-shaped: never answer a response — the id could
-                // collide with one of the peer's own calls. Fail the
-                // awaiting caller loud instead of leaving it hung (no-op if
-                // unknown).
-                fail(id: id, with: RequestError.invalidRequest)
-            }
+            await rejectWrongVersion(fields: fields, batchToken: batchToken)
             return
         }
-        if case .string(let method) = fields[Self.methodKey, default: .null] {
-            if id == nil, method == Self.cancelRequestMethod {
-                handleCancelRequest(params: fields[Self.paramsKey])
-                return
-            }
-            if let id {
-                await dispatchRequest(id: id, method: method, params: fields[Self.paramsKey], batchToken: batchToken)
-            } else {
-                await notificationHandler?(method, fields[Self.paramsKey])
-            }
-            return
+        switch Self.classify(fields: fields) {
+        case .request(let id, let method, let params):
+            await dispatchRequest(id: id, method: method, params: params, batchToken: batchToken)
+        case .notification(let method, let params):
+            await notificationHandler?(method, params)
+        case .cancelRequest(let params):
+            handleCancelRequest(params: params)
+        case .response(let id, let responseFields):
+            resolve(id: id, fields: responseFields)
+        case .unclassifiable(let id):
+            await respond(id: id, outcome: .failure(.invalidRequest), batchToken: batchToken)
+        case .malformed:
+            log("dropping unclassifiable message")
         }
-        if let id, fields[Self.resultKey] != nil || fields[Self.errorKey] != nil {
-            resolve(id: id, fields: fields)
-            return
-        }
-        if let id {
+    }
+
+    /// Answers a message that failed the jsonrpc-version check: an
+    /// `invalidRequest` response when it owed one (request-shaped, or a
+    /// detectable stand-in), or a loud rejection of the matching pending
+    /// caller when it looked like a response instead — never a reply, since
+    /// the `id` could collide with one of the peer's own calls. A no-op when
+    /// the envelope carries no `id` at all — nothing is owed and nothing is
+    /// pending to fail.
+    ///
+    /// - Parameters:
+    ///   - fields: The envelope's decoded members.
+    ///   - batchToken: The enclosing batch's collector, or `nil` when this
+    ///     envelope arrived on its own.
+    private func rejectWrongVersion(fields: [String: JSONValue], batchToken: Int?) async {
+        log("rejecting message without jsonrpc 2.0 version")
+        guard let id = fields[Self.idKey] else { return }
+        if fields[Self.resultKey] == nil, fields[Self.errorKey] == nil {
+            // Owed a response (request-shaped, or a detectable stand-in).
             await respond(id: id, outcome: .failure(.invalidRequest), batchToken: batchToken)
         } else {
-            log("dropping unclassifiable message")
+            // Response-shaped: never answer a response — the id could
+            // collide with one of the peer's own calls. Fail the awaiting
+            // caller loud instead of leaving it hung (no-op if unknown).
+            fail(id: id, with: RequestError.invalidRequest)
         }
     }
 
