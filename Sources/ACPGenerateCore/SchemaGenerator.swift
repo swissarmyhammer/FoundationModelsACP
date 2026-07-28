@@ -77,6 +77,7 @@ public struct SchemaGenerator: Sendable {
         guard let definitions = schema[Self.defsKey]?.objectValue else {
             throw GeneratorError.invalidSchema("missing top-level \(Self.defsKey) object")
         }
+        try validatePatchSemanticsFields(definitions: definitions)
 
         var identifiers: [String] = []
         var structModels: [StructModel] = []
@@ -1347,6 +1348,40 @@ public struct SchemaGenerator: Sendable {
     /// The schema extension keyword marking a forgiving array field.
     private static let skipInvalidItemsKey = "x-deserialize-skip-invalid-items"
 
+    /// Validates that every `config.patchSemanticsFields` entry names a field
+    /// the schema still declares.
+    ///
+    /// Neither the schema nor its description prose gives the generator a
+    /// keyword to check itself, so the config table is the only source of
+    /// truth for which fields have patch semantics — and a stale entry (a
+    /// field renamed or removed on re-vendor) must fail generation rather
+    /// than silently stop applying, the same discipline `deprecatedMethods`
+    /// enforces for the routing table.
+    ///
+    /// - Parameter definitions: The schema's top-level `$defs` object.
+    /// - Throws: `GeneratorError.invalidSchema` for an entry that is not
+    ///   `"Definition.field"`, names no definition, or names no property of
+    ///   that definition.
+    private func validatePatchSemanticsFields(definitions: [String: JSONValue]) throws {
+        for key in config.patchSemanticsFields.sorted() {
+            guard let separator = key.firstIndex(of: "."), key.firstIndex(of: ".") == key.lastIndex(of: ".") else {
+                throw GeneratorError.invalidSchema(
+                    "patch semantics config key \"\(key)\" is not \"Definition.field\""
+                )
+            }
+            let definitionName = String(key[key.startIndex..<separator])
+            let fieldName = String(key[key.index(after: separator)...])
+            guard let definition = definitions[definitionName],
+                let properties = definition[Self.propertiesKey]?.objectValue,
+                properties[fieldName] != nil
+            else {
+                throw GeneratorError.invalidSchema(
+                    "patch semantics config names \"\(key)\", which is not a field the schema declares"
+                )
+            }
+        }
+    }
+
     /// Builds the emission model for one property.
     ///
     /// - Parameters:
@@ -1388,7 +1423,8 @@ public struct SchemaGenerator: Sendable {
             defaultsToEmptyInstance: defaults.isEmptyInstance,
             objectDefaultMembers: defaults.objectMembers,
             strategy: strategy,
-            documentation: description(of: fragment)
+            documentation: description(of: fragment),
+            hasPatchSemantics: config.patchSemanticsFields.contains(context)
         )
     }
 

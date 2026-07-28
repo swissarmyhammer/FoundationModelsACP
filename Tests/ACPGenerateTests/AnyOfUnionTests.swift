@@ -23,6 +23,12 @@ import Testing
 /// evaluated. The expectations are downstream shape pins on what the accepted
 /// union emits.
 ///
+/// Generation below passes an explicit empty `GeneratorConfig()` rather than
+/// `SchemaGenerator`'s `.acpV2` default: `.acpV2` carries a
+/// `patchSemanticsFields` table validated against the schema being
+/// generated, and these inline fixtures do not declare the ACP v2 types that
+/// table names.
+///
 /// So none of these tests carries a `!contains("case other")` negative. Two
 /// did; both were vacuous, because every route to an emitted `case other`
 /// throws upstream, and each was reachable only behind several simultaneous
@@ -58,7 +64,7 @@ import Testing
               }
             }
             """.utf8)
-        let files = try SchemaGenerator().generate(schemaJSON: schema)
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         let unions = try #require(files.first { $0.name == "Unions.generated.swift" }).contents
         #expect(unions.contains("public enum Thing: Codable, Hashable, Sendable"))
         #expect(unions.contains("case alpha(Alpha)"))
@@ -84,7 +90,7 @@ import Testing
         // `anyOf` here rejects — at `discriminatedPayloadType`, before the
         // default-variant test is ever reached — a union whose modeled
         // variants are perfectly well formed.
-        let files = try SchemaGenerator().generate(schemaJSON: Self.discriminatedUnionWithBareFallbackSchema)
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: Self.discriminatedUnionWithBareFallbackSchema)
         let unions = try #require(files.first { $0.name == "Unions.generated.swift" }).contents
         #expect(unions.contains("public enum Thing: Codable, Hashable, Sendable"))
         #expect(unions.contains("case alpha(Alpha)"))
@@ -103,7 +109,7 @@ import Testing
         // members would be accepted with the second variant silently
         // unmodeled. The whole definition defers to raw JSON instead, which is
         // lossless.
-        let files = try SchemaGenerator().generate(schemaJSON: Self.valueUnionWithConstPinningFallbackSchema)
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: Self.valueUnionWithConstPinningFallbackSchema)
         let unresolved = try #require(files.first { $0.name == "Unresolved.generated.swift" }).contents
         #expect(unresolved.contains("public typealias Choice = JSONValue"))
         let models = try #require(files.first { $0.name == "Models.generated.swift" }).contents
@@ -119,7 +125,7 @@ import Testing
         //
         // Reverting `taggedUnionModel` to a raw `anyOf` read throws
         // `discriminator type has no const value` at the catch-all.
-        let files = try SchemaGenerator().generate(schemaJSON: Self.explicitUnknownVariantSchema)
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: Self.explicitUnknownVariantSchema)
         let unions = try #require(files.first { $0.name == "Unions.generated.swift" }).contents
         #expect(unions.contains("public enum Thing: Codable, Hashable, Sendable"))
         #expect(unions.contains("case alpha(Alpha)"))
@@ -135,7 +141,7 @@ import Testing
         // or forwarding". The synthesized fallback takes the raw object beside
         // the tag, so those members survive and the union is modeled rather
         // than deferred to raw JSON wholesale.
-        let files = try SchemaGenerator().generate(schemaJSON: Self.payloadBearingUnknownVariantSchema)
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: Self.payloadBearingUnknownVariantSchema)
         let unions = try #require(files.first { $0.name == "Unions.generated.swift" }).contents
         #expect(unions.contains("public enum Thing: Codable, Hashable, Sendable"))
         #expect(unions.contains("case alpha(Alpha)"))
@@ -151,7 +157,7 @@ import Testing
         // value. Writing the value alone would round-trip to JSON missing a
         // member the schema requires, which is why this shape was rejected
         // while the default carried one associated value.
-        let files = try SchemaGenerator().generate(schemaJSON: Self.valueUnionDefaultWithDiscriminatorSchema)
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: Self.valueUnionDefaultWithDiscriminatorSchema)
         let models = try #require(files.first { $0.name == "Models.generated.swift" }).contents
         #expect(models.contains("case other(String, JSONValue)"))
     }
@@ -163,7 +169,7 @@ import Testing
         // variants declare both members already — so the definition is modeled
         // rather than deferred, with the catch-all becoming the tag-capturing
         // default case.
-        let files = try SchemaGenerator().generate(schemaJSON: Self.valueUnionWithPayloadCatchAllSchema)
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: Self.valueUnionWithPayloadCatchAllSchema)
         let models = try #require(files.first { $0.name == "Models.generated.swift" }).contents
         #expect(models.contains("public struct Choice: Codable, Hashable, Sendable"))
         #expect(models.contains("case boolean(Bool)"))
@@ -178,7 +184,7 @@ import Testing
         // payload sits beside the base members rather than under a `value`
         // key. It emits as the base struct with a nested `Payload` enum whose
         // own Codable flattens into the same object.
-        let files = try SchemaGenerator().generate(schemaJSON: Self.objectWithTaggedPayloadUnionSchema)
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: Self.objectWithTaggedPayloadUnionSchema)
         let models = try #require(files.first { $0.name == "Models.generated.swift" }).contents
         #expect(models.contains("public struct Change: Codable, Hashable, Sendable"))
         #expect(models.contains("    public enum Payload: Codable, Hashable, Sendable {"))
@@ -199,7 +205,7 @@ import Testing
     }
 
     @Test func objectValueUnionClassifiesAndEmits() throws {
-        let files = try SchemaGenerator().generate(schemaJSON: Self.objectValueUnionSchema)
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: Self.objectValueUnionSchema)
         let models = try #require(files.first { $0.name == "Models.generated.swift" }).contents
         #expect(models.contains("public struct Choice: Codable, Hashable, Sendable"))
         #expect(models.contains("public enum Value: Codable, Hashable, Sendable"))
@@ -219,7 +225,7 @@ import Testing
         //
         // Reverting that filtering throws `expected exactly one
         // non-discriminator value member` at the catch-all.
-        let files = try SchemaGenerator().generate(schemaJSON: Self.objectValueUnionWithBareFallbackSchema)
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: Self.objectValueUnionWithBareFallbackSchema)
         let models = try #require(files.first { $0.name == "Models.generated.swift" }).contents
         #expect(models.contains("public struct Choice: Codable, Hashable, Sendable"))
         #expect(models.contains("public enum Value: Codable, Hashable, Sendable"))
@@ -236,7 +242,7 @@ import Testing
         // Reject the shape rather than emit it.
         for schema in [Self.valueUnionCollidingWithBaseSchema, Self.taggedPayloadUnionCollidingWithBaseSchema] {
             let error = #expect(throws: GeneratorError.self) {
-                _ = try SchemaGenerator().generate(schemaJSON: schema)
+                _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
             }
             // Pinned, because "it threw" would also be satisfied by the shape
             // being rejected somewhere upstream for an unrelated reason.
@@ -250,7 +256,7 @@ import Testing
         // too: `public enum Foo-bar` would otherwise fail at `swiftc`, well
         // past the point where the schema shape is still in view.
         let error = #expect(throws: GeneratorError.self) {
-            _ = try SchemaGenerator().generate(schemaJSON: Self.valueUnionWithUnusableMemberNameSchema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: Self.valueUnionWithUnusableMemberNameSchema)
         }
         #expect(try #require(error).description.contains("does not map to a plain Swift identifier"))
     }
@@ -274,7 +280,7 @@ import Testing
             }
             """.utf8)
         #expect(throws: GeneratorError.self) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 
@@ -296,7 +302,7 @@ import Testing
             }
             """.utf8)
         #expect(throws: GeneratorError.self) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 
@@ -320,7 +326,7 @@ import Testing
             }
             """.utf8)
         #expect(throws: GeneratorError.self) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 

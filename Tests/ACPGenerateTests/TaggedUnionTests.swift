@@ -7,6 +7,12 @@ import Testing
 /// (mixed variant shapes, disagreeing discriminator keys, payload fields
 /// beyond the discriminator, Swift-keyword wire values) and the emitted
 /// source's own escaping safety for a hostile tag.
+///
+/// Generation below passes an explicit empty `GeneratorConfig()` rather than
+/// `SchemaGenerator`'s `.acpV2` default: `.acpV2` carries a
+/// `patchSemanticsFields` table validated against the schema being
+/// generated, and these inline fixtures do not declare the ACP v2 types that
+/// table names.
 @Suite struct TaggedUnionEmissionTests {
     @Test func oneOfMixingStringAndObjectVariantsFailsLoudly() throws {
         let schema = Data(
@@ -27,7 +33,7 @@ import Testing
             }
             """.utf8)
         #expect(throws: GeneratorError.self) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 
@@ -54,7 +60,7 @@ import Testing
             }
             """.utf8)
         #expect(throws: GeneratorError.self) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 
@@ -97,7 +103,7 @@ import Testing
             }
             """.utf8)
         #expect(throws: GeneratorError.self) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 
@@ -124,7 +130,7 @@ import Testing
             }
             """.utf8)
         #expect(throws: GeneratorError.self) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 
@@ -158,7 +164,7 @@ import Testing
               }
             }
             """.utf8)
-        let generated = try SchemaGenerator().generate(schemaJSON: schema)
+        let generated = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         let unresolved = try #require(generated.first { $0.name == "Unresolved.generated.swift" })
         #expect(unresolved.contents.contains("public typealias Ambiguous = JSONValue"))
         // Both variants pin a discriminator (`a` and `b`), so `deferredUnionReason`
@@ -195,7 +201,7 @@ import Testing
             }
             """.utf8)
         #expect(throws: GeneratorError.unsupportedShape(context: "OnlyFallback", detail: "empty union")) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 }

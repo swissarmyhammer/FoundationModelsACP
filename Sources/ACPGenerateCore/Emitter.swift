@@ -138,12 +138,17 @@ enum Emitter {
 
     // MARK: - Struct members
 
-    /// Renders the property's full Swift type, `?` included.
+    /// Renders the property's full Swift type: `PatchField<Wrapped>` for a
+    /// field with patch semantics, otherwise the plain type with `?` when
+    /// optional.
     ///
     /// - Parameter property: The property model.
     /// - Returns: The type expression as written after the colon.
     private static func renderedType(of property: PropertyModel) -> String {
-        property.typeExpression + (property.isOptional ? "?" : "")
+        if property.hasPatchSemantics {
+            return "PatchField<\(property.typeExpression)>"
+        }
+        return property.typeExpression + (property.isOptional ? "?" : "")
     }
 
     /// Renders the public memberwise initializer.
@@ -166,14 +171,17 @@ enum Emitter {
 
     /// Renders one initializer parameter with its default, if any.
     ///
-    /// Optional parameters default to `nil`; defaulted parameters use their
-    /// schema default.
+    /// A patch-semantics field defaults to `.unchanged` — the state an
+    /// omitted wire field decodes to. Otherwise, optional parameters default
+    /// to `nil`; defaulted parameters use their schema default.
     ///
     /// - Parameter property: The property model.
     /// - Returns: The `name: Type[ = default]` fragment, without indentation.
     private static func initParameter(_ property: PropertyModel) -> String {
         var parameter = "\(property.swiftName): \(renderedType(of: property))"
-        if let defaultExpression = property.defaultExpression {
+        if property.hasPatchSemantics {
+            parameter += " = .unchanged"
+        } else if let defaultExpression = property.defaultExpression {
             parameter += " = \(defaultExpression)"
         } else if property.isOptional {
             parameter += " = nil"
@@ -251,6 +259,9 @@ enum Emitter {
     /// - Parameter property: The property model.
     /// - Returns: The `self.x = …` statement.
     private static func decodeLine(_ property: PropertyModel) -> String {
+        if property.hasPatchSemantics {
+            return patchDecodeLine(property)
+        }
         let name = property.swiftName
         let type = property.typeExpression
         switch property.strategy {
@@ -276,10 +287,31 @@ enum Emitter {
         }
     }
 
+    /// Renders the decode statement for a field with patch semantics, one
+    /// `PatchField`-aware helper per decode strategy.
+    ///
+    /// - Parameter property: The property model.
+    /// - Returns: The `self.x = …` statement.
+    private static func patchDecodeLine(_ property: PropertyModel) -> String {
+        let name = property.swiftName
+        let type = property.typeExpression
+        switch property.strategy {
+        case .strict:
+            return "self.\(name) = try container.decodePatchField(\(type).self, forKey: .\(name))"
+        case .forgivingScalar:
+            return "self.\(name) = container.forgivingDecodePatchField(\(type).self, forKey: .\(name))"
+        case .forgivingArray:
+            let element = property.elementType ?? type
+            return "self.\(name) = container.forgivingDecodePatchArray(of: \(element).self, forKey: .\(name))"
+        }
+    }
+
     /// Renders `encode(to:)`, omitting `nil` optional fields entirely.
     ///
     /// This mirrors `init(from:)`, which decodes every optional property via
-    /// `decodeIfPresent`, so both directions apply the same condition.
+    /// `decodeIfPresent`, so both directions apply the same condition. A
+    /// field with patch semantics is the deliberate exception on both sides:
+    /// its `.cleared` case decodes from, and encodes as, an explicit `null`.
     ///
     /// - Parameter model: The struct's emission model.
     /// - Returns: The method lines, indented one level.
@@ -287,12 +319,22 @@ enum Emitter {
         var lines = [
             "    /// Encodes a `\(model.name)`, omitting nil optional fields — never",
             "    /// emitting JSON null for an absent capability-gated field.",
+        ]
+        if model.properties.contains(where: \.hasPatchSemantics) {
+            lines.append(contentsOf: [
+                "    ///",
+                "    /// A patch-semantics field is the exception: `.cleared` writes an",
+                "    /// explicit `null` rather than omitting the key, since here `null` is",
+                "    /// itself the clear signal, not a stand-in for absence.",
+            ])
+        }
+        lines.append(contentsOf: [
             "    ///",
             "    /// - Parameter encoder: The encoder to write the object into.",
             "    /// - Throws: Rethrows any error from the underlying encoder.",
             "    public func encode(to encoder: any Encoder) throws {",
             "        var container = encoder.container(keyedBy: CodingKeys.self)",
-        ]
+        ])
         for property in model.properties {
             lines.append("        " + encodeCall(property))
         }
@@ -302,10 +344,17 @@ enum Emitter {
 
     /// Renders one keyed `encode` call, omitting nil optionals.
     ///
+    /// A field with patch semantics encodes through `encodePatch`, which
+    /// chooses between omitting the key, writing `null`, or writing the
+    /// value based on the field's case — the inverse of `patchDecodeLine`.
+    ///
     /// - Parameter property: The property model.
     /// - Returns: The `try container.encode…` statement, without indentation.
     private static func encodeCall(_ property: PropertyModel) -> String {
         let name = property.swiftName
+        if property.hasPatchSemantics {
+            return "try container.encodePatch(\(name), forKey: .\(name))"
+        }
         if property.isOptional {
             return "try container.encodeIfPresent(\(name), forKey: .\(name))"
         }

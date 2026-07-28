@@ -21,6 +21,12 @@ import Testing
 ///
 /// `GeneratorError` is `Equatable`, so each test matches the thrown error by
 /// value rather than only by type.
+///
+/// Every generation call below passes an explicit empty `GeneratorConfig()`
+/// rather than relying on `SchemaGenerator`'s `.acpV2` default: `.acpV2`
+/// carries a `patchSemanticsFields` table validated against the schema being
+/// generated, and these synthetic fixtures do not declare the ACP v2 types
+/// that table names.
 @Suite struct GeneratorErrorDetailTests {
     // MARK: - emptyUnionDetail
 
@@ -34,7 +40,7 @@ import Testing
             }
             """.utf8)
         #expect(throws: GeneratorError.unsupportedShape(context: "Empty", detail: "empty union")) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 
@@ -57,7 +63,7 @@ import Testing
             }
             """.utf8)
         #expect(throws: GeneratorError.unsupportedShape(context: "Empty", detail: "empty union")) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 
@@ -91,7 +97,7 @@ import Testing
                 detail: "variants disagree on the discriminator: type vs kind"
             )
         ) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 
@@ -131,7 +137,7 @@ import Testing
                 detail: "variants disagree on the discriminator: kind vs type"
             )
         ) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 
@@ -162,7 +168,7 @@ import Testing
                 detail: "value union needs a const discriminator"
             )
         ) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 
@@ -192,7 +198,7 @@ import Testing
                 detail: "expected allOf to be a single payload $ref"
             )
         ) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 
@@ -222,7 +228,7 @@ import Testing
                 detail: "expected allOf to be a single payload $ref"
             )
         ) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 }

@@ -220,7 +220,7 @@ import Testing
               }
             }
             """.utf8)
-        let files = try SchemaGenerator().generate(schemaJSON: schema)
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         let source = try #require(files.first { $0.name == "Models.generated.swift" }).contents
         #expect(source.contains("try container.decodeIfPresent(Int.self, forKey: .exitCode)"))
         #expect(source.contains("try container.encodeIfPresent(exitCode, forKey: .exitCode)"))
@@ -258,7 +258,7 @@ import Testing
             }
             """.utf8)
         #expect(throws: GeneratorError.self) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 
@@ -284,7 +284,7 @@ import Testing
             }
             """.utf8)
         #expect(throws: GeneratorError.self) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 
@@ -307,7 +307,8 @@ import Testing
                     defaultsToEmptyInstance: false,
                     objectDefaultMembers: nil,
                     strategy: .strict,
-                    documentation: nil
+                    documentation: nil,
+                    hasPatchSemantics: false
                 )
             ]
         )

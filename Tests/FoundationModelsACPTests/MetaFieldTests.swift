@@ -18,15 +18,20 @@ import Testing
 /// of them wraps the phrase across a newline, so a substring search for it has
 /// to normalize whitespace first or it reports four.
 ///
-/// **The remaining six say the opposite**, and this suite pins that gap rather
-/// than papering over it. `AgentMessage`, `AgentThought`, `SessionInfoUpdate`,
-/// `TerminalUpdate`, `ToolCallUpdate`, and `UserMessage` are upserts, and on
-/// those the schema says "Omitted means no metadata update; `null` is an
-/// explicit clear signal" — three states, where `JSONValue?` has two. The same
-/// three-state patch rule governs their other fields ("omitted fields leave
-/// the stored value unchanged, `null` clears it, and concrete values replace
-/// it"), so it is one design question for the updates milestone, not six
-/// field-level patches.
+/// **The remaining six say the opposite.** `AgentMessage`, `AgentThought`,
+/// `SessionInfoUpdate`, `TerminalUpdate`, `ToolCallUpdate`, and `UserMessage`
+/// are upserts, and on those the schema says "Omitted means no metadata
+/// update; `null` is an explicit clear signal" — three states, where
+/// `JSONValue?` has only two. The same three-state patch rule governs their
+/// other fields ("omitted fields leave the stored value unchanged, `null`
+/// clears it, and concrete values replace it"), so these six `_meta`
+/// properties and every other patch-semantics field on those definitions
+/// generate as `PatchField<Wrapped>` — see `GeneratorConfig.patchSemanticsFields`
+/// — rather than plain `Optional`. `upsertMetaDistinguishesOmittedFromNullFromAValue`
+/// and `sessionInfoUpdateTitleDistinguishesOmittedFromNullFromAValue` below
+/// prove the three states survive both directions; they replace this suite's
+/// former `upsertMetaCannotYetDistinguishOmittedFromNull`, which pinned the gap
+/// while it was still open.
 @Suite struct MetaFieldTests {
     @Test func anOmittedMetaDecodesToNil() throws {
         let location = try WireRoundTrip.expectLossless(ToolCallLocation.self, """
@@ -92,23 +97,74 @@ import Testing
         #expect(terminal.meta == .object(["scope": .string("inner")]))
     }
 
-    @Test func upsertMetaCannotYetDistinguishOmittedFromNull() throws {
-        // The known gap, asserted so it is visible rather than assumed absent.
-        // On `ToolCallUpdate` the schema gives `null` a distinct meaning —
-        // clear the stored metadata — and `JSONValue?` cannot carry it: both
-        // decode to `nil` and both re-encode as an omitted key, so a client
-        // that meant "clear" sends "unchanged".
-        //
-        // When the updates milestone introduces a three-state field, this
-        // test is the one that has to change, and its failure is the reminder.
+    @Test func upsertMetaDistinguishesOmittedFromNullFromAValue() throws {
+        // The inverse of the former `upsertMetaCannotYetDistinguishOmittedFromNull`:
+        // on `ToolCallUpdate`, `null` is now a distinct wire state from
+        // omitted, and a client that means "clear" is no longer
+        // indistinguishable from one that means "leave unchanged".
         let omitted = try WireRoundTrip.decode(ToolCallUpdate.self, from: """
             {"toolCallId":"call-1"}
             """)
         let cleared = try WireRoundTrip.decode(ToolCallUpdate.self, from: """
             {"toolCallId":"call-1","_meta":null}
             """)
-        #expect(omitted.meta == nil)
-        #expect(cleared.meta == nil)
+        let valued = try WireRoundTrip.decode(ToolCallUpdate.self, from: """
+            {"toolCallId":"call-1","_meta":{"vendor.example/trace":"abc"}}
+            """)
+        #expect(omitted.meta == .unchanged)
+        #expect(cleared.meta == .cleared)
+        #expect(valued.meta == .value(.object(["vendor.example/trace": .string("abc")])))
+
+        // The inverse direction: three distinct wire documents come back out.
+        // `null` survives as `null`, not as an omitted key — which is exactly
+        // what would make an explicit clear read as "no metadata update" the
+        // moment a proxy passed the message on.
+        #expect(try WireRoundTrip.encode(omitted) == .object(["toolCallId": .string("call-1")]))
+        #expect(
+            try WireRoundTrip.encode(cleared)
+                == .object(["toolCallId": .string("call-1"), "_meta": .null])
+        )
+        #expect(
+            try WireRoundTrip.encode(valued)
+                == .object([
+                    "toolCallId": .string("call-1"),
+                    "_meta": .object(["vendor.example/trace": .string("abc")]),
+                ])
+        )
+    }
+
+    @Test func sessionInfoUpdateTitleDistinguishesOmittedFromNullFromAValue() throws {
+        // The same three-state rule governs a patch-semantics field beyond
+        // `_meta`: `SessionInfoUpdate.title` is "Omitted fields leave the
+        // existing session info unchanged. `null` clears the corresponding
+        // value."
+        let omitted = try WireRoundTrip.decode(SessionInfoUpdate.self, from: "{}")
+        let cleared = try WireRoundTrip.decode(SessionInfoUpdate.self, from: #"{"title":null}"#)
+        let valued = try WireRoundTrip.decode(SessionInfoUpdate.self, from: #"{"title":"New Session"}"#)
+        #expect(omitted.title == .unchanged)
+        #expect(cleared.title == .cleared)
+        #expect(valued.title == .value("New Session"))
+
+        #expect(try WireRoundTrip.encode(omitted) == .object([:]))
+        #expect(try WireRoundTrip.encode(cleared) == .object(["title": .null]))
+        #expect(try WireRoundTrip.encode(valued) == .object(["title": .string("New Session")]))
+    }
+
+    @Test func nonPatchNullableFieldStillCollapsesOmittedAndNullAndStillOmitsOnEncode() throws {
+        // The other half of the acceptance criteria: patch semantics must not
+        // become the default for every nullable field. `ToolCallLocation.line`
+        // is nullable and carries no patch-semantics prose, so it keeps the
+        // plain `Optional` collapse this suite's other tests already pin for
+        // `_meta` — restated here for a non-`_meta` field.
+        let omitted = try WireRoundTrip.decode(ToolCallLocation.self, from: """
+            {"path":"/a.txt"}
+            """)
+        let cleared = try WireRoundTrip.decode(ToolCallLocation.self, from: """
+            {"path":"/a.txt","line":null}
+            """)
+        #expect(omitted.line == nil)
+        #expect(cleared.line == nil)
         #expect(try WireRoundTrip.encode(omitted) == WireRoundTrip.encode(cleared))
+        #expect(try WireRoundTrip.encode(omitted) == .object(["path": .string("/a.txt")]))
     }
 }

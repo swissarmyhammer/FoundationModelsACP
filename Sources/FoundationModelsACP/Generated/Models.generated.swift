@@ -138,20 +138,20 @@ public struct AgentMessage: Codable, Hashable, Sendable {
     public var messageId: MessageId
 
     /// Complete replacement content for this message.
-    public var content: [ContentBlock]?
+    public var content: PatchField<[ContentBlock]>
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
     /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
     /// these keys. Omitted means no metadata update; `null` is an explicit clear signal.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
+    public var meta: PatchField<JSONValue>
 
     /// Creates a `AgentMessage`.
     public init(
         messageId: MessageId,
-        content: [ContentBlock]? = nil,
-        meta: JSONValue? = nil
+        content: PatchField<[ContentBlock]> = .unchanged,
+        meta: PatchField<JSONValue> = .unchanged
     ) {
         self.messageId = messageId
         self.content = content
@@ -173,20 +173,24 @@ public struct AgentMessage: Codable, Hashable, Sendable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.messageId = try container.decode(MessageId.self, forKey: .messageId)
-        self.content = container.forgivingDecodeArrayIfPresent(of: ContentBlock.self, forKey: .content)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+        self.content = container.forgivingDecodePatchArray(of: ContentBlock.self, forKey: .content)
+        self.meta = container.forgivingDecodePatchField(JSONValue.self, forKey: .meta)
     }
 
     /// Encodes a `AgentMessage`, omitting nil optional fields — never
     /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// A patch-semantics field is the exception: `.cleared` writes an
+    /// explicit `null` rather than omitting the key, since here `null` is
+    /// itself the clear signal, not a stand-in for absence.
     ///
     /// - Parameter encoder: The encoder to write the object into.
     /// - Throws: Rethrows any error from the underlying encoder.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(messageId, forKey: .messageId)
-        try container.encodeIfPresent(content, forKey: .content)
-        try container.encodeIfPresent(meta, forKey: .meta)
+        try container.encodePatch(content, forKey: .content)
+        try container.encodePatch(meta, forKey: .meta)
     }
 }
 
@@ -308,20 +312,20 @@ public struct AgentThought: Codable, Hashable, Sendable {
     public var messageId: MessageId
 
     /// Complete replacement content for this thought message.
-    public var content: [ContentBlock]?
+    public var content: PatchField<[ContentBlock]>
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
     /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
     /// these keys. Omitted means no metadata update; `null` is an explicit clear signal.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
+    public var meta: PatchField<JSONValue>
 
     /// Creates a `AgentThought`.
     public init(
         messageId: MessageId,
-        content: [ContentBlock]? = nil,
-        meta: JSONValue? = nil
+        content: PatchField<[ContentBlock]> = .unchanged,
+        meta: PatchField<JSONValue> = .unchanged
     ) {
         self.messageId = messageId
         self.content = content
@@ -343,20 +347,24 @@ public struct AgentThought: Codable, Hashable, Sendable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.messageId = try container.decode(MessageId.self, forKey: .messageId)
-        self.content = container.forgivingDecodeArrayIfPresent(of: ContentBlock.self, forKey: .content)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+        self.content = container.forgivingDecodePatchArray(of: ContentBlock.self, forKey: .content)
+        self.meta = container.forgivingDecodePatchField(JSONValue.self, forKey: .meta)
     }
 
     /// Encodes a `AgentThought`, omitting nil optional fields — never
     /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// A patch-semantics field is the exception: `.cleared` writes an
+    /// explicit `null` rather than omitting the key, since here `null` is
+    /// itself the clear signal, not a stand-in for absence.
     ///
     /// - Parameter encoder: The encoder to write the object into.
     /// - Throws: Rethrows any error from the underlying encoder.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(messageId, forKey: .messageId)
-        try container.encodeIfPresent(content, forKey: .content)
-        try container.encodeIfPresent(meta, forKey: .meta)
+        try container.encodePatch(content, forKey: .content)
+        try container.encodePatch(meta, forKey: .meta)
     }
 }
 
@@ -5094,23 +5102,23 @@ public struct SessionInfo: Codable, Hashable, Sendable {
 /// corresponding value.
 public struct SessionInfoUpdate: Codable, Hashable, Sendable {
     /// Human-readable title for the session. Set to null to clear.
-    public var title: String?
+    public var title: PatchField<String>
 
     /// RFC 3339 timestamp of last activity. Set to null to clear.
-    public var updatedAt: String?
+    public var updatedAt: PatchField<String>
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
     /// metadata to their interactions. Omitted means no metadata update; `null` is an
     /// explicit clear signal. Implementations MUST NOT make assumptions about values at these keys.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
+    public var meta: PatchField<JSONValue>
 
     /// Creates a `SessionInfoUpdate`.
     public init(
-        title: String? = nil,
-        updatedAt: String? = nil,
-        meta: JSONValue? = nil
+        title: PatchField<String> = .unchanged,
+        updatedAt: PatchField<String> = .unchanged,
+        meta: PatchField<JSONValue> = .unchanged
     ) {
         self.title = title
         self.updatedAt = updatedAt
@@ -5131,21 +5139,25 @@ public struct SessionInfoUpdate: Codable, Hashable, Sendable {
     ///   or violates a wire invariant.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.title = container.forgivingDecodeIfPresent(String.self, forKey: .title)
-        self.updatedAt = container.forgivingDecodeIfPresent(String.self, forKey: .updatedAt)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+        self.title = container.forgivingDecodePatchField(String.self, forKey: .title)
+        self.updatedAt = container.forgivingDecodePatchField(String.self, forKey: .updatedAt)
+        self.meta = container.forgivingDecodePatchField(JSONValue.self, forKey: .meta)
     }
 
     /// Encodes a `SessionInfoUpdate`, omitting nil optional fields — never
     /// emitting JSON null for an absent capability-gated field.
     ///
+    /// A patch-semantics field is the exception: `.cleared` writes an
+    /// explicit `null` rather than omitting the key, since here `null` is
+    /// itself the clear signal, not a stand-in for absence.
+    ///
     /// - Parameter encoder: The encoder to write the object into.
     /// - Throws: Rethrows any error from the underlying encoder.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encodeIfPresent(title, forKey: .title)
-        try container.encodeIfPresent(updatedAt, forKey: .updatedAt)
-        try container.encodeIfPresent(meta, forKey: .meta)
+        try container.encodePatch(title, forKey: .title)
+        try container.encodePatch(updatedAt, forKey: .updatedAt)
+        try container.encodePatch(meta, forKey: .meta)
     }
 }
 
@@ -5566,32 +5578,32 @@ public struct TerminalUpdate: Codable, Hashable, Sendable {
     public var terminalId: TerminalId
 
     /// The command being run.
-    public var command: String?
+    public var command: PatchField<String>
 
     /// The absolute working directory of the command.
-    public var cwd: AbsolutePath?
+    public var cwd: PatchField<AbsolutePath>
 
     /// Exit information. A concrete object marks the terminal as exited.
-    public var exitStatus: TerminalExitStatus?
+    public var exitStatus: PatchField<TerminalExitStatus>
 
     /// An authoritative replacement snapshot of terminal output bytes.
-    public var output: TerminalOutput?
+    public var output: PatchField<TerminalOutput>
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
     /// metadata to their interactions. Omitted means no metadata update; `null` is an
     /// explicit clear signal. Implementations MUST NOT make assumptions about values at these keys.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
+    public var meta: PatchField<JSONValue>
 
     /// Creates a `TerminalUpdate`.
     public init(
         terminalId: TerminalId,
-        command: String? = nil,
-        cwd: AbsolutePath? = nil,
-        exitStatus: TerminalExitStatus? = nil,
-        output: TerminalOutput? = nil,
-        meta: JSONValue? = nil
+        command: PatchField<String> = .unchanged,
+        cwd: PatchField<AbsolutePath> = .unchanged,
+        exitStatus: PatchField<TerminalExitStatus> = .unchanged,
+        output: PatchField<TerminalOutput> = .unchanged,
+        meta: PatchField<JSONValue> = .unchanged
     ) {
         self.terminalId = terminalId
         self.command = command
@@ -5619,26 +5631,30 @@ public struct TerminalUpdate: Codable, Hashable, Sendable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.terminalId = try container.decode(TerminalId.self, forKey: .terminalId)
-        self.command = container.forgivingDecodeIfPresent(String.self, forKey: .command)
-        self.cwd = container.forgivingDecodeIfPresent(AbsolutePath.self, forKey: .cwd)
-        self.exitStatus = container.forgivingDecodeIfPresent(TerminalExitStatus.self, forKey: .exitStatus)
-        self.output = container.forgivingDecodeIfPresent(TerminalOutput.self, forKey: .output)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+        self.command = container.forgivingDecodePatchField(String.self, forKey: .command)
+        self.cwd = container.forgivingDecodePatchField(AbsolutePath.self, forKey: .cwd)
+        self.exitStatus = container.forgivingDecodePatchField(TerminalExitStatus.self, forKey: .exitStatus)
+        self.output = container.forgivingDecodePatchField(TerminalOutput.self, forKey: .output)
+        self.meta = container.forgivingDecodePatchField(JSONValue.self, forKey: .meta)
     }
 
     /// Encodes a `TerminalUpdate`, omitting nil optional fields — never
     /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// A patch-semantics field is the exception: `.cleared` writes an
+    /// explicit `null` rather than omitting the key, since here `null` is
+    /// itself the clear signal, not a stand-in for absence.
     ///
     /// - Parameter encoder: The encoder to write the object into.
     /// - Throws: Rethrows any error from the underlying encoder.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(terminalId, forKey: .terminalId)
-        try container.encodeIfPresent(command, forKey: .command)
-        try container.encodeIfPresent(cwd, forKey: .cwd)
-        try container.encodeIfPresent(exitStatus, forKey: .exitStatus)
-        try container.encodeIfPresent(output, forKey: .output)
-        try container.encodeIfPresent(meta, forKey: .meta)
+        try container.encodePatch(command, forKey: .command)
+        try container.encodePatch(cwd, forKey: .cwd)
+        try container.encodePatch(exitStatus, forKey: .exitStatus)
+        try container.encodePatch(output, forKey: .output)
+        try container.encodePatch(meta, forKey: .meta)
     }
 }
 
@@ -5998,46 +6014,46 @@ public struct ToolCallUpdate: Codable, Hashable, Sendable {
     public var toolCallId: ToolCallId
 
     /// Content produced by the tool call.
-    public var content: [ToolCallContent]?
+    public var content: PatchField<[ToolCallContent]>
 
     /// The category of tool being invoked.
     /// Helps clients choose appropriate icons and UI treatment.
-    public var kind: ToolKind?
+    public var kind: PatchField<ToolKind>
 
     /// File locations affected by this tool call.
     /// Enables "follow-along" features in clients.
-    public var locations: [ToolCallLocation]?
+    public var locations: PatchField<[ToolCallLocation]>
 
     /// Raw input parameters sent to the tool.
-    public var rawInput: JSONValue?
+    public var rawInput: PatchField<JSONValue>
 
     /// Raw output returned by the tool.
-    public var rawOutput: JSONValue?
+    public var rawOutput: PatchField<JSONValue>
 
     /// Current execution status of the tool call.
-    public var status: ToolCallStatus?
+    public var status: PatchField<ToolCallStatus>
 
     /// Human-readable title describing what the tool is doing.
-    public var title: String?
+    public var title: PatchField<String>
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
     /// metadata to their interactions. Omitted means no metadata update; `null` is an
     /// explicit clear signal. Implementations MUST NOT make assumptions about values at these keys.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
+    public var meta: PatchField<JSONValue>
 
     /// Creates a `ToolCallUpdate`.
     public init(
         toolCallId: ToolCallId,
-        content: [ToolCallContent]? = nil,
-        kind: ToolKind? = nil,
-        locations: [ToolCallLocation]? = nil,
-        rawInput: JSONValue? = nil,
-        rawOutput: JSONValue? = nil,
-        status: ToolCallStatus? = nil,
-        title: String? = nil,
-        meta: JSONValue? = nil
+        content: PatchField<[ToolCallContent]> = .unchanged,
+        kind: PatchField<ToolKind> = .unchanged,
+        locations: PatchField<[ToolCallLocation]> = .unchanged,
+        rawInput: PatchField<JSONValue> = .unchanged,
+        rawOutput: PatchField<JSONValue> = .unchanged,
+        status: PatchField<ToolCallStatus> = .unchanged,
+        title: PatchField<String> = .unchanged,
+        meta: PatchField<JSONValue> = .unchanged
     ) {
         self.toolCallId = toolCallId
         self.content = content
@@ -6071,32 +6087,36 @@ public struct ToolCallUpdate: Codable, Hashable, Sendable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.toolCallId = try container.decode(ToolCallId.self, forKey: .toolCallId)
-        self.content = container.forgivingDecodeArrayIfPresent(of: ToolCallContent.self, forKey: .content)
-        self.kind = container.forgivingDecodeIfPresent(ToolKind.self, forKey: .kind)
-        self.locations = container.forgivingDecodeArrayIfPresent(of: ToolCallLocation.self, forKey: .locations)
-        self.rawInput = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .rawInput)
-        self.rawOutput = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .rawOutput)
-        self.status = container.forgivingDecodeIfPresent(ToolCallStatus.self, forKey: .status)
-        self.title = container.forgivingDecodeIfPresent(String.self, forKey: .title)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+        self.content = container.forgivingDecodePatchArray(of: ToolCallContent.self, forKey: .content)
+        self.kind = container.forgivingDecodePatchField(ToolKind.self, forKey: .kind)
+        self.locations = container.forgivingDecodePatchArray(of: ToolCallLocation.self, forKey: .locations)
+        self.rawInput = container.forgivingDecodePatchField(JSONValue.self, forKey: .rawInput)
+        self.rawOutput = container.forgivingDecodePatchField(JSONValue.self, forKey: .rawOutput)
+        self.status = container.forgivingDecodePatchField(ToolCallStatus.self, forKey: .status)
+        self.title = container.forgivingDecodePatchField(String.self, forKey: .title)
+        self.meta = container.forgivingDecodePatchField(JSONValue.self, forKey: .meta)
     }
 
     /// Encodes a `ToolCallUpdate`, omitting nil optional fields — never
     /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// A patch-semantics field is the exception: `.cleared` writes an
+    /// explicit `null` rather than omitting the key, since here `null` is
+    /// itself the clear signal, not a stand-in for absence.
     ///
     /// - Parameter encoder: The encoder to write the object into.
     /// - Throws: Rethrows any error from the underlying encoder.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(toolCallId, forKey: .toolCallId)
-        try container.encodeIfPresent(content, forKey: .content)
-        try container.encodeIfPresent(kind, forKey: .kind)
-        try container.encodeIfPresent(locations, forKey: .locations)
-        try container.encodeIfPresent(rawInput, forKey: .rawInput)
-        try container.encodeIfPresent(rawOutput, forKey: .rawOutput)
-        try container.encodeIfPresent(status, forKey: .status)
-        try container.encodeIfPresent(title, forKey: .title)
-        try container.encodeIfPresent(meta, forKey: .meta)
+        try container.encodePatch(content, forKey: .content)
+        try container.encodePatch(kind, forKey: .kind)
+        try container.encodePatch(locations, forKey: .locations)
+        try container.encodePatch(rawInput, forKey: .rawInput)
+        try container.encodePatch(rawOutput, forKey: .rawOutput)
+        try container.encodePatch(status, forKey: .status)
+        try container.encodePatch(title, forKey: .title)
+        try container.encodePatch(meta, forKey: .meta)
     }
 }
 
@@ -6246,20 +6266,20 @@ public struct UserMessage: Codable, Hashable, Sendable {
     public var messageId: MessageId
 
     /// Complete replacement content for this message.
-    public var content: [ContentBlock]?
+    public var content: PatchField<[ContentBlock]>
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
     /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
     /// these keys. Omitted means no metadata update; `null` is an explicit clear signal.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
+    public var meta: PatchField<JSONValue>
 
     /// Creates a `UserMessage`.
     public init(
         messageId: MessageId,
-        content: [ContentBlock]? = nil,
-        meta: JSONValue? = nil
+        content: PatchField<[ContentBlock]> = .unchanged,
+        meta: PatchField<JSONValue> = .unchanged
     ) {
         self.messageId = messageId
         self.content = content
@@ -6281,19 +6301,23 @@ public struct UserMessage: Codable, Hashable, Sendable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.messageId = try container.decode(MessageId.self, forKey: .messageId)
-        self.content = container.forgivingDecodeArrayIfPresent(of: ContentBlock.self, forKey: .content)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+        self.content = container.forgivingDecodePatchArray(of: ContentBlock.self, forKey: .content)
+        self.meta = container.forgivingDecodePatchField(JSONValue.self, forKey: .meta)
     }
 
     /// Encodes a `UserMessage`, omitting nil optional fields — never
     /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// A patch-semantics field is the exception: `.cleared` writes an
+    /// explicit `null` rather than omitting the key, since here `null` is
+    /// itself the clear signal, not a stand-in for absence.
     ///
     /// - Parameter encoder: The encoder to write the object into.
     /// - Throws: Rethrows any error from the underlying encoder.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(messageId, forKey: .messageId)
-        try container.encodeIfPresent(content, forKey: .content)
-        try container.encodeIfPresent(meta, forKey: .meta)
+        try container.encodePatch(content, forKey: .content)
+        try container.encodePatch(meta, forKey: .meta)
     }
 }

@@ -251,7 +251,7 @@ import Testing
             return
         }
         #expect(toolCall.toolCallId == ToolCallId(rawValue: "call-1"))
-        #expect(toolCall.status == .completed)
+        #expect(toolCall.status == .value(.completed))
 
         let server = try WireRoundTrip.expectLossless(MCPServer.self, """
             {"type":"stdio","name":"local","command":"/usr/bin/server","args":["--flag"]}

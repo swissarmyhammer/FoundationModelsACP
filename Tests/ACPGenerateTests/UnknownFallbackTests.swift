@@ -8,6 +8,12 @@ import Testing
 /// snake_case wire strings map to camelCase Swift cases, integer constants map
 /// to cases named from their `title`, and any value a newer peer sends routes
 /// to `unknown` instead of failing decode.
+///
+/// Generation below passes an explicit empty `GeneratorConfig()` rather than
+/// `SchemaGenerator`'s `.acpV2` default: `.acpV2` carries a
+/// `patchSemanticsFields` table validated against the schema being
+/// generated, and these inline fixtures do not declare the ACP v2 types that
+/// table names.
 @Suite struct UnknownFallbackEmissionTests {
     @Test func anyOfStringEnumWithOpenTailEmitsAnEnum() throws {
         // ACP v2 writes string enums as `anyOf` and closes them with an
@@ -29,7 +35,7 @@ import Testing
               }
             }
             """.utf8)
-        let files = try SchemaGenerator().generate(schemaJSON: schema)
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         let unions = try #require(files.first { $0.name == "Unions.generated.swift" }).contents
         #expect(unions.contains("public enum StopReason: Codable, Hashable, Sendable"))
         #expect(unions.contains("case endTurn"))
@@ -60,7 +66,7 @@ import Testing
               }
             }
             """.utf8)
-        let files = try SchemaGenerator().generate(schemaJSON: schema)
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         let unions = try #require(files.first { $0.name == "Unions.generated.swift" }).contents
         #expect(unions.contains("public enum ErrorCode: Codable, Hashable, Sendable"))
         #expect(unions.contains("case parseError"))
@@ -94,7 +100,7 @@ import Testing
             }
             """.utf8)
         #expect(throws: GeneratorError.self) {
-            _ = try SchemaGenerator().generate(schemaJSON: schema)
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
         }
     }
 

@@ -130,6 +130,16 @@ struct PropertyModel {
 
     /// The schema `description`, emitted as a doc comment.
     let documentation: String?
+
+    /// Whether the field has three-state patch semantics — omitted, `null`,
+    /// and a concrete value are distinct wire states — per
+    /// `GeneratorConfig.patchSemanticsFields`. Such a field emits as
+    /// `PatchField<Wrapped>` instead of a plain `Optional`, decodes through
+    /// the `decodePatchField`/`forgivingDecodePatchField`/
+    /// `forgivingDecodePatchArray` container helpers rather than
+    /// `decode(IfPresent)`/`forgivingDecode(IfPresent)`, and encodes through
+    /// `encodePatch` rather than `encode(IfPresent)`.
+    let hasPatchSemantics: Bool
 }
 
 /// The scalar JSON type a constant-union enum's values take.

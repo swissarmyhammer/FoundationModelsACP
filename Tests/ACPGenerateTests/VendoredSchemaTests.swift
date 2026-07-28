@@ -305,7 +305,7 @@ import FoundationModelsACP
                 "ResumeSessionRequest.additionalDirectories: [AbsolutePath]?",
                 "SessionInfo.cwd: AbsolutePath",
                 "SessionInfo.additionalDirectories: [AbsolutePath]?",
-                "TerminalUpdate.cwd: AbsolutePath?",
+                "TerminalUpdate.cwd: PatchField<AbsolutePath>",
                 "ToolCallLocation.path: AbsolutePath",
             ]
         )

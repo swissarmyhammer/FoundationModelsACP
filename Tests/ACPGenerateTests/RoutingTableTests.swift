@@ -10,8 +10,11 @@ import FoundationModelsACP
 /// `x-side`/`x-method` annotations — never hand-wired.
 @Suite struct RoutingTableEmissionTests {
     @Test func schemaOnlyGenerationOmitsTheMethodTable() throws {
+        // An explicit empty config: `.acpV2`'s default carries a
+        // `patchSemanticsFields` table validated against schema content,
+        // which this empty schema does not declare.
         let schema = #"{"$defs": {}}"#
-        let files = try SchemaGenerator().generate(schemaJSON: Data(schema.utf8))
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: Data(schema.utf8))
         #expect(!files.contains { $0.name == "MethodTable.generated.swift" })
     }
 
