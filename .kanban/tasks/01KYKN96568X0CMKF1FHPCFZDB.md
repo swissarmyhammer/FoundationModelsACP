@@ -132,8 +132,8 @@ comments:
 
     All 6 checklist items marked [x]. Task is done and green. Leaving in `doing` for `/review`.
   timestamp: 2026-07-28T18:29:40.412573+00:00
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: 8a80
 title: 'Emitter.swift: extract repeated non-indentation string-literal fragments into named constants'
 ---
 A review pass (2026-07-28 00:58) on ^1pfngj1's indentation sweep surfaced a separate, unrelated duplication category in Sources/ACPGenerateCore/Emitter.swift: several full-line string literals repeat verbatim across functions (not indentation, actual content), e.g. `\"public init(from decoder: any Decoder) throws {\"` (decoderInit, scalarEnumDeclaration, taggedUnionDeclaration, discriminatedUnionDeclaration), `\"public func encode(to encoder: any Encoder) throws {\"`, `\"var container = encoder.container(keyedBy: CodingKeys.self)\"`, `\"case unknown(String, JSONValue)\"`, and `\"try payload.encode(to: encoder)\"`.
