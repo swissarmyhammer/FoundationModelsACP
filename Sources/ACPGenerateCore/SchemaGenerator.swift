@@ -203,10 +203,12 @@ public struct SchemaGenerator: Sendable {
 
     /// The error detail for a union with no variants.
     ///
-    /// Shared by `classifyOneOf`'s empty-`oneOf` guard and by
-    /// `taggedUnionModel`'s and `objectValueUnionModel`'s own empty-after-
-    /// filtering guards, which a `oneOf` *or* an `anyOf` can reach — so the
-    /// wording names neither keyword specifically.
+    /// Shared by `classifyOneOf`'s empty-`oneOf` guard, `classifyAnyOf`'s
+    /// empty-`anyOf` guard and its object-branch empty-after-catch-all-
+    /// filtering guard, and by `taggedUnionModel`'s and
+    /// `objectValueUnionModel`'s own empty-after-filtering guards, which a
+    /// `oneOf` *or* an `anyOf` can reach — so the wording names neither
+    /// keyword specifically.
     private static let emptyUnionDetail = "empty union"
 
     /// The schema keyword for inclusive unions.
@@ -566,7 +568,10 @@ public struct SchemaGenerator: Sendable {
     ///   mirroring `classifyOneOf`'s empty-`oneOf` guard: an empty union of
     ///   either keyword permits nothing, so silently deferring it to raw
     ///   JSON would hide the same authoring error a thrown error catches for
-    ///   `oneOf`.
+    ///   `oneOf`. Also thrown for an object-typed `anyOf` whose variants are
+    ///   all `not`-guarded catch-alls: `modeled` is then empty, and without
+    ///   this guard `modeled.allSatisfy` would succeed vacuously and
+    ///   misclassify the union as `.objectTaggedUnion` instead.
     private func classifyAnyOf(
         name: String,
         members: [String: JSONValue],
@@ -583,6 +588,17 @@ public struct SchemaGenerator: Sendable {
         }
         let modeled = variants.filter { $0[Self.notKey] == nil }
         if members[Self.typeKey]?.stringValue == Self.objectTypeName, members[Self.propertiesKey] != nil {
+            // Symmetric with the `.taggedUnion` branch's own `!modeled.isEmpty`
+            // condition below: when every variant is `not`-guarded, `modeled`
+            // is empty and `allSatisfy` over it is vacuously true. Without this
+            // guard that would return `.objectTaggedUnion` for a union with no
+            // real payload variant at all, and only `objectTaggedUnionModel`'s
+            // downstream re-derivation (via `taggedUnionModel`'s own
+            // filtered-to-empty guard) would catch it — the same
+            // `emptyUnionDetail` error, reached less directly.
+            guard !modeled.isEmpty else {
+                throw GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail)
+            }
             if modeled.allSatisfy({ $0[Self.allOfKey] != nil }) {
                 return .objectTaggedUnion
             }

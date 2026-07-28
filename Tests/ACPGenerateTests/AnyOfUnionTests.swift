@@ -204,6 +204,62 @@ import Testing
         #expect(!unresolved.contains("typealias Change"))
     }
 
+    @Test func objectAnyOfWhoseOnlyVariantIsTheUnknownFallbackFailsAtClassification() throws {
+        // Every variant in `Change`'s `anyOf` is a genuine (non-contradictory)
+        // catch-all, so `modeled` — `classifyAnyOf`'s object-branch filter for
+        // payload-bearing candidates — is empty. `modeled.allSatisfy(...)`
+        // over that empty list is vacuously true, so without a guard the
+        // classifier would return `.objectTaggedUnion` for a union with no
+        // real payload variant at all: the same vacuous-truth shape the
+        // top-level empty-`anyOf` guard already closes, one branch lower.
+        //
+        // `corrupt`'s unresolvable `type: 1` makes the regression observable:
+        // if the vacuous-truth bug reappeared, classification would return
+        // `.objectTaggedUnion` and `objectTaggedUnionModel` would call
+        // `structModel` before ever re-deriving the union's variants —
+        // throwing `unhandled type` at `corrupt`, a real but misleading error
+        // that masks the actual defect. The classification-site guard must
+        // pre-empt that with the shared `emptyUnionDetail`, so this test would
+        // fail with the *wrong* detail if the guard were removed, not simply
+        // "any error".
+        let schema = Data(
+            """
+            {
+              "$defs": {
+                "Change": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "corrupt": { "type": 1 }
+                  },
+                  "required": ["id", "corrupt"],
+                  "anyOf": [
+                    {
+                      "title": "other",
+                      "type": "object",
+                      "properties": { "operation": { "type": "string" } },
+                      "required": ["operation"],
+                      "not": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": { "operation": { "type": "string", "const": "add" } },
+                            "required": ["operation"]
+                          }
+                        ]
+                      },
+                      "additionalProperties": true
+                    }
+                  ]
+                }
+              }
+            }
+            """.utf8)
+        #expect(throws: GeneratorError.unsupportedShape(context: "Change", detail: "empty union")) {
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
+        }
+    }
+
     @Test func objectValueUnionClassifiesAndEmits() throws {
         let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: Self.objectValueUnionSchema)
         let models = try #require(files.first { $0.name == "Models.generated.swift" }).contents
