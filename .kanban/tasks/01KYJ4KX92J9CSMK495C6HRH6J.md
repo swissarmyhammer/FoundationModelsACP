@@ -35,8 +35,8 @@ comments:
 
     Task is done and green. Leaving in doing per the implement skill for /review to pick up.
   timestamp: 2026-07-28T12:55:47.028457+00:00
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8880'
 title: VendoredSchemaTests sort-order check doesn't account for knownAcronyms renames
 ---
 `declarationsAreEmittedInSortedSchemaNameOrder` in `Tests/ACPGenerateTests/VendoredSchemaTests.swift` reconstructs each emitted declaration's "original schema spelling" via a reverse map built only from `config.typeRenames` (`Dictionary(uniqueKeysWithValues: Self.set.config.typeRenames.map { ($1, $0) })`). It has no knowledge of `GeneratorConfig.knownAcronyms` / `SchemaGenerator.applyKnownAcronymCasing(to:)`, added on `^qzht036` to uniformly uppercase acronym words (e.g. `McpServer` -> `MCPServer`) in emitted type names.
