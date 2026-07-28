@@ -635,33 +635,64 @@ public struct SchemaGenerator: Sendable {
         }
         let modeled = variants.filter { $0[Self.notKey] == nil }
         if members[Self.typeKey]?.stringValue == Self.objectTypeName, members[Self.propertiesKey] != nil {
-            // Symmetric with this function's own `.taggedUnion`-returning
-            // arity condition below (still a raw `!modeled.isEmpty`, out of
-            // scope here): when every variant is `not`-guarded, `modeled`
-            // is empty and `allSatisfy` over it is vacuously true. Without this
-            // check that would return `.objectTaggedUnion` for a union with no
-            // real payload variant at all, and only `objectTaggedUnionModel`'s
-            // downstream re-derivation (via `taggedUnionModel`'s own
-            // filtered-to-empty guard) would catch it — the same
-            // `emptyUnionDetail` error, reached less directly.
-            try validateNonEmptyUnion(modeled, name: name)
-            if modeled.allSatisfy({ $0[Self.allOfKey] != nil }) {
-                return .objectTaggedUnion
-            }
-            guard !modeled.contains(where: { $0[Self.allOfKey] != nil }) else {
-                return .deferredUnion(keyword: Self.anyOfKey)
-            }
-            return .objectValueUnion
+            return try classifyObjectTypedAnyOf(name: name, modeled: modeled)
         }
-        // This arity test is why `classifyAnyOf` takes the *raw* variant list
-        // rather than `unionVariants(of:)`. It is the only line here that
-        // depends on the unfiltered count: `modeled.count < variants.count`
-        // asks "was a catch-all present?", and over a pre-filtered list the
-        // two counts are always equal, so no definition would ever reach
-        // `.taggedUnion` — 11 of them do today, the inventory
-        // `VendoredSchemaTests.everyTaggedUnionCarriesAPayloadBearingFallback`
-        // pins. The fallback guard above is filter-invariant and is *not* the
-        // reason; do not cite it as one.
+        return detectAnyOfDiscriminatedUnion(variants: variants, modeled: modeled)
+    }
+
+    /// Classifies the object-typed branch of an `anyOf` union — a definition
+    /// whose own `type` is `object` and that also carries `anyOf` variants,
+    /// as opposed to a bare `anyOf` union with no sibling object shape.
+    ///
+    /// - Parameters:
+    ///   - name: The definition's schema name.
+    ///   - modeled: `variants` with `not`-guarded catch-alls filtered out.
+    /// - Returns: `.objectTaggedUnion` when every modeled variant flattens an
+    ///   `allOf` `$ref` payload, `.objectValueUnion` when none do, or
+    ///   `.deferredUnion` when the two are mixed (no emission model covers
+    ///   that combination).
+    /// - Throws: `GeneratorError.unsupportedShape` when every variant is a
+    ///   `not`-guarded catch-all: `modeled` is then empty, and without this
+    ///   check `modeled.allSatisfy` would succeed vacuously and misclassify
+    ///   the union as `.objectTaggedUnion` instead. Symmetric with
+    ///   `detectAnyOfDiscriminatedUnion`'s own `!modeled.isEmpty` condition:
+    ///   without this guard, only `objectTaggedUnionModel`'s downstream
+    ///   re-derivation (via `taggedUnionModel`'s own filtered-to-empty guard)
+    ///   would catch it — the same `emptyUnionDetail` error, reached less
+    ///   directly.
+    private func classifyObjectTypedAnyOf(name: String, modeled: [JSONValue]) throws -> DefinitionKind {
+        try validateNonEmptyUnion(modeled, name: name)
+        if modeled.allSatisfy({ $0[Self.allOfKey] != nil }) {
+            return .objectTaggedUnion
+        }
+        guard !modeled.contains(where: { $0[Self.allOfKey] != nil }) else {
+            return .deferredUnion(keyword: Self.anyOfKey)
+        }
+        return .objectValueUnion
+    }
+
+    /// Detects whether a non-object-typed `anyOf` union is a tagged union
+    /// (a genuine catch-all fallback beside `const`-discriminated payload
+    /// variants), a plain discriminated union, or neither.
+    ///
+    /// - Parameters:
+    ///   - variants: The raw, unfiltered `anyOf` entries.
+    ///   - modeled: `variants` with `not`-guarded catch-alls filtered out.
+    /// - Returns: `.taggedUnion` when a catch-all was present and every
+    ///   remaining variant pins a `const` discriminator, `.discriminatedUnion`
+    ///   when any variant pins a `const` without a catch-all, or
+    ///   `.deferredUnion` otherwise.
+    ///
+    /// This arity test is why `classifyAnyOf` passes the *raw* variant list
+    /// here rather than `unionVariants(of:)`. It is the only line in this
+    /// function that depends on the unfiltered count: `modeled.count <
+    /// variants.count` asks "was a catch-all present?", and over a
+    /// pre-filtered list the two counts are always equal, so no definition
+    /// would ever reach `.taggedUnion` — 11 of them do today, the inventory
+    /// `VendoredSchemaTests.everyTaggedUnionCarriesAPayloadBearingFallback`
+    /// pins. `classifyAnyOf`'s fallback guard is filter-invariant and is
+    /// *not* the reason; do not cite it as one.
+    private func detectAnyOfDiscriminatedUnion(variants: [JSONValue], modeled: [JSONValue]) -> DefinitionKind {
         if modeled.count < variants.count, !modeled.isEmpty, modeled.allSatisfy(hasConstDiscriminator) {
             return .taggedUnion
         }
