@@ -112,6 +112,21 @@ public actor Connection {
     /// literal.
     private static let jsonrpcKey = "jsonrpc"
 
+    /// The JSON-RPC envelope's `id` member key, shared by every read site
+    /// that extracts it and every write site that stamps it, so this file
+    /// states the field name once rather than repeating the literal.
+    private static let idKey = "id"
+
+    /// The JSON-RPC envelope's `method` member key, shared by every read
+    /// site that extracts it and every write site that stamps it, so this
+    /// file states the field name once rather than repeating the literal.
+    private static let methodKey = "method"
+
+    /// The JSON-RPC envelope's `params` member key, shared by every read
+    /// site that extracts it and every write site that stamps it, so this
+    /// file states the field name once rather than repeating the literal.
+    private static let paramsKey = "params"
+
     /// Prefix applied to every diagnostic this connection logs.
     private static let logPrefix = "Connection: "
 
@@ -248,10 +263,10 @@ public actor Connection {
         nextRequestID += 1
         var envelope: [String: JSONValue] = [
             Self.jsonrpcKey: Self.jsonrpcVersion,
-            "id": id,
-            "method": .string(method),
+            Self.idKey: id,
+            Self.methodKey: .string(method),
         ]
-        envelope["params"] = params
+        envelope[Self.paramsKey] = params
         let frame = try NDJSONCodec.encode(JSONValue.object(envelope))
         let limit = timeout ?? requestTimeout
 
@@ -291,9 +306,9 @@ public actor Connection {
         guard !isClosed else { throw ConnectionError.closed }
         var envelope: [String: JSONValue] = [
             Self.jsonrpcKey: Self.jsonrpcVersion,
-            "method": .string(method),
+            Self.methodKey: .string(method),
         ]
-        envelope["params"] = params
+        envelope[Self.paramsKey] = params
         try await transport.write(NDJSONCodec.encode(JSONValue.object(envelope)))
     }
 
@@ -375,7 +390,7 @@ public actor Connection {
     ///   response (no `result` or `error` member).
     private func owesResponse(_ item: JSONValue) -> Bool {
         guard case .object(let fields) = item else { return false }
-        return fields["id"] != nil && fields[Self.resultKey] == nil && fields[Self.errorKey] == nil
+        return fields[Self.idKey] != nil && fields[Self.resultKey] == nil && fields[Self.errorKey] == nil
     }
 
     /// Routes one envelope by kind: request, notification, response,
@@ -391,7 +406,7 @@ public actor Connection {
             log("dropping non-object message")
             return
         }
-        let id = fields["id"]
+        let id = fields[Self.idKey]
         // The version check mirrors the write side, which stamps every
         // outgoing envelope with the version constant.
         guard fields[Self.jsonrpcKey, default: .null] == Self.jsonrpcVersion else {
@@ -408,15 +423,15 @@ public actor Connection {
             }
             return
         }
-        if case .string(let method) = fields["method", default: .null] {
+        if case .string(let method) = fields[Self.methodKey, default: .null] {
             if id == nil, method == Self.cancelRequestMethod {
-                handleCancelRequest(params: fields["params"])
+                handleCancelRequest(params: fields[Self.paramsKey])
                 return
             }
             if let id {
-                await dispatchRequest(id: id, method: method, params: fields["params"], batchToken: batchToken)
+                await dispatchRequest(id: id, method: method, params: fields[Self.paramsKey], batchToken: batchToken)
             } else {
-                await notificationHandler?(method, fields["params"])
+                await notificationHandler?(method, fields[Self.paramsKey])
             }
             return
         }
@@ -563,7 +578,7 @@ public actor Connection {
     ///   - batchToken: The enclosing batch's collector, or `nil` to write a
     ///     standalone frame.
     private func respond(id: JSONValue, outcome: Result<JSONValue, RequestError>, batchToken: Int?) async {
-        var envelope: [String: JSONValue] = [Self.jsonrpcKey: Self.jsonrpcVersion, "id": id]
+        var envelope: [String: JSONValue] = [Self.jsonrpcKey: Self.jsonrpcVersion, Self.idKey: id]
         switch outcome {
         case .success(let result):
             envelope[Self.resultKey] = result
@@ -610,7 +625,7 @@ public actor Connection {
     private func respondParseError() async {
         let envelope: [String: JSONValue] = [
             Self.jsonrpcKey: Self.jsonrpcVersion,
-            "id": .null,
+            Self.idKey: .null,
             Self.errorKey: RequestError.parseError.wireValue,
         ]
         await writeEncoded(.object(envelope), logMessage: "failed to write parse-error response")
@@ -725,8 +740,8 @@ public actor Connection {
         guard !isClosed else { return }
         let notification = JSONValue.object([
             Self.jsonrpcKey: Self.jsonrpcVersion,
-            "method": .string(Self.cancelRequestMethod),
-            "params": .object([Self.requestIdKey: id]),
+            Self.methodKey: .string(Self.cancelRequestMethod),
+            Self.paramsKey: .object([Self.requestIdKey: id]),
         ])
         await writeEncoded(notification, logMessage: "failed to send $/cancel_request")
     }
