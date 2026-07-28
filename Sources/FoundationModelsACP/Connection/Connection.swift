@@ -106,6 +106,12 @@ public actor Connection {
     /// on every inbound one.
     private static let jsonrpcVersion: JSONValue = .string("2.0")
 
+    /// The JSON-RPC envelope's `jsonrpc` member key, shared by every read
+    /// site that checks the version and every write site that stamps it, so
+    /// this file states the field name once rather than repeating the
+    /// literal.
+    private static let jsonrpcKey = "jsonrpc"
+
     /// Prefix applied to every diagnostic this connection logs.
     private static let logPrefix = "Connection: "
 
@@ -123,6 +129,11 @@ public actor Connection {
     /// that checks for it and every write site that sets it, so this file
     /// states the field name once rather than repeating the literal.
     private static let errorKey = "error"
+
+    /// The JSON-RPC envelope's `result` member key, shared by every read
+    /// site that checks for it and every write site that sets it, so this
+    /// file states the field name once rather than repeating the literal.
+    private static let resultKey = "result"
 
     /// The `$/cancel_request` notification's `requestId` field key, shared by
     /// the read side (`handleCancelRequest`) and the write side
@@ -236,7 +247,7 @@ public actor Connection {
         let id: RequestId = .number(Double(nextRequestID))
         nextRequestID += 1
         var envelope: [String: JSONValue] = [
-            "jsonrpc": Self.jsonrpcVersion,
+            Self.jsonrpcKey: Self.jsonrpcVersion,
             "id": id,
             "method": .string(method),
         ]
@@ -279,7 +290,7 @@ public actor Connection {
     public func notify(method: String, params: JSONValue? = nil) async throws {
         guard !isClosed else { throw ConnectionError.closed }
         var envelope: [String: JSONValue] = [
-            "jsonrpc": Self.jsonrpcVersion,
+            Self.jsonrpcKey: Self.jsonrpcVersion,
             "method": .string(method),
         ]
         envelope["params"] = params
@@ -364,7 +375,7 @@ public actor Connection {
     ///   response (no `result` or `error` member).
     private func owesResponse(_ item: JSONValue) -> Bool {
         guard case .object(let fields) = item else { return false }
-        return fields["id"] != nil && fields["result"] == nil && fields[Self.errorKey] == nil
+        return fields["id"] != nil && fields[Self.resultKey] == nil && fields[Self.errorKey] == nil
     }
 
     /// Routes one envelope by kind: request, notification, response,
@@ -383,9 +394,9 @@ public actor Connection {
         let id = fields["id"]
         // The version check mirrors the write side, which stamps every
         // outgoing envelope with the version constant.
-        guard fields["jsonrpc", default: .null] == Self.jsonrpcVersion else {
+        guard fields[Self.jsonrpcKey, default: .null] == Self.jsonrpcVersion else {
             log("rejecting message without jsonrpc 2.0 version")
-            if let id, fields["result"] == nil, fields[Self.errorKey] == nil {
+            if let id, fields[Self.resultKey] == nil, fields[Self.errorKey] == nil {
                 // Owed a response (request-shaped, or a detectable stand-in).
                 await respond(id: id, outcome: .failure(.invalidRequest), batchToken: batchToken)
             } else if let id {
@@ -409,7 +420,7 @@ public actor Connection {
             }
             return
         }
-        if let id, fields["result"] != nil || fields[Self.errorKey] != nil {
+        if let id, fields[Self.resultKey] != nil || fields[Self.errorKey] != nil {
             resolve(id: id, fields: fields)
             return
         }
@@ -552,10 +563,10 @@ public actor Connection {
     ///   - batchToken: The enclosing batch's collector, or `nil` to write a
     ///     standalone frame.
     private func respond(id: JSONValue, outcome: Result<JSONValue, RequestError>, batchToken: Int?) async {
-        var envelope: [String: JSONValue] = ["jsonrpc": Self.jsonrpcVersion, "id": id]
+        var envelope: [String: JSONValue] = [Self.jsonrpcKey: Self.jsonrpcVersion, "id": id]
         switch outcome {
         case .success(let result):
-            envelope["result"] = result
+            envelope[Self.resultKey] = result
         case .failure(let error):
             envelope[Self.errorKey] = error.wireValue
         }
@@ -598,7 +609,7 @@ public actor Connection {
     /// null` — there is no request id to echo, since the line never parsed.
     private func respondParseError() async {
         let envelope: [String: JSONValue] = [
-            "jsonrpc": Self.jsonrpcVersion,
+            Self.jsonrpcKey: Self.jsonrpcVersion,
             "id": .null,
             Self.errorKey: RequestError.parseError.wireValue,
         ]
@@ -621,7 +632,7 @@ public actor Connection {
         if let error = fields[Self.errorKey], error != .null {
             entry.continuation.resume(throwing: RequestError(wire: error))
         } else {
-            entry.continuation.resume(returning: fields["result", default: .null])
+            entry.continuation.resume(returning: fields[Self.resultKey, default: .null])
         }
     }
 
@@ -713,7 +724,7 @@ public actor Connection {
         guard fail(id: id, with: CancellationError()) else { return }
         guard !isClosed else { return }
         let notification = JSONValue.object([
-            "jsonrpc": Self.jsonrpcVersion,
+            Self.jsonrpcKey: Self.jsonrpcVersion,
             "method": .string(Self.cancelRequestMethod),
             "params": .object([Self.requestIdKey: id]),
         ])
