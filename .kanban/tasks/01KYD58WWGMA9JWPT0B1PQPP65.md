@@ -89,6 +89,17 @@ comments:
 
     Task left in `review` (not moved to `doing`, not moved to `done`) since it is stuck on the identifier-casing contradiction pending human action on the validator rule.
   timestamp: 2026-07-28T02:30:07.808065+00:00
+- actor: claude-code
+  id: 01kyk93ay2dzthtaewxbwqk19h
+  text: |-
+    Marking this task STUCK per the /finish orchestration process, not closing it.
+
+    Reason: the local review engine issued genuinely contradictory findings on the same identifier (Connection.swift's request-id counter) across two consecutive rounds — round 1 (2026-07-27 21:01) demanded nextRequestID -> nextRequestId citing the project's "…Id exception is only for ACP-generated types" rule; round 2 (2026-07-27 21:19) demanded the exact opposite, nextRequestId -> nextRequestID, citing the identical rule. Both cannot be satisfied. Per the finish skill's contradiction-handling rule, the orchestrator does not pick a winner and does not touch the identifier again — a human needs to fix the underlying casing validator rule (settle on one consistent convention for non-ACP identifiers, all-lowercase id or all-uppercase ID) before this identifier is touched again.
+
+    The other legitimate finding from round 2 (dispatchRequest nesting) was fixed, tested, stress-tested for the ordering-race guarantee, and committed (SHA ea1e252).
+
+    Left in review, unresolved, for a human to fix the review-validator casing rule and re-run /review on this task once fixed. This task is being skipped for now in the current /finish batch run.
+  timestamp: 2026-07-28T02:33:12.386653+00:00
 depends_on:
 - 01KYD58WV07Q982G94JHT1SH5G
 position_column: review
