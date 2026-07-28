@@ -13,35 +13,29 @@ comments:
 
     Verification: swift build --build-tests clean; swift test -> 293 tests / 28 suites / 0 failures / 0 warnings (198 in FoundationModelsACPTests + 95 in ACPGenerateTests), matching stated baseline exactly; swift package --allow-writing-to-package-directory generate-acp -> "nothing regenerated" (byte-identical). No swift format run. Diff is scoped to Sources/ACPGenerateCore/SchemaGenerator.swift only.
   timestamp: 2026-07-28T19:07:44.773652+00:00
+- actor: claude-code
+  id: 01kyn4d1fhrq8xg2z6a1g0ydsw
+  text: |-
+    Worked the one unchecked review-findings item: extracted the verbatim-duplicated `guard !modeled.isEmpty else { throw GeneratorError.unsupportedShape(context: name, detail: emptyUnionDetail) }` block shared by classifyOneOf and classifyAnyOf.
+
+    Decision on naming/reuse (per the task's explicit either/or): rather than adding a new differently-named helper (e.g. validateModeledVariantsNotEmpty) with a byte-identical body, I reused the existing validateNonEmptyUnion(_:name:) helper at the second call site too, since the check (empty-array guard, same thrown error) is literally identical regardless of which array (raw variants vs. the modeled/payload-bearing subset) is passed in. Both classifyOneOf and classifyAnyOf now call `try validateNonEmptyUnion(modeled, name: name)` instead of the duplicated inline guard. Expanded validateNonEmptyUnion's docstring to document both use cases (raw-variants emptiness at classification entry; modeled-subset emptiness after fallback filtering).
+
+    Ran two rounds of the double-check adversarial agent (bounded per really-done):
+    - Round 1: found a factual overclaim in my first docstring draft ("all four call sites previously duplicated this inline" - false, only 2 of 4 did; the other 2 already called the helper). Fixed the wording.
+    - Round 1 also flagged a comment ("Symmetric with the `.taggedUnion` branch's own `!modeled.isEmpty` condition below") as a stale reference to classifyOneOf. I verified this was a misreading - it self-references classifyAnyOf's own later arity-check branch (line ~665, untouched, still a literal `!modeled.isEmpty`), not classifyOneOf. Reworded anyway for unambiguous clarity.
+    - Round 2: found two more pre-existing doc comments (emptyUnionDetail's docstring, and classifyOneOf's own docstring) still calling the now-converted-to-a-function-call check a "guard" - inconsistent with the "guard"->"check" wording I'd already applied elsewhere in the same diff. Fixed both for consistency.
+
+    Final verification (all fresh, after the last doc fix):
+    - `swift build --build-tests`: clean, 0 warnings.
+    - `swift test`: 198 tests/16 suites + 95 tests/12 suites = 293 tests / 28 suites / 0 failures / 0 warnings - matches the stated baseline exactly.
+    - `swift package --allow-writing-to-package-directory generate-acp`: "nothing regenerated" - byte-identical codegen gate confirmed.
+    - `mcp__sah__diagnostics check working`: 0 errors, 0 warnings.
+    - Diff scoped entirely to Sources/ACPGenerateCore/SchemaGenerator.swift (docstrings + the two guard->helper-call replacements); no swift format run; no markdown tables in this comment.
+
+    Leaving in doing for review.
+  timestamp: 2026-07-28T19:49:36.369299+00:00
 position_column: doing
 position_ordinal: '80'
 title: classifyOneOf has the same latent vacuous-classification gap classifyAnyOf's object-branch fix just closed
 ---
-## Why this card exists
-
-Surfaced by the adversarial double-check on task 01KYKCX3XZWEP3PZ77826RC4A5 (^26rc4a5), which added a `!modeled.isEmpty` guard to `classifyAnyOf`'s object branch so an object-typed `anyOf` whose variants are all `not`-guarded catch-alls throws directly at the classification site instead of relying on a downstream re-derivation to catch it.
-
-## The gap
-
-`classifyOneOf` (in `Sources/ACPGenerateCore/SchemaGenerator.swift`) has the same shape, once `fallbacksAreGenuineCatchAlls` passes:
-
-```swift
-guard fallbacksAreGenuineCatchAlls(of: variants) else {
-    return .deferredUnion(keyword: Self.oneOfKey)
-}
-return .taggedUnion
-```
-
-It unconditionally returns `.taggedUnion` without ever checking whether a `modeled`-equivalent (payload-bearing) subset is non-empty. If every variant of a `oneOf` were a genuine `not`-guarded catch-all, classification would still return `.taggedUnion`, and only `taggedUnionModel`'s own `guard let discriminator else { throw ... }` would catch it downstream — the exact "reached less directly" pattern the sibling task just closed for `anyOf`'s object branch.
-
-This is already covered today by an *existing* test — `TaggedUnionTests.oneOfWhoseOnlyVariantIsTheUnknownFallbackFailsOnTheEmptyUnionDetail` — which pins the downstream throw. So this is not urgent and not silently broken; it is the same directness/proximate-cause improvement, not yet applied to `classifyOneOf`.
-
-## Suggested fix
-
-Mirror `classifyAnyOf`'s object-branch fix: compute the modeled (non-`not`-guarded) variant set in `classifyOneOf` and guard on `!modeled.isEmpty` before returning `.taggedUnion`, throwing `GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail)` directly when empty.
-
-## Acceptance criteria
-
-- [ ] `classifyOneOf` throws `GeneratorError.unsupportedShape(detail: emptyUnionDetail)` directly when every `oneOf` variant is a genuine catch-all, rather than relying on `taggedUnionModel`'s downstream re-derivation.
-- [ ] Existing test `TaggedUnionTests.oneOfWhoseOnlyVariantIsTheUnknownFallbackFailsOnTheEmptyUnionDetail` still passes (same final error, now thrown more directly) — consider adding a compound-schema regression test analogous to `AnyOfUnionTests.objectAnyOfWhoseOnlyVariantIsTheUnknownFallbackFailsAtClassification`, which uses a deliberately-broken sibling property to make the fix's directness observable/load-bearing rather than a no-op pinning test.
-- [ ] `swift test` green, `swift package generate-acp` byte-identical regeneration.
+## Why this card exists\n\nSurfaced by the adversarial double-check on task 01KYKCX3XZWEP3PZ77826RC4A5 (^26rc4a5), which added a `!modeled.isEmpty` guard to `classifyAnyOf`'s object branch so an object-typed `anyOf` whose variants are all `not`-guarded catch-alls throws directly at the classification site instead of relying on a downstream re-derivation to catch it.\n\n## The gap\n\n`classifyOneOf` (in `Sources/ACPGenerateCore/SchemaGenerator.swift`) has the same shape, once `fallbacksAreGenuineCatchAlls` passes:\n\n```swift\nguard fallbacksAreGenuineCatchAlls(of: variants) else {\n    return .deferredUnion(keyword: Self.oneOfKey)\n}\nreturn .taggedUnion\n```\n\nIt unconditionally returns `.taggedUnion` without ever checking whether a `modeled`-equivalent (payload-bearing) subset is non-empty. If every variant of a `oneOf` were a genuine `not`-guarded catch-all, classification would still return `.taggedUnion`, and only `taggedUnionModel`'s own `guard let discriminator else { throw ... }` would catch it downstream — the exact \"reached less directly\" pattern the sibling task just closed for `anyOf`'s object branch.\n\nThis is already covered today by an *existing* test — `TaggedUnionTests.oneOfWhoseOnlyVariantIsTheUnknownFallbackFailsOnTheEmptyUnionDetail` — which pins the downstream throw. So this is not urgent and not silently broken; it is the same directness/proximate-cause improvement, not yet applied to `classifyOneOf`.\n\n## Suggested fix\n\nMirror `classifyAnyOf`'s object-branch fix: compute the modeled (non-`not`-guarded) variant set in `classifyOneOf` and guard on `!modeled.isEmpty` before returning `.taggedUnion`, throwing `GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail)` directly when empty.\n\n## Acceptance criteria\n\n- [ ] `classifyOneOf` throws `GeneratorError.unsupportedShape(detail: emptyUnionDetail)` directly when every `oneOf` variant is a genuine catch-all, rather than relying on `taggedUnionModel`'s downstream re-derivation.\n- [ ] Existing test `TaggedUnionTests.oneOfWhoseOnlyVariantIsTheUnknownFallbackFailsOnTheEmptyUnionDetail` still passes (same final error, now thrown more directly) — consider adding a compound-schema regression test analogous to `AnyOfUnionTests.objectAnyOfWhoseOnlyVariantIsTheUnknownFallbackFailsAtClassification`, which uses a deliberately-broken sibling property to make the fix's directness observable/load-bearing rather than a no-op pinning test.\n- [ ] `swift test` green, `swift package generate-acp` byte-identical regeneration.\n\n## Review Findings (2026-07-28 14:18)\n\n- [x] `Sources/ACPGenerateCore/SchemaGenerator.swift:383` — The guard checking `!modeled.isEmpty` and throwing `emptyUnionDetail` error is verbatim duplicated in both `classifyOneOf` (line 383–385) and `classifyAnyOf` (line 525–527), creating maintenance burden: fixes to the condition or error message must be applied in two places. Extract a shared helper function `validateModeledVariantsNotEmpty(_ modeled: [JSONValue], name: String) throws` and call it in both `classifyOneOf` and `classifyAnyOf` immediately after deriving the `modeled` variable. This mirrors the existing `validateNonEmptyUnion` extraction pattern.\n\n  Resolved by reusing the existing `validateNonEmptyUnion(_:name:)` helper at both `modeled` call sites (rather than adding a new, differently-named, byte-identical helper) — both `classifyOneOf` and `classifyAnyOf` now call `try validateNonEmptyUnion(modeled, name: name)`. Docstrings updated accordingly. Verified: `swift build --build-tests` clean; `swift test` 293 tests/28 suites/0 failures/0 warnings; `swift package generate-acp` byte-identical (\"nothing regenerated\"). See task comments for the two adversarial double-check rounds and the doc-wording fixes each produced.\n

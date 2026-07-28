@@ -218,12 +218,12 @@ public struct SchemaGenerator: Sendable {
 
     /// The error detail for a union with no variants.
     ///
-    /// Shared by `classifyOneOf`'s empty-`oneOf` guard, `classifyAnyOf`'s
-    /// empty-`anyOf` guard and its object-branch empty-after-catch-all-
-    /// filtering guard, and by `taggedUnionModel`'s and
-    /// `objectValueUnionModel`'s own empty-after-filtering guards, which a
-    /// `oneOf` *or* an `anyOf` can reach — so the wording names neither
-    /// keyword specifically.
+    /// Shared by `classifyOneOf`'s empty-`oneOf` check, `classifyAnyOf`'s
+    /// empty-`anyOf` check and its object-branch empty-after-catch-all-
+    /// filtering check (both routed through `validateNonEmptyUnion`), and by
+    /// `taggedUnionModel`'s and `objectValueUnionModel`'s own
+    /// empty-after-filtering guards, which a `oneOf` *or* an `anyOf` can
+    /// reach — so the wording names neither keyword specifically.
     private static let emptyUnionDetail = "empty union"
 
     /// The schema keyword for inclusive unions.
@@ -467,19 +467,29 @@ public struct SchemaGenerator: Sendable {
 
     // MARK: - Union models
 
-    /// Validates that a union declares at least one variant.
+    /// Validates that a candidate variant list is non-empty, throwing the
+    /// shared `emptyUnionDetail` error otherwise.
     ///
-    /// Shared by `classifyOneOf` and `classifyAnyOf`, whose empty-union
-    /// guards were previously two copies of the same three lines — extracted
-    /// here so the condition and thrown error can only drift in one place.
+    /// Shared by `classifyOneOf` and `classifyAnyOf`, each of which calls
+    /// this twice: once on the raw `variants` list, guarding against a
+    /// literally empty `oneOf`/`anyOf`; and again — after confirming any
+    /// `not`-guarded fallback is a genuine catch-all — on `modeled`, the
+    /// subset left once those catch-alls are filtered out, guarding against
+    /// a union whose every variant turned out to be one, which would
+    /// otherwise still classify as `.taggedUnion`/`.objectTaggedUnion` with
+    /// no real payload variant at all. The two `variants` call sites already
+    /// shared this helper; the two `modeled` call sites previously
+    /// duplicated this same three-line check inline and are extracted here
+    /// too, so the condition and thrown error can only drift in one place.
     ///
     /// - Parameters:
-    ///   - variants: The union's variant fragments.
+    ///   - variants: The candidate variant list — either the union's raw
+    ///     variants, or the modeled (non-`not`-guarded) subset of them.
     ///   - name: The definition's schema name, for the thrown error's
     ///     context.
     /// - Throws: `GeneratorError.unsupportedShape` when `variants` is empty,
-    ///   so an empty `oneOf` or `anyOf` fails loudly instead of silently
-    ///   deferring to raw JSON.
+    ///   so an empty or vacuously-catch-all-only union fails loudly instead
+    ///   of silently deferring to raw JSON.
     private func validateNonEmptyUnion(_ variants: [JSONValue], name: String) throws {
         guard !variants.isEmpty else {
             throw GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail)
@@ -500,9 +510,9 @@ public struct SchemaGenerator: Sendable {
     /// - Throws: `GeneratorError.unsupportedShape` for an empty or
     ///   mixed-shape `oneOf`, so unknown constructs fail loudly. Also thrown
     ///   when every variant is a `not`-guarded catch-all: `modeled` is then
-    ///   empty, and without this guard classification would still return
+    ///   empty, and without this check classification would still return
     ///   `.taggedUnion` for a union with no real payload variant at all,
-    ///   mirroring `classifyAnyOf`'s object-branch guard.
+    ///   mirroring `classifyAnyOf`'s object-branch check.
     private func classifyOneOf(name: String, variants: [JSONValue]) throws -> DefinitionKind {
         try validateNonEmptyUnion(variants, name: name)
         if let rawKind = Self.agreedEnumRawKind(of: variants) {
@@ -525,25 +535,23 @@ public struct SchemaGenerator: Sendable {
             return .deferredUnion(keyword: Self.oneOfKey)
         }
         let modeled = variants.filter { $0[Self.notKey] == nil }
-        // Symmetric with `classifyAnyOf`'s object-branch `!modeled.isEmpty`
-        // guard: when every variant is `not`-guarded, `modeled` is empty.
-        // Without this guard, classification would still return
-        // `.taggedUnion` for a union with no real payload variant at all,
-        // and only `taggedUnionModel`'s own filtered-to-empty
-        // `guard let discriminator else` would catch it — the same
-        // `emptyUnionDetail` error, reached less directly. Unlike the
-        // `anyOf` object branch (whose `.objectTaggedUnion` path calls
+        // Symmetric with `classifyAnyOf`'s object-branch call to
+        // `validateNonEmptyUnion(modeled, name:)`: when every variant is
+        // `not`-guarded, `modeled` is empty. Without this check,
+        // classification would still return `.taggedUnion` for a union with
+        // no real payload variant at all, and only `taggedUnionModel`'s own
+        // filtered-to-empty `guard let discriminator else` would catch it —
+        // the same `emptyUnionDetail` error, reached less directly. Unlike
+        // the `anyOf` object branch (whose `.objectTaggedUnion` path calls
         // `structModel` before ever re-deriving the union, so bypassing its
-        // guard can surface an unrelated, misleading error first),
+        // check can surface an unrelated, misleading error first),
         // `.taggedUnion` maps straight to `taggedUnionModel` with no other
         // processing in between: that function's own guard throws this
-        // identical `context`/`detail` pair regardless, so this guard cannot
+        // identical `context`/`detail` pair regardless, so this check cannot
         // be pinned by an externally observable "wrong error" test the way
         // the `anyOf` fix could — it is a directness/proximate-cause
         // improvement only, confirmed by mutation testing.
-        guard !modeled.isEmpty else {
-            throw GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail)
-        }
+        try validateNonEmptyUnion(modeled, name: name)
         return .taggedUnion
     }
 
@@ -627,17 +635,16 @@ public struct SchemaGenerator: Sendable {
         }
         let modeled = variants.filter { $0[Self.notKey] == nil }
         if members[Self.typeKey]?.stringValue == Self.objectTypeName, members[Self.propertiesKey] != nil {
-            // Symmetric with the `.taggedUnion` branch's own `!modeled.isEmpty`
-            // condition below: when every variant is `not`-guarded, `modeled`
+            // Symmetric with this function's own `.taggedUnion`-returning
+            // arity condition below (still a raw `!modeled.isEmpty`, out of
+            // scope here): when every variant is `not`-guarded, `modeled`
             // is empty and `allSatisfy` over it is vacuously true. Without this
-            // guard that would return `.objectTaggedUnion` for a union with no
+            // check that would return `.objectTaggedUnion` for a union with no
             // real payload variant at all, and only `objectTaggedUnionModel`'s
             // downstream re-derivation (via `taggedUnionModel`'s own
             // filtered-to-empty guard) would catch it — the same
             // `emptyUnionDetail` error, reached less directly.
-            guard !modeled.isEmpty else {
-                throw GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail)
-            }
+            try validateNonEmptyUnion(modeled, name: name)
             if modeled.allSatisfy({ $0[Self.allOfKey] != nil }) {
                 return .objectTaggedUnion
             }
