@@ -372,6 +372,30 @@ private let fourCategoryConfigOptions: [SessionConfigOption] = [
     ),
 ]
 
+/// A single select-type configuration option, exercising the `.select` /
+/// `SessionConfigSelect` branch that `fourCategoryConfigOptions` and
+/// `primaryConfigOption` — both boolean — never reach.
+///
+/// `options` is built as the schema's ungrouped-array shape: an array of
+/// `SessionConfigSelectOption`-equivalent objects. `SessionConfigSelectOptions`
+/// stays a `JSONValue` placeholder (see M1's comment on this card) because
+/// it is an untagged union with no discriminator to key a Swift enum on, so
+/// there is no typed constructor to reach for here.
+private let selectConfigOption = SessionConfigOption(
+    configId: SessionConfigId(rawValue: "select-option"),
+    name: "Select Option",
+    category: .model,
+    type: .select(
+        SessionConfigSelect(
+            currentValue: SessionConfigValueId(rawValue: "slow"),
+            options: .array([
+                .object(["name": .string("Fast"), "value": .string("fast")]),
+                .object(["name": .string("Slow"), "value": .string("slow")]),
+            ])
+        )
+    )
+)
+
 // MARK: - Tests
 
 /// `session/new` / `list` / `resume` / `close` / `delete`, real session
@@ -692,6 +716,55 @@ private let fourCategoryConfigOptions: [SessionConfigOption] = [
             }
             #expect(configUpdate.configOptions == response.configOptions)
         }
+
+        await agentConn.close()
+        await client.close()
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func setSessionConfigOptionRoundTripsAndEmitsConfigOptionUpdateForTheSelectVariant() async throws {
+        // The category round-trip test above only ever sets `.boolean`
+        // options, so it never reaches `SessionRegistry.setConfigOption`'s
+        // `(.select(let current), .id(let newValue))` case. This exercises
+        // that branch directly, alongside — not in place of — the existing
+        // test.
+        let (clientEnd, agentEnd) = InMemoryTransport.pair()
+        let agentConn = await AgentSideConnection(stream: agentEnd) { conn in
+            SessionManagingAgent(connection: conn, initialConfigOptions: [selectConfigOption])
+        }
+        let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
+
+        let cwd = try #require(AbsolutePath(rawValue: "/work"))
+        let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
+        var updates = client.updates(for: session).makeAsyncIterator()
+
+        guard case .select(let originalSelect) = selectConfigOption.type else {
+            Issue.record("fixture is not a select option")
+            return
+        }
+        let newValue = SessionConfigValueId(rawValue: "fast")
+
+        let response = try await client.setSessionConfigOption(
+            SetSessionConfigOptionRequest(configId: selectConfigOption.configId, sessionId: session, value: .id(newValue))
+        )
+
+        let updatedEntry = try #require(response.configOptions.first { $0.configId == selectConfigOption.configId })
+        guard case .select(let updatedSelect) = updatedEntry.type else {
+            Issue.record("expected a select payload, got \(updatedEntry.type)")
+            return
+        }
+        #expect(updatedSelect.currentValue == newValue)
+        // The available options themselves are untouched by setting a new
+        // current value — only `currentValue` moves.
+        #expect(updatedSelect.options == originalSelect.options)
+        #expect(updatedEntry.category == selectConfigOption.category)
+
+        let update = try #require(await updates.next())
+        guard case .configOptionUpdate(let configUpdate) = update else {
+            Issue.record("expected a config_option_update, got \(update)")
+            return
+        }
+        #expect(configUpdate.configOptions == response.configOptions)
 
         await agentConn.close()
         await client.close()
