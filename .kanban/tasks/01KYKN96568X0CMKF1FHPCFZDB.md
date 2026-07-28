@@ -100,6 +100,38 @@ comments:
 
     Leaving in `doing` for `/review`.
   timestamp: 2026-07-28T17:24:07.534566+00:00
+- actor: claude-code
+  id: 01kymzktmr8pyqm592kr6ft675
+  text: |-
+    Implemented the 2026-07-28 13:03 review round: added two shared helpers and swept the whole file for every remaining raw occurrence of each duplicated opening sequence, not just the 4 cited call sites.
+
+    decoderInitSequence(baseIndent: String = indentUnit) -> [String] — the 2-line `init(from:)` opening (signature + keyed-container decl). encoderInitSequence(baseIndent: String = indentUnit) -> [String] — the 4-line `encode(to:)` opening (2 doc lines + signature + keyed-container decl). Both placed near the shared-fragment constants at the top of the enum, taking baseIndent since one call site nests one level deeper than the other four.
+
+    Grepped the whole file for decoderInitOpening / encodeMethodOpening / decoderContainerDeclaration / encoderContainerDeclaration before and after. Found 5 call sites for each helper, not the 4 the review cited:
+
+    decoderInitSequence(): decoderInit, taggedUnionDeclaration, discriminatedUnionDeclaration, unionStructDecoder (the 4 cited across items 1/5), plus valueUnionDecoder (baseIndent: indent2) — a 5th instance the review missed, matching the standing pattern on this file where a review's cited count undercounts by one.
+
+    encoderInitSequence(): encodeMethod, taggedUnionDeclaration, discriminatedUnionDeclaration, unionStructEncoder (the 4 cited across items 3/4/6), plus valueUnionEncoder (baseIndent: indent2) — same 5th-instance miss on the encoder side.
+
+    Deliberately left scalarEnumDeclaration's decoderInitOpening/encodeMethodOpening usages alone — they're followed by a single-value-container decode/encode, not the keyed-container sequence, so they are not duplicates of either helper's body.
+
+    Fixed the doc-comment item (review's :325, now at renderedType(of property:) since line numbers drifted): changed `/// - Parameter of:` to `/// - Parameter property:`. Left the other `/// - Parameter of:` occurrence (caseAssociatedValues(of unionCase:)) alone since its internal parameter name is `unionCase`, not `property` — the review specifically named `property` as the correct fix.
+
+    Verification (fresh, this session): `swift build --build-tests` 0 errors; `swift test` → 198 tests/16 suites + 95 tests/12 suites = 293 tests/28 suites, 0 failures, 0 warnings — matches baseline exactly. `mcp__sah__diagnostics check working`: 0 errors/0 warnings. Codegen gate: `rm -f .schema-hash && swift run acp-generate` then `git status --short -- Sources/FoundationModelsACP/Generated/` — empty, byte-for-byte no-op confirmed. No swift format run.
+
+    Adversarial double-check agent dispatched to independently re-verify the 5+5 call sites, confirm no 6th occurrence exists, re-run build/test/codegen-gate fresh, and confirm the renderedType(of:) doc fix. Awaiting its verdict before final hand-off.
+  timestamp: 2026-07-28T18:25:55.864657+00:00
+- actor: claude-code
+  id: 01kymztnxwy2d5njt11djvsc6z
+  text: |-
+    Adversarial double-check verdict: PASS, no findings.
+
+    Independently verified: all 10 call sites (5 decoderInitSequence, 5 encoderInitSequence) are byte-identical to the pre-refactor text, including the two baseIndent: indent2 sites (indent2 + indentUnit == indent3 character-for-character since all indent constants are repeats of the same 4-space string); grepped the whole file for decoderInitOpening/encodeMethodOpening/decoderContainerDeclaration/encoderContainerDeclaration and confirmed no 6th occurrence exists beyond the two deliberately-untouched scalarEnumDeclaration single-value-container lines; confirmed the renderedType(of property:) doc fix is correct and that caseAssociatedValues(of unionCase:) was correctly left alone; reran swift build --build-tests (clean) and swift test fresh (198+95 = 293 tests, 16+12 = 28 suites, 0 failures); reran the codegen gate (rm -f Sources/FoundationModelsACP/Generated/.schema-hash && swift run acp-generate) and confirmed git status --short -- Sources/FoundationModelsACP/Generated/ is empty; confirmed the two new private static helpers have no external callers (blast radius clean, touched function signatures unchanged).
+
+    Final call-site counts: decoderInitSequence() — 5 sites (decoderInit, taggedUnionDeclaration, discriminatedUnionDeclaration, unionStructDecoder, valueUnionDecoder). encoderInitSequence() — 5 sites (encodeMethod, taggedUnionDeclaration, discriminatedUnionDeclaration, unionStructEncoder, valueUnionEncoder). Both helpers found a 5th call site (valueUnionDecoder/valueUnionEncoder) beyond the 4 the review round cited — confirming the review's own stated pattern ("finds N, misses N+1") held again this round, and the sweep caught it.
+
+    All 6 checklist items marked [x]. Task is done and green. Leaving in `doing` for `/review`.
+  timestamp: 2026-07-28T18:29:40.412573+00:00
 position_column: doing
 position_ordinal: '80'
 title: 'Emitter.swift: extract repeated non-indentation string-literal fragments into named constants'
@@ -164,3 +196,16 @@ Verify no other content-fragment duplicates exist beyond the 5 the review pass r
 - [x] `Sources/ACPGenerateCore/SchemaGenerator.swift:1813` — Parameter documented as `variant:` but argument label is `of:`. Documentation should use argument labels to match the function signature. Change the documented parameter from `variant:` to `of:` to match the argument label.
 - [x] `Sources/ACPGenerateCore/SchemaGenerator.swift:2192` — Parameter documented as `definitions:` but argument label is `from:`. Documentation should use argument labels to match the function signature. Change `- Parameter definitions:` to `- Parameter from:` to match the argument label.
 - [x] `Sources/ACPGenerateCore/SchemaGenerator.swift:2462` — Parameter documented as `seen:` but argument label is `in:`. Documentation should use argument labels to match what callers see. Change the documented parameter from `seen:` to `in:` to match the argument label.
+
+## Review Findings (2026-07-28 13:03)
+
+Scope: `3598af9..bacd605` (the checkpoint commit for this task; `HEAD~1..HEAD` at review time landed on `f3b1388`, an unrelated kanban-bookkeeping commit for a different task, so the range was resolved to the commit that actually touches `Emitter.swift`/`SchemaGenerator.swift`/tests).
+
+- [x] `Sources/ACPGenerateCore/Emitter.swift:276` — Identical 2-line decoder method opening appears twice without extraction. The sequence `indentUnit + decoderInitOpening,` followed by `indent2 + decoderContainerDeclaration,` is duplicated in both `decoderInit(model:)` and `unionStructDecoder(...)`. This pattern can drift if a fix is applied to one location but not the other. Extract a `decoderInitSequence()` helper function that returns these two lines, then call it from both locations to ensure they stay synchronized. — Done: added `decoderInitSequence(baseIndent:)`; applied at all 5 actual call sites found by a whole-file sweep (decoderInit, taggedUnionDeclaration, discriminatedUnionDeclaration, unionStructDecoder, and valueUnionDecoder — a 5th instance this review round didn't cite).
+- [x] `Sources/ACPGenerateCore/Emitter.swift:325` — Parameter documentation references external label `of` instead of internal parameter name `property`, inconsistent with established convention throughout the file. Change `/// - Parameter of:` to `/// - Parameter property:`. — Done: fixed on `renderedType(of property:)` (line numbers had drifted since the review). Confirmed the file's other `/// - Parameter of:` occurrence, on `caseAssociatedValues(of unionCase:)`, was correctly left alone since its internal name is `unionCase`, not `property`.
+- [x] `Sources/ACPGenerateCore/Emitter.swift:413` — Identical 4-line encoder method opening appears twice without extraction. The sequence appending `encoderParameterDoc`, `encoderThrowsDoc`, `encodeMethodOpening`, and `encoderContainerDeclaration` is duplicated in both `encodeMethod(model:)` and `unionStructEncoder(...)`. This pattern can drift if a fix is applied to one location but not the other. Extract an `encoderInitSequence()` helper function that returns these four lines, then call it from both locations to ensure they stay synchronized. — Done: added `encoderInitSequence(baseIndent:)`; applied at all 5 actual call sites (encodeMethod, taggedUnionDeclaration, discriminatedUnionDeclaration, unionStructEncoder, and valueUnionEncoder — the encoder-side 5th instance).
+- [x] `Sources/ACPGenerateCore/Emitter.swift:994` — Identical 4-line encoder method opening appears in `taggedUnionDeclaration`. The sequence appending `encoderParameterDoc`, `encoderThrowsDoc`, `encodeMethodOpening`, and `encoderContainerDeclaration` matches the pattern already flagged in `encodeMethod` and `unionStructEncoder`. This is a third instance of the same duplication. Use the same extracted `encoderInitSequence()` helper function mentioned in the second finding instead of duplicating these lines a third time. — Done: taggedUnionDeclaration now calls `encoderInitSequence()`.
+- [x] `Sources/ACPGenerateCore/Emitter.swift:1123` — Identical 2-line decoder method opening appears in `discriminatedUnionDeclaration`. The sequence `indentUnit + decoderInitOpening,` followed by `indent2 + decoderContainerDeclaration,` matches the pattern already flagged in `decoderInit`, `unionStructDecoder`, and `taggedUnionDeclaration`. This is a fourth instance of the same duplication. Use the same extracted `decoderInitSequence()` helper function instead of duplicating these lines a fourth time. — Done: discriminatedUnionDeclaration now calls `decoderInitSequence()`.
+- [x] `Sources/ACPGenerateCore/Emitter.swift:1133` — Identical 4-line encoder method opening appears in `discriminatedUnionDeclaration`. The sequence appending `encoderParameterDoc`, `encoderThrowsDoc`, `encodeMethodOpening`, and `encoderContainerDeclaration` matches the pattern already flagged in `encodeMethod`, `unionStructEncoder`, and `taggedUnionDeclaration`. This is a fourth instance of the same duplication. Use the same extracted `encoderInitSequence()` helper function instead of duplicating these lines a fourth time. — Done: discriminatedUnionDeclaration now calls `encoderInitSequence()`.
+
+Note: the engine also flagged `Tests/ACPGenerateTests/UnknownFallbackTests.swift` (an orphaned `encode` doc comment with no implementing function) — dropped per the standing rule against asking to refactor pre-existing test code. Confirmed via `git blame` that comment predates this commit (2026-07-15, commit 49450737); this commit only touched one unrelated line in that file (the `scalarEnumDeclaration` call-site relabel).
