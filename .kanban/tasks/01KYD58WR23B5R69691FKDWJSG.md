@@ -205,8 +205,8 @@ comments:
   timestamp: 2026-07-27T23:39:16.815788+00:00
 depends_on:
 - 01KYD58WPKKF4BAN3AKFZV61KY
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8380'
 title: 'M3 Connections and transports: full-duplex, fail loud'
 ---
 ## Starting point
