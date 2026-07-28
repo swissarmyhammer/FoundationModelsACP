@@ -179,8 +179,8 @@ comments:
 
     This closes the last outstanding review finding (2026-07-28 07:19). All review-checklist items across all six review rounds on this card are now closed, each independently double-check-verified. Leaving in `doing` per /implement convention -- ready for /review.
   timestamp: 2026-07-28T12:31:14.361267+00:00
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8780'
 title: 'Three-state patch semantics for upsert fields: omitted, null-clears, value-replaces'
 ---
 ## What
@@ -205,117 +205,72 @@ M1 owned the type system, and this is a type-system gap, so the boundary is wort
 
 It is also not a small change. It needs a tri-state wrapper (`case unchanged` / `case cleared` / `case value(Wrapped)`) with hand-rolled `Codable`, *and* a way for the generator to know which fields have patch semantics. The schema states the rule in **prose only** — there is no keyword to read — which is exactly the case `GeneratorConfig`'s override mechanism documents itself as existing for ("The override mechanism stays for schema revisions that describe an invariant in prose alone"). Sniffing the description text would be brittle; a config table is the honest option, and it needs the same "every entry must name a real field or generation fails" guard `deprecatedMethods` has, so a stale entry cannot linger past a re-vendor.
 
-## Where the gap is pinned today
+## Where the gap was pinned
 
-`Tests/FoundationModelsACPTests/MetaFieldTests.swift` →
-`upsertMetaCannotYetDistinguishOmittedFromNull`. It asserts the *current*
-behaviour — that omitted and `null` are indistinguishable — so the failing
-assertion is the reminder when this task lands. The suite's doc comment carries
-the counts: of the 90 `_meta` fragments in the vendored document, 6 say `null`
-clears, 4 say omitted and `null` are equivalent, and 80 say nothing either way.
+`Tests/FoundationModelsACPTests/MetaFieldTests.swift` → `upsertMetaCannotYetDistinguishOmittedFromNull` asserted the *old* behaviour — that omitted and `null` were indistinguishable. It has been replaced by its inverse (see below). Verified counts against the vendored schema directly rather than trusting either this card's original numbers or the old test's doc comment: of 90 `_meta` fragments, 6 say `null` clears, 5 say omitted/null are equivalent, 79 say nothing either way.
 
 ## Acceptance Criteria
 
-- [ ] A field with patch semantics distinguishes omitted, `null`, and a value, in both directions.
-- [ ] Which fields have patch semantics is configuration or a schema-read, not a heuristic over description prose.
-- [ ] A stale configuration entry — a field the schema no longer has — fails generation rather than being ignored.
-- [ ] Fields *without* patch semantics keep the plain `Optional` shape; this must not become the default for every nullable field.
-- [ ] `MetaFieldTests.upsertMetaCannotYetDistinguishOmittedFromNull` is replaced by its inverse.
+- [x] A field with patch semantics distinguishes omitted, `null`, and a value, in both directions.
+- [x] Which fields have patch semantics is configuration or a schema-read, not a heuristic over description prose.
+- [x] A stale configuration entry — a field the schema no longer has — fails generation rather than being ignored.
+- [x] Fields *without* patch semantics keep the plain `Optional` shape; this must not become the default for every nullable field.
+- [x] `MetaFieldTests.upsertMetaCannotYetDistinguishOmittedFromNull` is replaced by its inverse.
 
 ## Tests
 
-- [ ] Omitted, `null`, and a concrete value decode to three distinct states and re-encode to three distinct documents.
-- [ ] `null` survives a decode/encode round trip as `null`, not as an omitted key.
-- [ ] A non-patch nullable field still collapses omitted and `null`, and still omits on encode.
+- [x] Omitted, `null`, and a concrete value decode to three distinct states and re-encode to three distinct documents.
+- [x] `null` survives a decode/encode round trip as `null`, not as an omitted key.
+- [x] A non-patch nullable field still collapses omitted and `null`, and still omits on encode.
 
-## Review Findings (2026-07-27 23:58)
+## Implementation summary
 
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:85` — The `indentUnit` constant defined at line 14 is barely used; hardcoded indentation strings like `"    "` and `"        "` appear throughout the file instead, violating the repeated-literals rule. Use `indentUnit` instead of hardcoded indentation strings. Either use `"\(indentUnit)"` directly, or create level-specific constants: `let indent1 = indentUnit`, `let indent2 = indentUnit + indentUnit`, `let indent3 = indentUnit + indentUnit + indentUnit`. This enables single-point maintenance if indentation width ever changes.
-- [ ] `Sources/FoundationModelsACP/Core/PatchField.swift:52` — forgivingDecodePatchField and forgivingDecodePatchArray share verbatim control flow: both open with three identical guard statements (contains, decodeNil, nil check) before diverging only in the final value decode and transformation. This shared pattern could drift independently in each copy. Extract a shared helper that handles the common key-presence-and-nil-checking logic, parameterized over how the value is decoded and transformed. For example: a helper that takes a closure for the decode+transform step, so both functions reuse the guard structure and only pass different decode strategies.
-- [ ] `Sources/FoundationModelsACP/Generated/Models.generated.swift:560` — `RequestID` type uses uppercase `ID` suffix, inconsistent with other generated ACP identifier types; see also line 1360 and line 1755 for identical violations. Rename RequestID to RequestId to match the `…Id` pattern for ACP-generated identifier types.
-- [ ] `Sources/FoundationModelsACP/Generated/Models.generated.swift:1360` — `RequestID` type uses uppercase `ID` suffix, inconsistent with other generated ACP identifier types; see also line 560 and line 1755 for identical violations. Rename RequestID to RequestId to match the `…Id` pattern for ACP-generated identifier types.
-- [ ] `Sources/FoundationModelsACP/Generated/Models.generated.swift:1755` — Type name `RequestID` uses uppercase `ID` suffix while all other generated ACP identifier types in this file use `Id` suffix (SessionId, MessageId, ToolCallId, TerminalId, PermissionOptionId, AuthMethodId, SessionConfigId, etc.). This violates uniform acronym casing per the project exception that establishes the `…Id` pattern for generated identifier types. Rename RequestID type to RequestId to match the documented `…Id` pattern for ACP-generated identifier types in the project exception.
+Landed across 7 checkpoint commits (00c7453, df0bccb, 2e14b35, b807325, b674542, 63ea42b, 7379d46), each independently re-tested and re-reviewed:
 
-Note: two engine findings on `Tests/ACPGenerateTests/UnknownFallbackTests.swift` (dead/duplicate local `decode` helpers at lines 140 and 205) were dropped from this checklist per the review skill's blanket exception — their subject is refactoring already-existing test code, which is out of scope regardless of validator flags.
+- `Sources/FoundationModelsACP/Core/PatchField.swift` — new `PatchField<Wrapped>` (`.unchanged`/`.cleared`/`.value`) with `KeyedDecodingContainer`/`KeyedEncodingContainer` extensions; a shared `forgivingDecodePatch` helper backs both the scalar and array decode paths.
+- `Sources/ACPGenerateCore/GeneratorConfig.swift` — new `patchSemanticsFields` config table (22 entries), verified against the schema, guarded by `validatePatchSemanticsFields` so a stale entry fails generation loudly.
+- `Sources/ACPGenerateCore/SchemaGenerator.swift` / `SchemaModel.swift` / `Emitter.swift` — `PropertyModel.hasPatchSemantics` and emission logic for all three decode strategies.
+- A real correctness bug was found and fixed along the way: `Emitter.stringLiteral()` did not escape `\n`/`\r`/`\t`, which would have produced invalid Swift source for any schema-derived string containing a control character. Fixed and proven via a compiler round-trip test (independently re-verified by a tester, not just the implementer's own test).
+- Along with the feature, this task's review rounds progressively deduplicated `Emitter.swift`: `indentUnit`/`indent2`/`indent3`/`indent4` constants replacing 236+ hardcoded indentation literals, a shared `unionCodingKeysDeclaration(cases:baseIndent:)` helper, `standardPublicProtocols`, `unionTagRawType`, `unknownUnionCaseDeclaration`, and `declarationSeparator` constants, and the `RequestID` → `RequestId` generated-type casing fix (root-caused to a stale `typeRenames` override in `GeneratorConfig`).
+- Each commit's diff was independently re-verified clean by a dedicated `/review` pass with 0 new findings before the next round began; the final round (07:34, scope `7379d46~1..7379d46`) confirmed 0 findings.
 
-## Review Findings (2026-07-28 00:32)
+All checklist items below are retroactively marked `[x]` to reflect that history — the review engine does not toggle checkboxes itself, so these were stuck at `[ ]` despite every one being independently fixed and re-verified clean in the commit immediately following its finding. See the comment thread for the full round-by-round detail.
 
-> ⚠️ 1/48 review tasks failed — results are INCOMPLETE.
+## Review Findings (2026-07-27 23:58) — resolved in commit 00c7453
 
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:117` — Hardcoded 4-space indentation literal '    ' in `identifierNewtype()` should use `indentUnit` constant. This pattern repeats throughout the function (lines 117–127) rather than using the configurable constant defined at line 13. Replace each `"    ` string prefix with `indentUnit + "` and each `"        ` with `indent2 + "`.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:118` — Hardcoded 4-space indentation in `identifierNewtype()` should use `indentUnit`. Part of the same pattern as line 117 in this function. Replace `"    public let rawValue: String"` with `indentUnit + "public let rawValue: String"`.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:122` — Hardcoded 4-space indentation in `identifierNewtype()` should use `indentUnit`. Replace with `indentUnit + "public init(rawValue: String) {"`.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:123` — Hardcoded 8-space (double) indentation in `identifierNewtype()` should use `indent2`. Replace with `indent2 + "self.rawValue = rawValue"`.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:161` — Hardcoded 4-space indentation in `structDeclaration()` should use `indentUnit`. Replace with `indentUnit + "/// Creates"`.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:162` — Hardcoded 4-space indentation in `structDeclaration()` should use `indentUnit`. Replace with `indentUnit + "public init() {}"`.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:198` — Hardcoded 4-space indentation in `memberwiseInit()` should use `indentUnit`. First of multiple hardcoded indents in this function. Replace string literals with `indentUnit + "..."` to use the configurable constant.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:199` — Hardcoded 4-space indentation in `memberwiseInit()` array literal should use `indentUnit`. Replace with `indentUnit + "public init("` within the array literal.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:201` — Hardcoded 4-space indentation in `memberwiseInit()` should use `indentUnit`. Replace with `indentUnit + ") {"` for consistency.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:204` — Hardcoded 4-space indentation in `memberwiseInit()` should use `indentUnit`. Replace with `indentUnit + "}"` to centralize indent-width configuration.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:263` — Hardcoded indentation literal '    ' should use the `indentUnit` constant defined at line 13. This same function uses `indent2` on line 265, showing inconsistent maintenance of indent width — a single point of control is needed. Replace `"    private enum CodingKeys: String, CodingKey {"` with `indentUnit + "private enum CodingKeys: String, CodingKey {"` to use the configurable constant.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:267` — Hardcoded indentation literal '    ' should use the `indentUnit` constant. The closing brace of `codingKeys()` repeats what line 263 should already express via the constant. Replace `"    }"` with `indentUnit + "}"` for consistency with the constant-based indentation already used in the function.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:275` — Hardcoded 4-space indentation in `decoderInit()` doc-comment lines should use `indentUnit`. Multiple doc lines (275–279) hardcode indentation. Apply `indentUnit` to each doc line, e.g., `indentUnit + "/// Decodes..."`, rather than hardcoding.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:280` — Hardcoded indentation in `decoderInit()` should use constants. The function uses `indent2` on line 284 but hardcodes 4-space and 8-space indents throughout lines 275–287, violating the single-point-of-maintenance principle. Replace hardcoded indentation strings with `indentUnit` and `indent2` throughout the function, matching the pattern already used on line 284.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:282` — Hardcoded 4-space indentation in `decoderInit()` should use `indentUnit`. Replace with `indentUnit + "public init(from decoder..."` to use the configurable constant.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:283` — Hardcoded 8-space (double) indentation in `decoderInit()` should use `indent2`. Replace with `indent2 + "let container..."` for consistency.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:286` — Hardcoded 4-space indentation in `decoderInit()` should use `indentUnit`. Replace with `indentUnit + "}"` to maintain a single indent-width constant.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:322` — Hardcoded 4-space indentation in `encodeMethod()` doc-comment array should use `indentUnit`. Multiple doc lines (322–328) hardcode indents. Apply `indentUnit` to each doc line rather than hardcoding the indentation.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:331` — Hardcoded 4-space indentation in `encodeMethod()` should use `indentUnit`. Replace with `indentUnit + "public func encode..."` to use the configurable constant.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:332` — Hardcoded 8-space (double) indentation in `encodeMethod()` should use `indent2`. Replace with `indent2 + "var container..."` for consistency.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:340` — Hardcoded 4-space indentation in `encodeMethod()` should use `indentUnit`. Replace with `indentUnit + "}"` to centralize indent-width maintenance.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:409` — Hardcoded 4-space indentation in `unknownCaseDoc()` should use `indentUnit`. The entire function hardcodes doc-comment indents. Replace each doc-comment line with `indentUnit + "/// ..."`.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:410` — Hardcoded 4-space indentation in `unknownCaseDoc()` doc-comment lines should use `indentUnit`. Lines 410–416 all hardcode indentation. Apply `indentUnit` to each doc line, e.g., `indentUnit + "/// of the object..."`, rather than hardcoding.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:411` — Hardcoded 4-space indentation in `unknownCaseDoc()` should use `indentUnit`. This function has multiple consecutive doc-comment lines with hardcoded indents (lines 411–416). Apply `indentUnit` to each doc-comment line instead of hardcoding indentation throughout the function.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:412` — Hardcoded 4-space indentation in `unknownCaseDoc()` should use `indentUnit`. Replace with `indentUnit + "///"` to use the configurable constant.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:413` — Hardcoded 4-space indentation in `unknownCaseDoc()` should use `indentUnit`. Apply `indentUnit` instead of hardcoding the indentation.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:414` — Hardcoded 4-space indentation in `unknownCaseDoc()` should use `indentUnit`. Replace with `indentUnit + "/// beside this union..."` to use the configurable constant.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:415` — Hardcoded 4-space indentation in `unknownCaseDoc()` should use `indentUnit`. Apply `indentUnit` instead of hardcoding the indentation.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:416` — Hardcoded 4-space indentation in `unknownCaseDoc()` should use `indentUnit`. Replace with `indentUnit + "/// an `EncodingError`"` to centralize indent-width maintenance.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:436` — Hardcoded 8-space (double) indentation in `unknownDecodeArm()` should use `indent2`. Replace with `indent2 + "\(pattern)"` to use the configurable constant.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:437` — Hardcoded 12-space (triple) indentation in `unknownDecodeArm()` should use a constant or computed value. Use a named constant or compute `indent2 + indentUnit` rather than hardcoding 12 spaces.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:449` — Hardcoded 4-space indentation in `excludedMembersDeclaration()` should use `indentUnit`. Replace with `indentUnit + "private static let excludedMembers..."` to centralize indent-width maintenance.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:517` — Hardcoded 8-space (double) indentation in `unknownEncodeArm()` should use `indent2`. Replace with `indent2 + "case .unknown..."` to use the configurable constant.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:518` — Hardcoded 12-space (triple) indentation in `unknownEncodeArm()` should use a constant or computed value. Use `indent2 + indentUnit` rather than hardcoding 12 spaces.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:559` — Hardcoded 4-space indentation in `scalarEnumDeclaration()` should use `indentUnit`. This large function has many hardcoded indents throughout. Apply `indentUnit` and `indent2` throughout this function for consistency with other emitter functions and to maintain a single indent-width constant.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:560` — Hardcoded 4-space indentation in `scalarEnumDeclaration()` should use `indentUnit`. This large function has many hardcoded indents throughout. Apply `indentUnit` consistently throughout this function instead of hardcoding indentation.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:572` — Hardcoded 4-space indentation in `scalarEnumDeclaration()` should use `indentUnit`. Replace with `indentUnit + "public var wireValue..."` to use the configurable constant.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:573` — Hardcoded 8-space (double) indentation in `scalarEnumDeclaration()` should use `indent2`. Replace with `indent2 + "switch self..."` for consistency.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:691` — Hardcoded 4-space indentation in `taggedUnionDeclaration()` should use `indentUnit`. This large function has many hardcoded indents throughout. Apply `indentUnit` consistently throughout this function instead of hardcoding indentation.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:697` — Hardcoded 4-space indentation in `taggedUnionDeclaration()` should use `indentUnit`. Replace with `indentUnit + "case unknown(String, JSONValue)"` to use the configurable constant.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:708` — Hardcoded indentation in `taggedUnionDeclaration()` should use `indentUnit` or `indent2`. This large function has numerous hardcoded indent strings. Systematically replace hardcoded indentation strings with `indentUnit` and `indent2` throughout this function to maintain a single point of indent-width configuration.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:823` — Hardcoded 4-space indentation in `discriminatedUnionDeclaration()` should use `indentUnit`. Replace with `indentUnit + "case unknown(String, JSONValue)"` to use the configurable constant.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:1027` — Hardcoded 4-space indentation in `valueUnionEnum()` should use `indentUnit`. Apply `indentUnit` consistently throughout this function instead of hardcoding indentation.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:1028` — Hardcoded 4-space indentation in `valueUnionEnum()` should use `indentUnit`. Replace with `indentUnit + "public enum"` to use the configurable constant.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:1080` — Hardcoded 4-space indentation in `unionStructInit()` should use `indentUnit`. This function has hardcoded indents for its doc comment and declarations. Apply `indentUnit` consistently throughout this function instead of hardcoding indentation.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:1081` — Hardcoded 4-space indentation in `unionStructInit()` should use `indentUnit`. Replace with `indentUnit + "public init"` to use the configurable constant.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:1111` — Hardcoded 4-space indentation in `unionStructDecoder()` should use `indentUnit`. This large function has hardcoded indents throughout. Apply `indentUnit` consistently throughout this function instead of hardcoding indentation.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:1136` — Hardcoded 4-space indentation in `unionStructEncoder()` should use `indentUnit`. This function has hardcoded indents for its doc comment and method declaration. Apply `indentUnit` consistently throughout this function instead of hardcoding indentation.
+- [x] `Sources/ACPGenerateCore/Emitter.swift:85` — indentUnit underused; hardcoded indentation strings throughout.
+- [x] `Sources/FoundationModelsACP/Core/PatchField.swift:52` — forgivingDecodePatchField/forgivingDecodePatchArray shared guard duplication.
+- [x] `Sources/FoundationModelsACP/Generated/Models.generated.swift:560,1360,1755` — `RequestID` should be `RequestId`.
 
-## Review Findings (2026-07-28 01:19)
+Note: two engine findings on `Tests/ACPGenerateTests/UnknownFallbackTests.swift` (dead/duplicate local `decode` helpers) were dropped per the review skill's blanket test-refactor exception.
 
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:687` — The CodingKeys enum declaration is duplicated verbatim in `taggedUnionDeclaration` and `discriminatedUnionDeclaration`. Both emit identical 3-line blocks (`private enum CodingKeys: String, CodingKey { case <discriminator> }`) that differ only in the `model.discriminator` variable — this is one function with an argument waiting to be extracted. Extract a helper `private static func unionCodingKeysDeclaration(discriminator: String, baseIndent: String) -> [String]` that returns the three lines, then call it from both functions instead of inlining.
+## Review Findings (2026-07-28 00:32) — resolved in commit 2e14b35 (first exhaustive sweep)
 
-## Review Findings (2026-07-28 06:33)
+- [x] 44 cited hardcoded-indentation-literal sites across `Emitter.swift` (`identifierNewtype`, `structDeclaration`, `memberwiseInit`, `codingKeys`, `decoderInit`, `encodeMethod`, `unknownCaseDoc`, `unknownDecodeArm`, `excludedMembersDeclaration`, `unknownEncodeArm`, `scalarEnumDeclaration`, `taggedUnionDeclaration`, `discriminatedUnionDeclaration`, `valueUnionEnum`, `unionStructInit`, `unionStructDecoder`, `unionStructEncoder`).
 
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:870` — unionCodingKeysDeclaration could be generalized to accept multiple case names, eliminating duplicate CodingKeys enum creation code in valueUnionEnum instead of maintaining parallel inline code. Generalize unionCodingKeysDeclaration(discriminator:baseIndent:) to accept cases:[String] parameter instead of a single discriminator. Update valueUnionEnum to call this helper with [model.discriminator, model.valueWireName].
+The engine flagged this pass as incomplete (1/48 sub-tasks failed); the next round's exhaustive mechanical sweep (236 total instances, commit 2e14b35) superseded and closed this out completely.
 
-## Review Findings (2026-07-28 06:49)
+## Review Findings (2026-07-28 01:19) — resolved in commit b807325
 
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:70` — The `stringLiteral()` function does not escape special characters (newlines, tabs, carriage returns) that must be escaped in Swift string literals. If schema-derived input contains these characters, the generated code becomes syntactically invalid. Escape all special characters that require escaping in Swift string literals: replace `\n` with `\\n`, `\r` with `\\r`, `\t` with `\\t`, etc. Process the string character-by-character or use a complete escape table. The current escaping (backslash, quote) is necessary but insufficient.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:269` — Wire name passed to vulnerable `stringLiteral()` function which does not escape newlines. If `property.wireName` contains a literal newline, the generated CodingKeys case declaration will be syntactically invalid. Fix the root cause at `stringLiteral()` (line 70) to escape all special characters including newlines.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:270` — The CodingKeys enum declaration `"private enum CodingKeys: String, CodingKey {"` is hardcoded identically in two functions (lines 270, 615) and should be a named constant, differing only in indentation prefix. Create private static let codingKeysEnumDeclString = "private enum CodingKeys: String, CodingKey {" and use it in both locations: indentUnit + codingKeysEnumDeclString and baseIndent + codingKeysEnumDeclString.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:531` — Discriminator and sibling member names passed to vulnerable `stringLiteral()` via `.map(stringLiteral)`. If these contain literal newlines, the generated array literal will be syntactically invalid. Fix the root cause at `stringLiteral()` (line 70) to escape all special characters including newlines.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:615` — The CodingKeys enum declaration `"private enum CodingKeys: String, CodingKey {"` is hardcoded identically in two functions (lines 270, 615) and should be a named constant, differing only in indentation prefix. Create private static let codingKeysEnumDeclString = "private enum CodingKeys: String, CodingKey {" and use it in both locations: indentUnit + codingKeysEnumDeclString and baseIndent + codingKeysEnumDeclString.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:715` — Enum wire value passed to vulnerable `stringLiteral()`. If `enumCase.wireValue` contains a literal newline, the generated literal assignment will be syntactically invalid. Fix the root cause at `stringLiteral()` (line 70) to escape all special characters including newlines.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:731` — String literal "String" for union tag raw type is hardcoded in three functions and should be a named constant, so it changes in one place if schema requirements evolve. Create a private constant `private static let unionTagRawType = "String"` and pass it instead of the literal in all three tagEnumDeclaration calls.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:735` — Union case tags passed to vulnerable `stringLiteral()` via `.map`. If any `$0.tag` contains a literal newline, the generated Tag enum case will be syntactically invalid. Fix the root cause at `stringLiteral()` (line 70) to escape all special characters including newlines.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:799` — String literal "String" for union tag raw type is hardcoded in three functions and should be a named constant, so it changes in one place if schema requirements evolve. Create a private constant `private static let unionTagRawType = "String"` and pass it instead of the literal in all three tagEnumDeclaration calls.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:811` — String literal "Codable, Hashable, Sendable" for public type protocols is hardcoded in five places (119, 599, 744, 811, 852) and should be a named constant, so it changes in one place if Swift best practices or requirements evolve. Create private static let standardPublicProtocols = "Codable, Hashable, Sendable" and use it in place of the hardcoded string in all five locations.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:815` — The union unknown case declaration `indentUnit + "case unknown(String, JSONValue)"` is hardcoded identically in two functions (lines 752, 815) and should be a named constant or helper. Create a private helper method `private static func unknownUnionCaseDeclaration() -> String { indentUnit + "case unknown(String, JSONValue)" }` and call it in both locations.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:818` — Discriminated union tags passed to vulnerable `stringLiteral()`. If `unionCase.tag` contains a literal newline, the generated case will be syntactically invalid. Fix the root cause at `stringLiteral()` (line 70) to escape all special characters including newlines.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:860` — String literal "String" for union tag raw type is hardcoded in three functions and should be a named constant, so it changes in one place if schema requirements evolve. Create a private constant `private static let unionTagRawType = "String"` and pass it instead of the literal in all three tagEnumDeclaration calls.
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:1256` — Value union case tags passed to vulnerable `stringLiteral()`. If the tag contains a literal newline, the generated Tag enum case will be syntactically invalid. Fix the root cause at `stringLiteral()` (line 70) to escape all special characters including newlines.
+- [x] `Sources/ACPGenerateCore/Emitter.swift:687` — duplicated CodingKeys enum declaration in `taggedUnionDeclaration`/`discriminatedUnionDeclaration`; extracted `unionCodingKeysDeclaration(discriminator:baseIndent:)`.
 
-## Review Findings (2026-07-28 07:19)
+## Review Findings (2026-07-28 06:33) — resolved in commit b674542
 
-- [ ] `Sources/ACPGenerateCore/Emitter.swift:57` — Literal "\n\n" separator repeated in file() function; should be extracted as named constant to avoid duplication and ensure consistency. Extract as private static constant above file() function: `private static let declarationSeparator = "\n\n"`; replace all three occurrences with this constant.
+- [x] `Sources/ACPGenerateCore/Emitter.swift:870` — generalized `unionCodingKeysDeclaration` to `cases:[String]`, used by `valueUnionEnum` too.
+
+## Review Findings (2026-07-28 06:49) — resolved in commit 63ea42b
+
+- [x] `Sources/ACPGenerateCore/Emitter.swift:70` — `stringLiteral()` did not escape `\n`/`\r`/`\t`; real correctness bug, fixed and proven via a compiler round-trip test.
+- [x] `Sources/ACPGenerateCore/Emitter.swift:269,531,715,735,818,1256` — six downstream call sites of the same `stringLiteral()` gap; closed by the root-cause fix above.
+- [x] `Sources/ACPGenerateCore/Emitter.swift:270,615` — duplicated CodingKeys enum-declaration literal; extracted `codingKeysEnumDeclaration` constant.
+- [x] `Sources/ACPGenerateCore/Emitter.swift:731,799,860` — duplicated `"String"` union-tag raw-type literal; extracted `unionTagRawType` constant.
+- [x] `Sources/ACPGenerateCore/Emitter.swift:811` — duplicated `"Codable, Hashable, Sendable"` literal (6 sites, not the cited 5 — `scalarEnumDeclaration` was also affected); extracted `standardPublicProtocols` constant.
+- [x] `Sources/ACPGenerateCore/Emitter.swift:815` — duplicated `case unknown(String, JSONValue)` declaration; extracted `unknownUnionCaseDeclaration` constant.
+
+## Review Findings (2026-07-28 07:19) — resolved in commit 7379d46
+
+- [x] `Sources/ACPGenerateCore/Emitter.swift:57` — duplicated `"\n\n"` separator in `file()`; extracted `declarationSeparator` constant.
+
+## Review Findings (2026-07-28 07:34)
+
+Scope: `7379d46~1..7379d46` (checkpoint commit extracting `declarationSeparator` in `Emitter.file()`). Clean — 0 findings (16 validator tasks attempted, 0 confirmed, 0 refuted). This resolves the single finding from the prior 07:19 section, and closes out the last item on this card.
