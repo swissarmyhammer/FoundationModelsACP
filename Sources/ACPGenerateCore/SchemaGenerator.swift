@@ -498,7 +498,11 @@ public struct SchemaGenerator: Sendable {
     ///   catch-all, `.deferredUnion` when a fallback instead pins a `const`
     ///   of its own — see `isUnknownFallbackVariant`.
     /// - Throws: `GeneratorError.unsupportedShape` for an empty or
-    ///   mixed-shape `oneOf`, so unknown constructs fail loudly.
+    ///   mixed-shape `oneOf`, so unknown constructs fail loudly. Also thrown
+    ///   when every variant is a `not`-guarded catch-all: `modeled` is then
+    ///   empty, and without this guard classification would still return
+    ///   `.taggedUnion` for a union with no real payload variant at all,
+    ///   mirroring `classifyAnyOf`'s object-branch guard.
     private func classifyOneOf(name: String, variants: [JSONValue]) throws -> DefinitionKind {
         try validateNonEmptyUnion(variants, name: name)
         if let rawKind = Self.agreedEnumRawKind(of: variants) {
@@ -519,6 +523,26 @@ public struct SchemaGenerator: Sendable {
         // `unsupportedShape` instead of the documented deferral.
         guard fallbacksAreGenuineCatchAlls(of: variants) else {
             return .deferredUnion(keyword: Self.oneOfKey)
+        }
+        let modeled = variants.filter { $0[Self.notKey] == nil }
+        // Symmetric with `classifyAnyOf`'s object-branch `!modeled.isEmpty`
+        // guard: when every variant is `not`-guarded, `modeled` is empty.
+        // Without this guard, classification would still return
+        // `.taggedUnion` for a union with no real payload variant at all,
+        // and only `taggedUnionModel`'s own filtered-to-empty
+        // `guard let discriminator else` would catch it — the same
+        // `emptyUnionDetail` error, reached less directly. Unlike the
+        // `anyOf` object branch (whose `.objectTaggedUnion` path calls
+        // `structModel` before ever re-deriving the union, so bypassing its
+        // guard can surface an unrelated, misleading error first),
+        // `.taggedUnion` maps straight to `taggedUnionModel` with no other
+        // processing in between: that function's own guard throws this
+        // identical `context`/`detail` pair regardless, so this guard cannot
+        // be pinned by an externally observable "wrong error" test the way
+        // the `anyOf` fix could — it is a directness/proximate-cause
+        // improvement only, confirmed by mutation testing.
+        guard !modeled.isEmpty else {
+            throw GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail)
         }
         return .taggedUnion
     }

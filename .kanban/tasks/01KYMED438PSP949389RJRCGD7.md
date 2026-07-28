@@ -1,8 +1,20 @@
 ---
 assignees:
 - claude-code
-position_column: todo
-position_ordinal: 8f80
+comments:
+- actor: claude-code
+  id: 01kyn20cr5z604mb2g86gycf5h
+  text: |-
+    Implemented: classifyOneOf now computes modeled = variants.filter { $0[notKey] == nil } after the fallbacksAreGenuineCatchAlls guard passes, and throws GeneratorError.unsupportedShape(context: name, detail: emptyUnionDetail) directly when modeled.isEmpty, instead of falling through to .taggedUnion and relying on taggedUnionModel's own downstream guard. Mirrors classifyAnyOf's object-branch fix exactly. Docstring's Throws clause updated to document the new case.
+
+    Mutation testing finding (important, differs from the anyOf sibling): reverted the guard, then tried the anyOf sibling's exact trick (a deliberately-broken sibling property alongside the oneOf, e.g. "corrupt": {"type": 1}) to see if the fix is externally observable. It is NOT — with the guard removed, the error is byte-identical: "unsupported schema shape at OnlyFallback: empty union". Root cause: classify() short-circuits on the oneOf key before ever looking at sibling type/properties (unlike classifyAnyOf's object branch, which only fires when members[typeKey]==object). And critically, classifyOneOf's .taggedUnion path calls taggedUnionModel directly with no other processing in between - unlike .objectTaggedUnion, whose objectTaggedUnionModel calls structModel (processing sibling members) before ever re-deriving the union. Since both the classification-site throw and taggedUnionModel's downstream throw use the identical context/detail pair, there is no schema construction that can make classifyOneOf's guard produce an observably different result. Restored the guard afterward; confirmed the removed-experiment test file has zero diff vs HEAD.
+
+    Given this, I did not add a new compound regression test - doing so would just be another no-op pinning test duplicating the existing oneOfWhoseOnlyVariantIsTheUnknownFallbackFailsOnTheEmptyUnionDetail, which the acceptance criteria explicitly said to avoid. The existing test still pins the (unchanged) final error. The fix itself is documented in-code as a directness/proximate-cause improvement only, confirmed by mutation testing, not an externally-observable behavior change.
+
+    Verification: swift build --build-tests clean; swift test -> 293 tests / 28 suites / 0 failures / 0 warnings (198 in FoundationModelsACPTests + 95 in ACPGenerateTests), matching stated baseline exactly; swift package --allow-writing-to-package-directory generate-acp -> "nothing regenerated" (byte-identical). No swift format run. Diff is scoped to Sources/ACPGenerateCore/SchemaGenerator.swift only.
+  timestamp: 2026-07-28T19:07:44.773652+00:00
+position_column: doing
+position_ordinal: '80'
 title: classifyOneOf has the same latent vacuous-classification gap classifyAnyOf's object-branch fix just closed
 ---
 ## Why this card exists
