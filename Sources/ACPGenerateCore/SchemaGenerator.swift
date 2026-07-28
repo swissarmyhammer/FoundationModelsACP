@@ -256,7 +256,7 @@ public struct SchemaGenerator: Sendable {
             guard let variants = members[Self.anyOfKey]?.arrayValue else {
                 throw GeneratorError.unsupportedShape(context: name, detail: "\(Self.anyOfKey) is not an array")
             }
-            return classifyAnyOf(name: name, members: members, variants: variants)
+            return try classifyAnyOf(name: name, members: members, variants: variants)
         }
         if members[Self.enumKey] != nil {
             return .deferredUnion(keyword: Self.enumKey)
@@ -537,11 +537,20 @@ public struct SchemaGenerator: Sendable {
     /// when its variants differ by an inline `value` member, and the
     /// `.objectTaggedUnion` shape when they flatten `$ref` payloads instead.
     /// Mixing the two in one union has no emission model, so it defers.
+    ///
+    /// - Throws: `GeneratorError.unsupportedShape` for an empty `anyOf`,
+    ///   mirroring `classifyOneOf`'s empty-`oneOf` guard: an empty union of
+    ///   either keyword permits nothing, so silently deferring it to raw
+    ///   JSON would hide the same authoring error a thrown error catches for
+    ///   `oneOf`.
     private func classifyAnyOf(
         name: String,
         members: [String: JSONValue],
         variants: [JSONValue]
-    ) -> DefinitionKind {
+    ) throws -> DefinitionKind {
+        guard !variants.isEmpty else {
+            throw GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail)
+        }
         if let rawKind = Self.agreedEnumRawKind(of: variants),
             variants.contains(where: { $0[Self.constKey] != nil })
         {

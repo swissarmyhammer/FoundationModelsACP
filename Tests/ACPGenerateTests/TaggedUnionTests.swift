@@ -161,6 +161,14 @@ import Testing
         let generated = try SchemaGenerator().generate(schemaJSON: schema)
         let unresolved = try #require(generated.first { $0.name == "Unresolved.generated.swift" })
         #expect(unresolved.contents.contains("public typealias Ambiguous = JSONValue"))
+        // Both variants pin a discriminator (`a` and `b`), so `deferredUnionReason`
+        // must take its "Deferred" branch, not the "Permanently deferred" one
+        // reserved for unions with no discriminator at all.
+        #expect(
+            unresolved.contents.contains(
+                "Deferred: this `oneOf` union's variants pin discriminators"
+            )
+        )
         let unions = try #require(generated.first { $0.name == "Unions.generated.swift" })
         #expect(!unions.contents.contains("Ambiguous"))
     }

@@ -57,6 +57,32 @@ comments:
 
     Final state: 268 tests / 26 suites / 0 failures / 0 warnings (up from the 260/25 baseline). Three commits (97b7b65, c188da1, 3e41631) on v2-reset. All three original task items and both M1-surfaced follow-ups are complete. Leaving in `doing` for `/review` per the /implement process.
   timestamp: 2026-07-28T03:17:51.839678+00:00
+- actor: claude-code
+  id: 01kykckba5h9qyvzh01gzfjf8r
+  text: |-
+    Fixed both open review findings.
+
+    Finding 1 (classifyAnyOf missing empty-anyOf guard): investigated whether an empty anyOf differs semantically from an empty oneOf before picking an approach. It does not — both mean "this definition permits nothing," a schema authoring error, not a case that should silently defer to raw JSON. Traced what happens today on an empty anyOf: agreedEnumRawKind(of: []) returns nil trivially, fallbacksAreGenuineCatchAlls(of: []) is vacuously true, modeled = [], and for an object-typed definition modeled.allSatisfy(...) is vacuously true too — so an empty anyOf on an object with properties would silently become .objectTaggedUnion, and on anything else it falls through to .deferredUnion(keyword: anyOfKey), landing as a raw-JSON typealias instead of failing loudly. Confirmed via grep that the vendored schema (Schema/acp-v2.json and both meta variants) has zero empty anyOf/oneOf occurrences today, so this is the same "unreached but will bite a future re-vendor" character as the original classifyOneOf gap. Added a matching `guard !variants.isEmpty else { throw GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail) }` to the top of classifyAnyOf, which required making it `throws` (one call site, already inside the throwing `classify`). Added `emptyAnyOfFailsWithTheEmptyUnionDetail` to GeneratorErrorDetailTests.swift mirroring the existing `emptyOneOfFailsWithTheEmptyUnionDetail`. Verified RED->GREEN by temporarily removing the guard: the test failed with "an error was expected but none was thrown" (exactly the silent-success failure mode the finding described), then passed once the guard was restored.
+
+    Finding 2 (missing message assertion): verified the exact deferredUnionReason output for the `oneOfFallbackPinningItsOwnConstDefersRatherThanMismodeling` schema by reading deferredUnionReason directly rather than assuming byte-exactness — both variants in that schema pin a const (`a` and `b`), so declaredUnionVariants(of:).contains(where: hasConstDiscriminator) is true and the function takes the "Deferred: this `oneOf` union's variants pin discriminators the generator cannot reconcile into one Swift enum; raw JSON is its representation." branch, not "Permanently deferred". Added `#expect(unresolved.contents.contains("Deferred: this \`oneOf\` union's variants pin discriminators"))`. Verified the assertion is load-bearing by temporarily inverting deferredUnionReason's guard condition: the test failed showing the actual generated banner flipped to "Permanently deferred: no variant of this `oneOf` union pins a discriminator...", proving the assertion would catch a real regression in the Deferred/Permanently-deferred branch logic. Restored the guard afterward.
+
+    Verified: swift build --build-tests clean (0 warnings), swift test 269 tests / 26 suites / 0 failures (up from 268/26 baseline — one new test added), swift package --allow-writing-to-package-directory generate-acp reports "nothing regenerated" and git diff on Sources/FoundationModelsACP/Generated is empty. No swift format run. No markdown tables in this comment.
+
+    Files touched: Sources/ACPGenerateCore/SchemaGenerator.swift (classifyAnyOf gains the empty-union guard and becomes throws), Tests/ACPGenerateTests/GeneratorErrorDetailTests.swift (new test), Tests/ACPGenerateTests/TaggedUnionTests.swift (new assertion in the existing test).
+
+    Leaving in `doing` pending really-done / double-check and then /review.
+  timestamp: 2026-07-28T03:34:22.789603+00:00
+- actor: claude-code
+  id: 01kykcxhh81c3dbaahmew9bnbs
+  text: |-
+    Double-check adversarial review: PASS.
+
+    The reviewer independently hand-traced both fixes against the production code (not just the tests' own claims): confirmed the empty-anyOf guard is first in classifyAnyOf's body and the single call site was updated with `try`; confirmed the pre-fix vacuous-truth behavior (empty anyOf silently reaching .deferredUnion, or .objectTaggedUnion for an object-typed definition with properties) by tracing agreedEnumRawKind(of: []), fallbacksAreGenuineCatchAlls(of: []), and modeled.allSatisfy over an empty array; JSON-parsed all three vendored schema files and confirmed zero empty anyOf/oneOf anywhere; hand-traced the "Ambiguous" test schema through classifyOneOf -> fallbacksAreGenuineCatchAlls -> deferredUnionReason and confirmed the new assertion's substring is an exact, non-stale match for what the code produces; independently reran swift build --build-tests and swift test fresh (269/26, 0 failures/warnings) and swift package generate-acp (nothing regenerated, zero diff on Generated/); confirmed no scope creep (exactly the three claimed files touched).
+
+    One non-blocking finding raised (explicitly requested as part of the review): classifyAnyOf's object-branch (`if modeled.allSatisfy({ $0[Self.allOfKey] != nil }) { return .objectTaggedUnion }`) has the identical vacuous-truth pattern this task's own fix closed elsewhere — modeled can be empty when every anyOf variant is a not-guarded catch-all, and allSatisfy over an empty array is vacuously true, so it would misclassify as .objectTaggedUnion instead of failing loudly. It fails safe today (a downstream re-derivation in taggedUnionModel throws the same emptyUnionDetail error via a more indirect path) and is unreached by the vendored schema (verified structurally). This is pre-existing code, not touched by this task's diff, and outside the two review findings this task was scoped to fix, so per really-done's contract I am proceeding with a logged justification rather than expanding scope. Filed as follow-up task 01KYKCX3XZWEP3PZ77826RC4A5 (^26rc4a5).
+
+    Final state: 269 tests / 26 suites / 0 failures / 0 warnings (up from 268/26 baseline, +1 new test). swift package --allow-writing-to-package-directory generate-acp reports "nothing regenerated"; git diff on Sources/FoundationModelsACP/Generated is empty. Both review findings fixed and verified. Leaving in `doing` for `/review`.
+  timestamp: 2026-07-28T03:39:56.840798+00:00
 position_column: doing
 position_ordinal: '80'
 title: Generator follow-ups deferred during M0
@@ -85,12 +111,17 @@ They are legitimate quality suggestions on a file that is now ~2,000 lines and c
 
 ## Acceptance Criteria
 
-- [ ] `classifyOneOf` either gains the fallback guard `classifyAnyOf` has, or carries a comment explaining why the asymmetry is correct.
-- [ ] Generation-failure detail strings are pinned by test.
-- [ ] The tidy-up is applied as its own commit, with `swift package generate-acp` producing byte-identical output and the CI gate green.
+- [x] `classifyOneOf` either gains the fallback guard `classifyAnyOf` has, or carries a comment explaining why the asymmetry is correct.
+- [x] Generation-failure detail strings are pinned by test.
+- [x] The tidy-up is applied as its own commit, with `swift package generate-acp` producing byte-identical output and the CI gate green.
 
 ## Tests
 
-- [ ] A synthetic `oneOf` with a `const`-pinning `not` variant behaves as documented — deferred, or loudly rejected, not silently mismodelled.
-- [ ] Each consolidated validation failure asserts its detail string.
-- [ ] `swift test` green and `git diff` on `Sources/FoundationModelsACP/Generated` empty after regeneration.
+- [x] A synthetic `oneOf` with a `const`-pinning `not` variant behaves as documented — deferred, or loudly rejected, not silently mismodelled.
+- [x] Each consolidated validation failure asserts its detail string.
+- [x] `swift test` green and `git diff` on `Sources/FoundationModelsACP/Generated` empty after regeneration.
+
+## Review Findings (2026-07-27 22:22)
+
+- [x] `Sources/ACPGenerateCore/SchemaGenerator.swift:362` — `classifyOneOf` explicitly rejects empty oneOf with "empty union" error (via `Self.emptyUnionDetail`), but `classifyAnyOf` has no corresponding guard and would silently defer an empty anyOf to raw JSON via `return .deferredUnion(keyword: Self.anyOfKey)`. For symmetric handling of the two union keywords, both should either throw the same error or both should defer. Add a matching empty-check guard to the start of classifyAnyOf that throws `GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail)`, or document in classifyOneOf's guard why oneOf is stricter. Consistency prevents users from being surprised that empty-anyOf silently succeeds while empty-oneOf fails.
+- [x] `Tests/ACPGenerateTests/TaggedUnionTests.swift:89` — The test `oneOfFallbackPinningItsOwnConstDefersRatherThanMismodeling` verifies a schema with contradictory fallback is deferred to a typealias, but doesn't verify the message in that typealias. The change added `deferredUnionReason` to produce the message content (that it's "Deferred" vs "Permanently deferred" based on variant discriminators), but no assertion confirms the message is correct. If `deferredUnionReason` logic is wrong, this test still passes. Add an assertion verifying the placeholder message: `#expect(unresolved.contents.contains("Deferred: this `oneOf` union's variants pin discriminators"))` to confirm the logic that distinguishes "Deferred" (contradictory fallback) from "Permanently deferred" (no discriminators) is working.

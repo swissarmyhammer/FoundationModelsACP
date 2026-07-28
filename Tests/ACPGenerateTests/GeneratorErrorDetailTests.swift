@@ -43,6 +43,24 @@ import Testing
     // by `TaggedUnionTests.oneOfWhoseOnlyVariantIsTheUnknownFallbackFailsOnTheEmptyUnionDetail`,
     // alongside the classification test it is paired with.
 
+    @Test func emptyAnyOfFailsWithTheEmptyUnionDetail() throws {
+        // `classifyAnyOf` mirrors `classifyOneOf`'s empty-union guard: an
+        // empty `anyOf` permits nothing, so it must fail loudly rather than
+        // silently deferring to a raw-JSON typealias the way an unrecognized
+        // shape would.
+        let schema = Data(
+            """
+            {
+              "$defs": {
+                "Empty": { "anyOf": [] }
+              }
+            }
+            """.utf8)
+        #expect(throws: GeneratorError.unsupportedShape(context: "Empty", detail: "empty union")) {
+            _ = try SchemaGenerator().generate(schemaJSON: schema)
+        }
+    }
+
     // MARK: - discriminatorDisagreement
 
     @Test func taggedUnionVariantsDisagreeingOnTheDiscriminatorNameBothKeys() throws {
