@@ -1,4 +1,49 @@
 import Foundation
+import Synchronization
+
+/// Work an inbound request handler defers until after this connection has
+/// written that request's response — never before, so a handler that sends
+/// an outbound notification this way cannot have it race the response it
+/// logically follows. `AgentSideConnection.afterRespondingToCurrentRequest(_:)`
+/// is the public entry point; `Connection` only owns the collector and the
+/// task-local that locates the right one (see `Connection.currentResponseHooks`).
+///
+/// A plain class guarded by a lock rather than an actor: registration must be
+/// synchronous, with no `await` between "the handler decides to defer work"
+/// and "the work is recorded" — an actor hop there would reopen a scheduling
+/// gap of exactly the kind this type exists to close.
+final class ResponseHooks: Sendable {
+    private let hooks = Mutex<[@Sendable () async -> Void]>([])
+
+    /// Registers one closure to run after the current response is written.
+    ///
+    /// - Parameter work: The deferred work, run once this request's response
+    ///   has been handed to the transport.
+    func append(_ work: @escaping @Sendable () async -> Void) {
+        hooks.withLock { $0.append(work) }
+    }
+
+    /// Runs every registered closure, in registration order, awaiting each
+    /// before starting the next.
+    func runAll() async {
+        let work = hooks.withLock { $0 }
+        for item in work {
+            await item()
+        }
+    }
+}
+
+extension Connection {
+    /// The response-hooks collector for the request currently being handled
+    /// on this task, if any.
+    ///
+    /// Set by `dispatchRequest` around the handler invocation, so any code the
+    /// handler calls — however many `await`s deep, as long as it stays on this
+    /// same task rather than an unrelated one — can register deferred work
+    /// without this connection threading a request id through every layer of
+    /// dispatch just to let one handler find its own request back again.
+    @TaskLocal static var currentResponseHooks: ResponseHooks?
+}
 
 /// Failures raised locally by `Connection`, never received from the peer.
 public enum ConnectionError: Error, Hashable, Sendable {
@@ -407,18 +452,32 @@ public actor Connection {
         }
         let handler = requestHandler
         let task = Task {
-            let outcome: Result<JSONValue, RequestError>
-            do {
-                guard let handler else { throw RequestError.methodNotFound(method) }
-                outcome = .success(try await handler(method, params))
-            } catch is CancellationError {
-                outcome = .failure(.requestCancelled)
-            } catch let error as RequestError {
-                outcome = .failure(error)
-            } catch {
-                outcome = .failure(.internalError(detail: String(describing: error)))
+            // Bound around the handler call so `afterRespondingToCurrentRequest`
+            // finds the right collector no matter how deep the handler's own
+            // `await`s go, as long as they stay on this task. `hooks.runAll()`
+            // below — outside this scope, after the response is written —
+            // is what makes deferred work provably follow the response
+            // rather than merely being likely to.
+            let hooks = ResponseHooks()
+            let outcome: Result<JSONValue, RequestError> = await Self.$currentResponseHooks.withValue(hooks) {
+                do {
+                    guard let handler else { throw RequestError.methodNotFound(method) }
+                    return .success(try await handler(method, params))
+                } catch is CancellationError {
+                    return .failure(.requestCancelled)
+                } catch let error as RequestError {
+                    return .failure(error)
+                } catch {
+                    return .failure(.internalError(detail: String(describing: error)))
+                }
             }
-            await self.completeInbound(id: id, outcome: outcome, batchToken: batchToken)
+            // Only run deferred hooks when a response was actually written:
+            // `completeInbound` skips writing if the connection closed while
+            // the handler ran, and running hooks anyway would break the
+            // documented contract that they follow a response that exists.
+            if await self.completeInbound(id: id, outcome: outcome, batchToken: batchToken) {
+                await hooks.runAll()
+            }
         }
         inboundTasks[id] = task
     }
@@ -431,14 +490,19 @@ public actor Connection {
     ///   - outcome: The handler's result or typed error.
     ///   - batchToken: The enclosing batch's collector, or `nil` when this
     ///     request arrived on its own.
+    /// - Returns: Whether the response was actually written — `false` when
+    ///   the connection had already closed, so the caller knows not to run
+    ///   any work deferred until "after the response."
+    @discardableResult
     private func completeInbound(
         id: RequestID,
         outcome: Result<JSONValue, RequestError>,
         batchToken: Int?
-    ) async {
+    ) async -> Bool {
         inboundTasks.removeValue(forKey: id)
-        guard !isClosed else { return }
+        guard !isClosed else { return false }
         await respond(id: id, outcome: outcome, batchToken: batchToken)
+        return true
     }
 
     /// Writes one response envelope — immediately if it arrived on its own,

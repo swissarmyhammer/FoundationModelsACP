@@ -149,4 +149,36 @@ public final class AgentSideConnection: Sendable {
     public func close() async {
         await core.close()
     }
+
+    // MARK: - Deferred post-response work
+
+    /// Defers `work` until after this connection has written the response to
+    /// whichever inbound request is currently being handled on the calling
+    /// task — most importantly `prompt(_:)`, whose response must reach the
+    /// wire before the `running` `state_update` that reports the turn it just
+    /// accepted (spec §*Prompt Lifecycle*, "acknowledges acceptance").
+    ///
+    /// A handler cannot simply spawn a `Task` for that first `session/update`
+    /// and return: the new `Task` is an independent unit of concurrency that
+    /// can reach the wire before this connection's own response-writing task
+    /// does, depending on scheduling — a real race, not a hypothetical one.
+    /// This defers `work` to run only once the response is *provably*
+    /// written, by having the request-dispatch task itself run it right after
+    /// `respond`, rather than leaving the ordering to whichever task happens
+    /// to reach the transport first.
+    ///
+    /// Must be called synchronously from within the handler — i.e., before it
+    /// returns, with no intervening `await` that could hop to a different
+    /// task — and the handler itself must be running on the task dispatching
+    /// the request it wants to follow (true for every `Agent` method, which
+    /// `RoleConnectionCore` always calls directly, never via a spawned `Task`).
+    /// Calling this outside of handling an inbound request is a no-op: there
+    /// is no current request to follow, so `work` is silently dropped rather
+    /// than run at an arbitrary, unspecified time.
+    ///
+    /// - Parameter work: The deferred work, run once the current request's
+    ///   response has been handed to the transport.
+    public func afterRespondingToCurrentRequest(_ work: @escaping @Sendable () async -> Void) {
+        Connection.currentResponseHooks?.append(work)
+    }
 }
