@@ -119,6 +119,16 @@ public actor Connection {
         return entry.wireMethod
     }()
 
+    /// The JSON-RPC envelope's `error` member key, shared by every read site
+    /// that checks for it and every write site that sets it, so this file
+    /// states the field name once rather than repeating the literal.
+    private static let errorKey = "error"
+
+    /// The `$/cancel_request` notification's `requestId` field key, shared by
+    /// the read side (`handleCancelRequest`) and the write side
+    /// (`cancelOutbound`) so both agree on the same field name.
+    private static let requestIdKey = "requestId"
+
     /// One outbound request awaiting its response.
     private struct PendingRequest {
         /// Resumed with the response's `result`, or throwing on error.
@@ -354,7 +364,7 @@ public actor Connection {
     ///   response (no `result` or `error` member).
     private func owesResponse(_ item: JSONValue) -> Bool {
         guard case .object(let fields) = item else { return false }
-        return fields["id"] != nil && fields["result"] == nil && fields["error"] == nil
+        return fields["id"] != nil && fields["result"] == nil && fields[Self.errorKey] == nil
     }
 
     /// Routes one envelope by kind: request, notification, response,
@@ -375,7 +385,7 @@ public actor Connection {
         // outgoing envelope with the version constant.
         guard fields["jsonrpc", default: .null] == Self.jsonrpcVersion else {
             log("rejecting message without jsonrpc 2.0 version")
-            if let id, fields["result"] == nil, fields["error"] == nil {
+            if let id, fields["result"] == nil, fields[Self.errorKey] == nil {
                 // Owed a response (request-shaped, or a detectable stand-in).
                 await respond(id: id, outcome: .failure(.invalidRequest), batchToken: batchToken)
             } else if let id {
@@ -399,7 +409,7 @@ public actor Connection {
             }
             return
         }
-        if let id, fields["result"] != nil || fields["error"] != nil {
+        if let id, fields["result"] != nil || fields[Self.errorKey] != nil {
             resolve(id: id, fields: fields)
             return
         }
@@ -417,7 +427,7 @@ public actor Connection {
     ///
     /// - Parameter params: The notification's raw parameters.
     private func handleCancelRequest(params: JSONValue?) {
-        guard case .object(let fields) = params ?? .null, let requestId = fields["requestId"] else {
+        guard case .object(let fields) = params ?? .null, let requestId = fields[Self.requestIdKey] else {
             log("dropping $/cancel_request with no requestId")
             return
         }
@@ -547,7 +557,7 @@ public actor Connection {
         case .success(let result):
             envelope["result"] = result
         case .failure(let error):
-            envelope["error"] = error.wireValue
+            envelope[Self.errorKey] = error.wireValue
         }
         await deliver(.object(envelope), batchToken: batchToken)
     }
@@ -590,7 +600,7 @@ public actor Connection {
         let envelope: [String: JSONValue] = [
             "jsonrpc": Self.jsonrpcVersion,
             "id": .null,
-            "error": RequestError.parseError.wireValue,
+            Self.errorKey: RequestError.parseError.wireValue,
         ]
         await writeEncoded(.object(envelope), logMessage: "failed to write parse-error response")
     }
@@ -608,7 +618,7 @@ public actor Connection {
         }
         entry.timeout?.cancel()
         // Tolerate peers that emit `"error": null` alongside a result.
-        if let error = fields["error"], error != .null {
+        if let error = fields[Self.errorKey], error != .null {
             entry.continuation.resume(throwing: RequestError(wire: error))
         } else {
             entry.continuation.resume(returning: fields["result", default: .null])
@@ -705,7 +715,7 @@ public actor Connection {
         let notification = JSONValue.object([
             "jsonrpc": Self.jsonrpcVersion,
             "method": .string(Self.cancelRequestMethod),
-            "params": .object(["requestId": id]),
+            "params": .object([Self.requestIdKey: id]),
         ])
         await writeEncoded(notification, logMessage: "failed to send $/cancel_request")
     }
