@@ -2066,6 +2066,23 @@ extension SchemaGenerator {
     /// misread as one of the shorter suffixes.
     private static let definitionSuffixes = [notificationSuffix, responseSuffix, requestSuffix]
 
+    /// A grammatically-joined "a X, a Y, nor a Z" listing of
+    /// `definitionSuffixes`, for the unrecognized-suffix error below.
+    ///
+    /// Derived from the array itself so a future suffix addition keeps the
+    /// error message in sync automatically, instead of leaving a hardcoded
+    /// list of suffix names to drift stale. Omits the comma before "nor"
+    /// when there are exactly two items ("a X nor a Y"), matching standard
+    /// English list punctuation.
+    private static var definitionSuffixesDescription: String {
+        let described = definitionSuffixes.map { "a \($0)" }
+        guard let last = described.last else { return "" }
+        let rest = described.dropLast()
+        guard !rest.isEmpty else { return last }
+        let conjunction = rest.count > 1 ? ", nor " : " nor "
+        return rest.joined(separator: ", ") + conjunction + last
+    }
+
     /// A side's position in emission order (agent, client, protocol).
     ///
     /// - Parameter of: The side to rank.
@@ -2363,7 +2380,7 @@ extension SchemaGenerator {
             guard let suffix = Self.definitionSuffixes.first(where: { name.hasSuffix($0) }) else {
                 throw GeneratorError.unsupportedShape(
                     context: context,
-                    detail: "definition \(name) is neither a \(Self.requestSuffix), a \(Self.responseSuffix), nor a \(Self.notificationSuffix)"
+                    detail: "definition \(name) is neither \(Self.definitionSuffixesDescription)"
                 )
             }
             definitionsBySuffix[suffix, default: []].append(name)
