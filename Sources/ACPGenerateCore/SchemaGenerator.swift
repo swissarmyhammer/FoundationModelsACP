@@ -191,6 +191,9 @@ public struct SchemaGenerator: Sendable {
     /// The JSON Schema `type` value for a string fragment.
     private static let stringTypeName = "string"
 
+    /// The JSON Schema `type` value for an integer fragment.
+    private static let integerTypeName = "integer"
+
     /// The JSON Schema `type` value for JSON's null.
     private static let nullTypeName = "null"
 
@@ -446,6 +449,25 @@ public struct SchemaGenerator: Sendable {
 
     // MARK: - Union models
 
+    /// Validates that a union declares at least one variant.
+    ///
+    /// Shared by `classifyOneOf` and `classifyAnyOf`, whose empty-union
+    /// guards were previously two copies of the same three lines — extracted
+    /// here so the condition and thrown error can only drift in one place.
+    ///
+    /// - Parameters:
+    ///   - variants: The union's variant fragments.
+    ///   - name: The definition's schema name, for the thrown error's
+    ///     context.
+    /// - Throws: `GeneratorError.unsupportedShape` when `variants` is empty,
+    ///   so an empty `oneOf` or `anyOf` fails loudly instead of silently
+    ///   deferring to raw JSON.
+    private func validateNonEmptyUnion(_ variants: [JSONValue], name: String) throws {
+        guard !variants.isEmpty else {
+            throw GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail)
+        }
+    }
+
     /// Distinguishes the two `oneOf` families this stage emits from a `oneOf`
     /// this stage declines to model.
     ///
@@ -460,9 +482,7 @@ public struct SchemaGenerator: Sendable {
     /// - Throws: `GeneratorError.unsupportedShape` for an empty or
     ///   mixed-shape `oneOf`, so unknown constructs fail loudly.
     private func classifyOneOf(name: String, variants: [JSONValue]) throws -> DefinitionKind {
-        guard !variants.isEmpty else {
-            throw GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail)
-        }
+        try validateNonEmptyUnion(variants, name: name)
         if let rawKind = Self.agreedEnumRawKind(of: variants) {
             return .scalarEnum(rawKind)
         }
@@ -492,8 +512,8 @@ public struct SchemaGenerator: Sendable {
     /// and the protocol's string vocabularies on a single emission path
     /// instead of two that must be kept in step.
     private static let enumRawKinds: [String: EnumRawKind] = [
-        "string": .string,
-        "integer": .integer,
+        Self.stringTypeName: .string,
+        Self.integerTypeName: .integer,
     ]
 
     /// The raw kind a union's variants agree on, when every variant is a
@@ -551,9 +571,7 @@ public struct SchemaGenerator: Sendable {
         members: [String: JSONValue],
         variants: [JSONValue]
     ) throws -> DefinitionKind {
-        guard !variants.isEmpty else {
-            throw GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail)
-        }
+        try validateNonEmptyUnion(variants, name: name)
         if let rawKind = Self.agreedEnumRawKind(of: variants),
             variants.contains(where: { $0[Self.constKey] != nil })
         {
@@ -1609,10 +1627,10 @@ public struct SchemaGenerator: Sendable {
     /// so it maps to raw JSON.
     private static let scalarTypes: [String: (swiftName: String, allowedInvariant: GeneratorConfig.InvariantType?)] = [
         Self.stringTypeName: ("String", .absolutePath),
-        "integer": ("Int", .lineNumber),
+        Self.integerTypeName: ("Int", .lineNumber),
         "boolean": ("Bool", nil),
         "number": ("Double", nil),
-        objectTypeName: ("JSONValue", nil),
+        Self.objectTypeName: ("JSONValue", nil),
     ]
 
     private func resolveScalarType(
