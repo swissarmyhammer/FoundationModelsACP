@@ -18,8 +18,8 @@ comments:
   timestamp: 2026-07-27T23:56:00.890733+00:00
 depends_on:
 - 01KYD58WR23B5R69691FKDWJSG
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8480'
 title: M4 Initialization and capability negotiation
 ---
 ## Starting point
