@@ -198,6 +198,12 @@ public struct SchemaGenerator: Sendable {
     /// The JSON Schema `type` value for JSON's null.
     private static let nullTypeName = "null"
 
+    /// The `anyOf` arity of the nullable-type pattern (`T | null`): one
+    /// concrete variant alongside a `null` variant. Used by
+    /// `resolveCompositeType` to recognize a two-entry `anyOf` as sugar for a
+    /// nullable `T` rather than a genuine union.
+    private static let nullableAnyOfVariantCount = 2
+
     /// The schema keyword for exclusive unions.
     private static let oneOfKey = "oneOf"
 
@@ -1644,7 +1650,7 @@ public struct SchemaGenerator: Sendable {
         }
         if let anyOf = members[Self.anyOfKey]?.arrayValue {
             let nonNull = anyOf.filter { $0[Self.typeKey]?.stringValue != Self.nullTypeName }
-            if anyOf.count == 2, nonNull.count == 1 {
+            if anyOf.count == Self.nullableAnyOfVariantCount, nonNull.count == 1 {
                 var inner = try resolveType(fragment: nonNull[0], override: override, context: context)
                 inner.nullable = true
                 return inner

@@ -28,6 +28,21 @@ comments:
 
     Task left in `doing` per the /implement skill contract - ready for /review.
   timestamp: 2026-07-28T13:25:38.199237+00:00
+- actor: claude-code
+  id: 01kymfcq7337c7jqdvfgh04gx4
+  text: |-
+    Worked the "Review Findings (2026-07-28 08:31)" checklist item. The cited location (SchemaGenerator.swift:1022) is a doc comment inside defaultVariantCaseName and contains no literal 2 — verified by reading the file directly. Located the actual code the finding describes in resolveCompositeType, at what is now line 1653: `if anyOf.count == 2, nonNull.count == 1 { ... inner.nullable = true ... }`, the [T, null]-arity check that recognizes a two-entry anyOf as sugar for a nullable T. Confirmed via grep for "== 2\b" across Sources/ that this is the only such comparison in SchemaGenerator.swift.
+
+    Fix: added `private static let nullableAnyOfVariantCount = 2` next to the existing `nullTypeName` constant (around line 199), with a doc comment explaining it is the anyOf arity of the nullable-type pattern (T | null) and naming resolveCompositeType as its user. Updated the call site to `anyOf.count == Self.nullableAnyOfVariantCount`. Pure constant extraction, no semantic change.
+
+    Verification (fresh, this session): swift build --build-tests clean. swift test: 198+95 = 293 tests, 16+12 = 28 suites, 0 failures, 0 warnings — matches the stated baseline exactly (pure refactor, no new tests needed). swift package --allow-writing-to-package-directory generate-acp reports "nothing regenerated" (schema hash unchanged), and git status/diff show zero changes under Sources/FoundationModelsACP/Generated. diagnostics check working: 0 errors, 0 warnings.
+
+    Adversarial double-check (via really-done gate): PASS. It independently re-verified this was the sole [T, null]-arity check in the codebase (broad grep across Sources/Tests/Plugins, excluding Generated), confirmed constant naming/placement/doc-comment style matches surrounding conventions, re-ran build/test/regen fresh with identical results, and confirmed the diff is a single-line substitution with no other logic touched.
+
+    Also checked off the pre-existing Acceptance Criteria boxes (the !modeled.isEmpty guard, the synthetic-schema regression test, and green swift test / byte-identical regen) — that work was already completed and verified in the two prior session comments on this task, just never marked done on the card.
+
+    Leaving in doing for /review — only the two changed lines plus one added constant declaration in SchemaGenerator.swift; no other files touched by this pass.
+  timestamp: 2026-07-28T13:42:25.763724+00:00
 position_column: doing
 position_ordinal: '80'
 title: classifyAnyOf's object-branch has a vacuous-truth gap symmetric to the empty-anyOf fix
@@ -67,6 +82,10 @@ It fails safe today: `objectTaggedUnionModel` → `taggedUnionModel` re-derives 
 
 ## Acceptance criteria
 
-- [ ] Add `!modeled.isEmpty` (or equivalent) to the object-branch condition in `classifyAnyOf`, for symmetry with the guard already present in the `.taggedUnion` branch below it, so the failure is thrown at the classification site with a clear proximate cause instead of relying on a downstream re-derivation to catch it.
-- [ ] A synthetic-schema test pins the resulting behavior (throws `GeneratorError.unsupportedShape` with a clear detail, not a silent `.objectTaggedUnion` misclassification).
-- [ ] `swift test` green, `swift package generate-acp` byte-identical regeneration.
+- [x] Add `!modeled.isEmpty` (or equivalent) to the object-branch condition in `classifyAnyOf`, for symmetry with the guard already present in the `.taggedUnion` branch below it, so the failure is thrown at the classification site with a clear proximate cause instead of relying on a downstream re-derivation to catch it.
+- [x] A synthetic-schema test pins the resulting behavior (throws `GeneratorError.unsupportedShape` with a clear detail, not a silent `.objectTaggedUnion` misclassification).
+- [x] `swift test` green, `swift package generate-acp` byte-identical regeneration.
+
+## Review Findings (2026-07-28 08:31)
+
+- [x] `Sources/ACPGenerateCore/SchemaGenerator.swift:1022` — Hardcoded literal `2` represents the JSON Schema pattern for nullable types (type | null, which anyOf with 2 entries where 1 is non-null), but the pattern is not named—making the significance of the number invisible to readers. Define a named constant like `private static let nullableTypePatternVariantCount = 2` with a comment explaining it represents the (T | null) schema pattern, and use it in the comparison.
