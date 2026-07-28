@@ -340,6 +340,11 @@ private let repetitionsForOrderingRaceDetection = 500
 /// `SessionLifecycleTests.swift`.
 private let indefiniteForegroundWorkDuration: Duration = .seconds(3600)
 
+/// The time limit applied to every test in this suite except the ordering
+/// race, which needs its own longer limit to cover
+/// `repetitionsForOrderingRaceDetection` iterations.
+private let standardTestTimeout = 1  // minute
+
 // MARK: - Tests
 
 /// `session/prompt` acknowledges immediately and reports everything else —
@@ -420,7 +425,7 @@ private let indefiniteForegroundWorkDuration: Duration = .seconds(3600)
 
     // MARK: A full turn: running -> idle with a stopReason
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test(.timeLimit(.minutes(standardTestTimeout)))
     func aFullTurnProducesRunningThenIdleWithAStopReason() async throws {
         let (agentConn, client, session) = try await makeSessionPair(script: .completesImmediately, stopReason: .maxTokens)
         var updates = client.updates(for: session).makeAsyncIterator()
@@ -442,7 +447,7 @@ private let indefiniteForegroundWorkDuration: Duration = .seconds(3600)
 
     // MARK: The agent owns message identity
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test(.timeLimit(.minutes(standardTestTimeout)))
     func acceptingAPromptEmitsUserMessageChunksSharingOneStableAgentGeneratedMessageId() async throws {
         let (agentConn, client, session) = try await makeSessionPair(script: .completesImmediately)
         var updates = client.updates(for: session).makeAsyncIterator()
@@ -480,7 +485,7 @@ private let indefiniteForegroundWorkDuration: Duration = .seconds(3600)
 
     // MARK: requires_action, then resumed to running once answered
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test(.timeLimit(.minutes(standardTestTimeout)))
     func aBlockedTurnReportsRequiresActionThenResumesToRunningOnceAnswered() async throws {
         let selected = RequestPermissionOutcome.selected(
             SelectedPermissionOutcome(optionId: PermissionOptionId(rawValue: "allow"))
@@ -511,7 +516,7 @@ private let indefiniteForegroundWorkDuration: Duration = .seconds(3600)
 
     // MARK: session/cancel -> idle + cancelled
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test(.timeLimit(.minutes(standardTestTimeout)))
     func sessionCancelMidTurnYieldsIdleAndCancelled() async throws {
         let (agentConn, client, session) = try await makeSessionPair(script: .runsUntilCancelled)
         var updates = client.updates(for: session).makeAsyncIterator()

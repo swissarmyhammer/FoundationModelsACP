@@ -34,6 +34,40 @@ comments:
 
     Task remains in `doing`, ready for /review.
   timestamp: 2026-07-28T01:55:57.253390+00:00
+- actor: claude-code
+  id: 01kyk81px1djnnpstyxaq5y3f1
+  text: |-
+    Pulled back from review into doing to address the 2026-07-27 21:01 review findings. All 6 addressed:
+
+    1. Renamed `nextRequestID` -> `nextRequestId` throughout Connection.swift (declaration + both usages in `request(method:params:timeout:)`).
+
+    2-5. Extracted the repeated `do { try await transport.write(NDJSONCodec.encode(...)) } catch { log(...) } ` pattern into a new private helper on Connection:
+    ```
+    private func writeEncoded(_ value: JSONValue, logMessage: String) async {
+        do {
+            try await transport.write(NDJSONCodec.encode(value))
+        } catch {
+            log("\(logMessage): \(error)")
+        }
+    }
+    ```
+    placed after `log(_:)`. Updated all 4 call sites: `deliver()`'s standalone-response path, `deliver()`'s batch-flush path, `respondParseError()`, and `cancelOutbound()`. Verified these 4 are the only call sites with this exact log-and-swallow semantics -- `notify()` rethrows on failure and `write(_:failing:)` fails a specific pending continuation on failure, so neither was folded into the helper (different error-handling contracts).
+
+    6. In PromptLifecycleTests.swift, added `private let standardTestTimeout = 1  // minute` next to the other fixture constants and replaced the 4 occurrences of `.timeLimit(.minutes(1))` with `.timeLimit(.minutes(standardTestTimeout))`. Left `promptResponseArrivesBeforeTheFirstStateUpdate`'s own `.timeLimit(.minutes(2))` untouched -- it intentionally has a larger budget for its internal 500-iteration loop and is a separate concern from the plain per-test 1-minute constant.
+
+    Verification: `swift build --build-tests` clean (0 errors/0 warnings). `swift test` full suite: 185 tests/15 suites (FoundationModelsACPTests) + 75 tests/10 suites (ACPGenerateTests) = 260/25, all green, matching baseline. `mcp__sah__diagnostics check working`: 0 errors/0 warnings. Re-ran `swift test --filter PromptLifecycleTests` 10 additional times back to back (each run internally repeats the ordering-race check `repetitionsForOrderingRaceDetection` = 500x) -- all 10 runs green, so the response-before-first-state_update ordering guarantee from the M3/M6 concurrency fix still holds after this refactor (5,000 additional ordering-race iterations with zero failures, on top of the ~30 full-suite reruns already logged from the original implementation).
+
+    Adversarial double-check (via really-done) launched; will report its verdict once it lands. Task remains in `doing`.
+  timestamp: 2026-07-28T02:14:50.529840+00:00
+- actor: claude-code
+  id: 01kyk82v7gvy8yc3vj000t07p7
+  text: |-
+    Adversarial double-check (via really-done) verdict: PASS. Independently confirmed: the `writeEncoded` extraction is semantically identical to the 4 original inline blocks (same encode call, same swallow-and-log behavior, same log message text per site); no remaining references to `nextRequestID` anywhere in the tree; `standardTestTimeout` preserves the 1-minute duration at all 4 sites and the ordering test's separate `.timeLimit(.minutes(2))` was correctly left untouched; `notify()` and `write(_:failing:)` correctly left out of the extraction since they have different error-handling contracts (rethrow / fail-a-specific-continuation vs. log-and-swallow); no unrelated changes in the diff.
+
+    All verification green: `swift build --build-tests` (0 errors/0 warnings), full `swift test` (260 tests/25 suites, matching baseline), `mcp__sah__diagnostics check working` (0/0), and 10 extra back-to-back `swift test --filter PromptLifecycleTests` runs (5,000 total ordering-race iterations) all passing -- the response-before-first-state_update guarantee holds after the refactor.
+
+    All 6 review findings fixed. Task remains in `doing`, ready for `/review`.
+  timestamp: 2026-07-28T02:15:27.728255+00:00
 depends_on:
 - 01KYD58WV07Q982G94JHT1SH5G
 position_column: doing
@@ -76,3 +110,12 @@ Also required: after accepting a prompt the agent must emit a `user_message` or 
 - [ ] A blocked turn reports `requires_action`, then resumes to `running` once answered.
 - [ ] Cancel mid-turn yields idle + `cancelled`.
 - [ ] The acknowledged prompt's `messageId` is present and stable across its chunks.
+
+## Review Findings (2026-07-27 21:01)
+
+- [ ] `Sources/FoundationModelsACP/Connection/Connection.swift:153` — Acronym `ID` in `lowerCamelCase` context should be downcase-first as `nextRequestId`, not `nextRequestID`. The project exception for `…Id` ACP types applies only to machine-generated types following the `SessionId`/`ToolCallId` pattern; this counter variable is neither ACP-generated nor following that pattern. Rename `nextRequestID` to `nextRequestId` throughout Connection.swift (lines 153, and any usages in the `request` method).
+- [ ] `Sources/FoundationModelsACP/Connection/Connection.swift:288` — The pattern `do { try await transport.write(NDJSONCodec.encode(...)) } catch { log(...) }` is repeated 4 times across the file. Extract a shared helper method: `private func writeEncoded(_ value: JSONValue, logMessage: String) async { do { try await transport.write(NDJSONCodec.encode(value)) } catch { log(logMessage + ": \(error)") } }` and replace all 4 occurrences.
+- [ ] `Sources/FoundationModelsACP/Connection/Connection.swift:306` — Second occurrence of write-encode-catch-log pattern in deliver() method (batch response path). Use extracted helper method instead of duplicating the try-catch block.
+- [ ] `Sources/FoundationModelsACP/Connection/Connection.swift:321` — Third occurrence of write-encode-catch-log pattern in respondParseError() method. Use extracted helper method instead of duplicating the try-catch block.
+- [ ] `Sources/FoundationModelsACP/Connection/Connection.swift:483` — Fourth occurrence of write-encode-catch-log pattern in cancelOutbound() method. Use extracted helper method instead of duplicating the try-catch block.
+- [ ] `Tests/FoundationModelsACPTests/PromptLifecycleTests.swift:376` — Hardcoded timeout value 1 (minute) configures test behavior and should be a named constant. Extract to a named constant: `private let standardTestTimeout = 1 // minute` and use `.timeLimit(.minutes(standardTestTimeout))`.

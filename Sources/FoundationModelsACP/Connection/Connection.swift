@@ -151,7 +151,7 @@ public actor Connection {
     private let onClose: CloseHandler?
 
     /// Monotonic id for outbound requests.
-    private var nextRequestID = 1
+    private var nextRequestId = 1
     /// Outbound requests awaiting a response, keyed by their wire id.
     private var pending: [RequestID: PendingRequest] = [:]
     /// In-flight inbound request handlers, keyed by the request's own wire
@@ -223,8 +223,8 @@ public actor Connection {
         timeout: Duration? = nil
     ) async throws -> JSONValue {
         guard !isClosed else { throw ConnectionError.closed }
-        let id: RequestID = .number(Double(nextRequestID))
-        nextRequestID += 1
+        let id: RequestID = .number(Double(nextRequestId))
+        nextRequestId += 1
         var envelope: [String: JSONValue] = [
             "jsonrpc": Self.jsonrpcVersion,
             "id": id,
@@ -535,11 +535,7 @@ public actor Connection {
     ///     standalone frame.
     private func deliver(_ responseObject: JSONValue, batchToken: Int?) async {
         guard let batchToken else {
-            do {
-                try await transport.write(NDJSONCodec.encode(responseObject))
-            } catch {
-                log("failed to write response: \(error)")
-            }
+            await writeEncoded(responseObject, logMessage: "failed to write response")
             return
         }
         guard var state = batches[batchToken] else {
@@ -555,11 +551,7 @@ public actor Connection {
         state.remaining -= 1
         if state.remaining <= 0 {
             batches.removeValue(forKey: batchToken)
-            do {
-                try await transport.write(NDJSONCodec.encode(JSONValue.array(state.results)))
-            } catch {
-                log("failed to write batch response: \(error)")
-            }
+            await writeEncoded(.array(state.results), logMessage: "failed to write batch response")
         } else {
             batches[batchToken] = state
         }
@@ -573,11 +565,7 @@ public actor Connection {
             "id": .null,
             "error": RequestError.parseError.wireValue,
         ]
-        do {
-            try await transport.write(NDJSONCodec.encode(JSONValue.object(envelope)))
-        } catch {
-            log("failed to write parse-error response: \(error)")
-        }
+        await writeEncoded(.object(envelope), logMessage: "failed to write parse-error response")
     }
 
     /// Resolves the pending continuation for a response's `id`; responses for
@@ -607,6 +595,24 @@ public actor Connection {
     /// - Parameter message: The diagnostic text, without prefix.
     private func log(_ message: String) {
         logger.log(Self.logPrefix + message)
+    }
+
+    /// Encodes and writes one JSON value to the transport, logging rather
+    /// than throwing on failure. Every call site here treats an outbound
+    /// write as best effort with no caller awaiting its result — unlike
+    /// `write(_:failing:)`, which rejects a specific pending request instead
+    /// of merely logging, because a caller is waiting on that one.
+    ///
+    /// - Parameters:
+    ///   - value: The JSON value to encode and write.
+    ///   - logMessage: The diagnostic logged, with the underlying error
+    ///     appended, if the write fails.
+    private func writeEncoded(_ value: JSONValue, logMessage: String) async {
+        do {
+            try await transport.write(NDJSONCodec.encode(value))
+        } catch {
+            log("\(logMessage): \(error)")
+        }
     }
 
     /// Schedules the task that rejects request `id` with
@@ -674,11 +680,7 @@ public actor Connection {
             "method": .string(Self.cancelRequestMethod),
             "params": .object(["requestId": id]),
         ])
-        do {
-            try await transport.write(NDJSONCodec.encode(notification))
-        } catch {
-            log("failed to send $/cancel_request: \(error)")
-        }
+        await writeEncoded(notification, logMessage: "failed to send $/cancel_request")
     }
 
     /// Fails loud: marks the connection closed, rejects every pending
