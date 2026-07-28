@@ -238,6 +238,33 @@ public actor Connection {
 
     // MARK: - Outbound
 
+    /// Builds an outbound request or notification envelope: the `jsonrpc`
+    /// version, `method`, `params` when non-`nil`, and `id` when provided.
+    ///
+    /// `request` and `notify` share this rather than each assembling their
+    /// own dictionary literal, so a future change to method or params
+    /// encoding has exactly one call site to update instead of two that
+    /// would otherwise need to be kept in lockstep by hand.
+    ///
+    /// - Parameters:
+    ///   - id: The request's wire id, or `nil` for a notification, which
+    ///     carries none.
+    ///   - method: The JSON-RPC method name.
+    ///   - params: The parameters, passed through verbatim; the member is
+    ///     omitted entirely when `nil`.
+    /// - Returns: The encodable envelope.
+    private static func outboundEnvelope(id: RequestId?, method: String, params: JSONValue?) -> JSONValue {
+        var envelope: [String: JSONValue] = [
+            Self.jsonrpcKey: Self.jsonrpcVersion,
+            Self.methodKey: .string(method),
+        ]
+        if let id {
+            envelope[Self.idKey] = id
+        }
+        envelope[Self.paramsKey] = params
+        return .object(envelope)
+    }
+
     /// Sends one request and suspends until the peer responds.
     ///
     /// - Parameters:
@@ -261,13 +288,7 @@ public actor Connection {
         guard !isClosed else { throw ConnectionError.closed }
         let id: RequestId = .number(Double(nextRequestID))
         nextRequestID += 1
-        var envelope: [String: JSONValue] = [
-            Self.jsonrpcKey: Self.jsonrpcVersion,
-            Self.idKey: id,
-            Self.methodKey: .string(method),
-        ]
-        envelope[Self.paramsKey] = params
-        let frame = try NDJSONCodec.encode(JSONValue.object(envelope))
+        let frame = try NDJSONCodec.encode(Self.outboundEnvelope(id: id, method: method, params: params))
         let limit = timeout ?? requestTimeout
 
         return try await withTaskCancellationHandler {
@@ -304,12 +325,7 @@ public actor Connection {
     ///   rethrows transport write failures.
     public func notify(method: String, params: JSONValue? = nil) async throws {
         guard !isClosed else { throw ConnectionError.closed }
-        var envelope: [String: JSONValue] = [
-            Self.jsonrpcKey: Self.jsonrpcVersion,
-            Self.methodKey: .string(method),
-        ]
-        envelope[Self.paramsKey] = params
-        try await transport.write(NDJSONCodec.encode(JSONValue.object(envelope)))
+        try await transport.write(NDJSONCodec.encode(Self.outboundEnvelope(id: nil, method: method, params: params)))
     }
 
     /// Shuts the connection down: rejects every pending request with
