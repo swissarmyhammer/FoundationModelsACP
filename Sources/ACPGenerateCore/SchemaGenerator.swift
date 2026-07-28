@@ -2456,6 +2456,13 @@ extension Emitter {
         ".\(String(describing: side))"
     }
 
+    /// The property name shared by the stable and unstable routing tables.
+    ///
+    /// `ACPMethodTable.methods` and `Unstable.MethodTable.methods` both use
+    /// this name; extracting it keeps the two header declarations in
+    /// lockstep if the property is ever renamed.
+    private static let methodsPropertyName = "methods"
+
     /// Assembles a rendered table declaration.
     ///
     /// Both routing tables share this builder: header lines, one line block
@@ -2494,7 +2501,7 @@ extension Emitter {
                 "public enum ACPMethodTable {",
                 "    /// Every stable method, ordered agent, client, protocol and by wire",
                 "    /// method name within each side.",
-                "    public static let methods: [MethodInfo] = [",
+                "    public static let \(Self.methodsPropertyName): [MethodInfo] = [",
             ],
             entries: methods,
             entryLines: { method in
@@ -2534,7 +2541,7 @@ extension Emitter {
                 "    public enum MethodTable {",
                 "        /// Every unstable-only method, ordered agent, client, protocol and",
                 "        /// by wire method name within each side.",
-                "        public static let methods: [UnstableMethodInfo] = [",
+                "        public static let \(Self.methodsPropertyName): [UnstableMethodInfo] = [",
             ],
             entries: methods,
             entryLines: { method in
