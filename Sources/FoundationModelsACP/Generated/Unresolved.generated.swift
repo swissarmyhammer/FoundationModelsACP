@@ -3,17 +3,17 @@
 
 /// A JSON-RPC response object.
 ///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
+/// Permanently deferred: no variant of this `anyOf` union pins a discriminator, so there is nothing to key a Swift enum on; raw JSON is its representation.
 public typealias AgentResponse = JSONValue
 
 /// A JSON-RPC response object.
 ///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
+/// Permanently deferred: no variant of this `anyOf` union pins a discriminator, so there is nothing to key a Swift enum on; raw JSON is its representation.
 public typealias ClientResponse = JSONValue
 
 /// Resource content that can be embedded in a message.
 ///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
+/// Permanently deferred: no variant of this `anyOf` union pins a discriminator, so there is nothing to key a Swift enum on; raw JSON is its representation.
 public typealias EmbeddedResourceResource = JSONValue
 
 /// Allows the Agent to send an arbitrary notification that is not part of the ACP spec.
@@ -53,10 +53,10 @@ public typealias ExtResponse = JSONValue
 ///
 /// \[2\] Fractional parts may be problematic, since many decimal fractions cannot be represented exactly as binary fractions.
 ///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
+/// Permanently deferred: no variant of this `anyOf` union pins a discriminator, so there is nothing to key a Swift enum on; raw JSON is its representation.
 public typealias RequestID = JSONValue
 
 /// Possible values for a session configuration option.
 ///
-/// Placeholder seam: schema `anyOf` union, decoded as raw JSON until a later generator stage replaces it.
+/// Permanently deferred: no variant of this `anyOf` union pins a discriminator, so there is nothing to key a Swift enum on; raw JSON is its representation.
 public typealias SessionConfigSelectOptions = JSONValue
