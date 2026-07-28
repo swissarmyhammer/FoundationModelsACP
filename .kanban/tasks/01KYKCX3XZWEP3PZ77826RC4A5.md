@@ -43,8 +43,8 @@ comments:
 
     Leaving in doing for /review — only the two changed lines plus one added constant declaration in SchemaGenerator.swift; no other files touched by this pass.
   timestamp: 2026-07-28T13:42:25.763724+00:00
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8980'
 title: classifyAnyOf's object-branch has a vacuous-truth gap symmetric to the empty-anyOf fix
 ---
 ## Why this card exists
