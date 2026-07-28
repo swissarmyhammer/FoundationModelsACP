@@ -77,6 +77,52 @@ import FoundationModelsACP
         return try encoder.encode(try JSONDecoder().decode(JSONValue.self, from: document))
     }
 
+    /// The true original schema spelling for every name the generator emits,
+    /// keyed by the emitted name.
+    ///
+    /// Built by walking the vendored schema's own `$defs` and computing, for
+    /// each definition name, the same two steps `SchemaGenerator.emittedName`
+    /// applies before a declaration is emitted: `config.typeRenames`, then
+    /// `applyKnownAcronymCasing`. Both are private to `SchemaGenerator`, so
+    /// the acronym step is mirrored here rather than un-applied after the
+    /// fact — un-applying is not safe in general, since it is not
+    /// necessarily invertible (a schema name already spelled `HTTP` and one
+    /// spelled `Http` would both re-case to `HTTP`, so which original
+    /// spelling an emitted `HTTP` came from cannot be recovered from the
+    /// emitted name alone). Walking forward from the schema, name by name, has
+    /// no such ambiguity: each `$defs` key names exactly the declaration its
+    /// own transform produces.
+    ///
+    /// - Returns: Emitted name to original schema name, for every definition
+    ///   the generator actually emits a top-level declaration for.
+    /// - Throws: An error when the vendored schema cannot be read or parsed,
+    ///   or a test failure when it has no top-level `$defs` object.
+    private static func originalSchemaNames() throws -> [String: String] {
+        let schema = try JSONDecoder().decode(JSONValue.self, from: try packageFile(set.schemaPath))
+        let definitions = try #require(schema["$defs"]?.objectValue)
+        let acronyms = Set(set.config.knownAcronyms.map { $0.uppercased() })
+        func emittedName(of name: String) -> String {
+            let renamed = set.config.typeRenames[name] ?? name
+            guard !acronyms.isEmpty else { return renamed }
+            var words: [String] = []
+            var word = ""
+            for character in renamed {
+                if character.isUppercase, !word.isEmpty {
+                    words.append(word)
+                    word = ""
+                }
+                word.append(character)
+            }
+            if !word.isEmpty { words.append(word) }
+            return words.map { acronyms.contains($0.uppercased()) ? $0.uppercased() : $0 }.joined()
+        }
+        return Dictionary(
+            uniqueKeysWithValues: definitions.keys
+                .filter { !set.config.handwrittenDefinitions.contains($0) }
+                .map { (emittedName(of: $0), $0) }
+        )
+    }
+
     @Test func primarySetIsTheTopLevelVendoredV2Artifacts() throws {
         #expect(Self.set.versionLabel == "v2")
         #expect(Self.set.outputNamespace == nil)
@@ -391,9 +437,12 @@ import FoundationModelsACP
         // is the one that says what broke.
         //
         // Names are compared as the *schema* spells them, since the emitter
-        // renames a few — `Error` sorts where `Error` sorts, not where
-        // `ACPError` would.
-        let schemaNames = Dictionary(uniqueKeysWithValues: Self.set.config.typeRenames.map { ($1, $0) })
+        // both renames a few (`Error` sorts where `Error` sorts, not where
+        // `ACPError` would) and uppercases known acronyms inside others
+        // (`MCPServerHTTP` sorts where `McpServerHttp` sorts, not where
+        // `MCPServerHTTP` would). `originalSchemaNames()` recovers the true
+        // spelling for both.
+        let schemaNames = try Self.originalSchemaNames()
         let emitted = try Self.generateFromVendoredArtifacts().mapValues { contents in
             Self.declaredTypeNames(in: contents).map { schemaNames[$0] ?? $0 }
         }
