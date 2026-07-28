@@ -49,8 +49,15 @@ enum DefinitionKind {
     /// struct with a nested tagged-union enum.
     case objectTaggedUnion
 
-    /// An `anyOf`/`enum` definition deferred to a later generator stage;
-    /// emitted as a placeholder typealias seam.
+    /// An `anyOf`/`enum` definition this generator does not model as a typed
+    /// declaration; emitted as a placeholder typealias seam.
+    ///
+    /// Not necessarily a future generator stage's work: today every reachable
+    /// case is a union whose variants pin no discriminator at all, which no
+    /// amount of generator logic can key a Swift enum on — see
+    /// `deferredUnionReason`, which composes the placeholder's banner text
+    /// from `keyword` and the definition's own fragment rather than assuming
+    /// one fixed reason.
     case deferredUnion(keyword: String)
 
     /// A definition with no shape at all (`ExtRequest` and friends): raw JSON.

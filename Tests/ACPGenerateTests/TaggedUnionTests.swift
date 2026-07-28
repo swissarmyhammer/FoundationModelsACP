@@ -3,40 +3,10 @@ import Testing
 
 @testable import ACPGenerateCore
 
-/// Reduces JSON bytes to a canonical sorted-keys form.
-///
-/// Byte comparisons of canonicalized JSON ignore key order and nothing else.
-///
-/// - Parameter data: The JSON bytes to canonicalize.
-/// - Returns: The same JSON re-serialized with sorted keys.
-/// - Throws: Rethrows `JSONSerialization` failures.
-private func canonicalized(_ data: Data) throws -> Data {
-    let object = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
-    return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .fragmentsAllowed])
-}
-
-/// Decodes a fixture and asserts it re-encodes byte-equivalent.
-///
-/// Byte-equivalence is modulo key order; the re-encoded bytes must also
-/// decode back equal to the first decode.
-///
-/// - Parameters:
-///   - type: The generated type to round-trip.
-///   - fixture: The wire JSON.
-/// - Returns: The decoded value for further case assertions.
-/// - Throws: Rethrows decoding/encoding failures as test failures.
-@discardableResult
-private func assertRoundTrips<T: Codable & Equatable>(_ type: T.Type, fixture: String) throws -> T {
-    let data = Data(fixture.utf8)
-    let decoded = try JSONDecoder().decode(T.self, from: data)
-    let reencoded = try JSONEncoder().encode(decoded)
-    #expect(try canonicalized(reencoded) == canonicalized(data), "re-encoding \(fixture) changed the wire form")
-    let decodedAgain = try JSONDecoder().decode(T.self, from: reencoded)
-    #expect(decodedAgain == decoded)
-    return decoded
-}
-
-/// on that discriminator.
+/// Tests `oneOf` tagged-union classification: the shapes it rejects loudly
+/// (mixed variant shapes, disagreeing discriminator keys, payload fields
+/// beyond the discriminator, Swift-keyword wire values) and the emitted
+/// source's own escaping safety for a hostile tag.
 @Suite struct TaggedUnionEmissionTests {
     @Test func oneOfMixingStringAndObjectVariantsFailsLoudly() throws {
         let schema = Data(
@@ -154,6 +124,69 @@ private func assertRoundTrips<T: Codable & Equatable>(_ type: T.Type, fixture: S
             }
             """.utf8)
         #expect(throws: GeneratorError.self) {
+            _ = try SchemaGenerator().generate(schemaJSON: schema)
+        }
+    }
+
+    @Test func oneOfFallbackPinningItsOwnConstDefersRatherThanMismodeling() throws {
+        // A `not`-guarded variant that also pins a `const` of its own
+        // contradicts the `not` beside it and is the union's own evidence
+        // for which member the discriminator is, not a catch-all —
+        // `isUnknownFallbackVariant`'s documented gap for `oneOf`. It must
+        // defer the whole definition to raw JSON rather than let the
+        // contradictory variant reach `discriminatorTag` unfiltered and
+        // silently become an extra case.
+        let schema = Data(
+            """
+            {
+              "$defs": {
+                "Ambiguous": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": { "type": { "type": "string", "const": "a" } },
+                      "required": ["type"]
+                    },
+                    {
+                      "type": "object",
+                      "not": { "properties": { "type": { "enum": ["a"] } } },
+                      "properties": { "type": { "type": "string", "const": "b" } },
+                      "required": ["type"]
+                    }
+                  ]
+                }
+              }
+            }
+            """.utf8)
+        let generated = try SchemaGenerator().generate(schemaJSON: schema)
+        let unresolved = try #require(generated.first { $0.name == "Unresolved.generated.swift" })
+        #expect(unresolved.contents.contains("public typealias Ambiguous = JSONValue"))
+        let unions = try #require(generated.first { $0.name == "Unions.generated.swift" })
+        #expect(!unions.contents.contains("Ambiguous"))
+    }
+
+    @Test func oneOfWhoseOnlyVariantIsTheUnknownFallbackFailsOnTheEmptyUnionDetail() throws {
+        // Every variant is a genuine (non-contradictory) catch-all, so
+        // classification still reaches `.taggedUnion` — but `taggedUnionModel`
+        // then filters it out via `unionVariants(of:)`, leaving no variant to
+        // build a case from. Pins the `emptyUnionDetail` string this call
+        // site shares with `classifyOneOf`'s own empty-`oneOf` guard.
+        let schema = Data(
+            """
+            {
+              "$defs": {
+                "OnlyFallback": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "not": { "properties": { "type": { "enum": ["a"] } } }
+                    }
+                  ]
+                }
+              }
+            }
+            """.utf8)
+        #expect(throws: GeneratorError.unsupportedShape(context: "OnlyFallback", detail: "empty oneOf")) {
             _ = try SchemaGenerator().generate(schemaJSON: schema)
         }
     }

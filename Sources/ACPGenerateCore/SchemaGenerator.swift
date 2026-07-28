@@ -117,7 +117,7 @@ public struct SchemaGenerator: Sendable {
                 placeholders.append(
                     Emitter.placeholder(
                         name: emittedName(name: name),
-                        reason: "Placeholder seam: schema `\(keyword)` union, decoded as raw JSON until a later generator stage replaces it.",
+                        reason: deferredUnionReason(keyword: keyword, fragment: fragment),
                         documentation: documentation
                     )
                 )
@@ -265,6 +265,35 @@ public struct SchemaGenerator: Sendable {
         }
     }
 
+    /// The placeholder banner explaining why a `.deferredUnion` definition
+    /// stays raw JSON instead of a typed declaration.
+    ///
+    /// Every `\(keyword)` union the vendored schema currently defers to this
+    /// seam has no variant that pins any discriminator at all — nothing a
+    /// Swift enum could key on — so for those the deferral is permanent: only
+    /// a re-vendor that adds a discriminator could change it, not a future
+    /// revision of this generator. The wording says so plainly rather than
+    /// promising work already scheduled.
+    ///
+    /// `classifyAnyOf`'s fallback and mixed-shape branches can in principle
+    /// also land a definition here for a union whose variants *do* pin a
+    /// discriminator but conflict in a way the generator declines to
+    /// resolve. That shape is unreached today (see `isUnknownFallbackVariant`
+    /// and `classifyAnyOf`), so it gets its own wording rather than
+    /// borrowing the "no discriminator" claim, which would not be true of it.
+    ///
+    /// - Parameters:
+    ///   - keyword: The schema keyword (`oneOf`, `anyOf`, or `enum`) that
+    ///     produced the deferral.
+    ///   - fragment: The definition's schema fragment.
+    /// - Returns: The banner text for the generated placeholder typealias.
+    private func deferredUnionReason(keyword: String, fragment: JSONValue) -> String {
+        guard declaredUnionVariants(of: fragment).contains(where: hasConstDiscriminator) else {
+            return "Permanently deferred: no variant of this `\(keyword)` union pins a discriminator, so there is nothing to key a Swift enum on; raw JSON is its representation."
+        }
+        return "Deferred: this `\(keyword)` union's variants pin discriminators the generator cannot reconcile into one Swift enum; raw JSON is its representation."
+    }
+
     /// Maps a schema definition name to its emitted Swift type name.
     ///
     /// - Parameter name: The schema definition name.
@@ -403,13 +432,17 @@ public struct SchemaGenerator: Sendable {
 
     // MARK: - Union models
 
-    /// Distinguishes the two `oneOf` families this stage emits.
+    /// Distinguishes the two `oneOf` families this stage emits from a `oneOf`
+    /// this stage declines to model.
     ///
     /// - Parameters:
     ///   - name: The definition's schema name.
     ///   - variants: The `oneOf` entries.
     /// - Returns: `.scalarEnum` when every variant is a constant of one scalar
-    ///   type, `.taggedUnion` when every variant is a discriminated object.
+    ///   type, `.taggedUnion` when every variant is a discriminated object
+    ///   and any `not`-guarded fallback is the genuine unknown-discriminator
+    ///   catch-all, `.deferredUnion` when a fallback instead pins a `const`
+    ///   of its own — see `isUnknownFallbackVariant`.
     /// - Throws: `GeneratorError.unsupportedShape` for an empty or
     ///   mixed-shape `oneOf`, so unknown constructs fail loudly.
     private func classifyOneOf(name: String, variants: [JSONValue]) throws -> DefinitionKind {
@@ -419,13 +452,24 @@ public struct SchemaGenerator: Sendable {
         if let rawKind = Self.agreedEnumRawKind(of: variants) {
             return .scalarEnum(rawKind)
         }
-        if variants.allSatisfy({ $0[Self.typeKey]?.stringValue == "object" }) {
-            return .taggedUnion
+        guard variants.allSatisfy({ $0[Self.typeKey]?.stringValue == "object" }) else {
+            throw GeneratorError.unsupportedShape(
+                context: name,
+                detail: "\(Self.oneOfKey) mixes variant shapes; expected all scalar consts or all discriminated objects"
+            )
         }
-        throw GeneratorError.unsupportedShape(
-            context: name,
-            detail: "\(Self.oneOfKey) mixes variant shapes; expected all scalar consts or all discriminated objects"
-        )
+        // Mirrors `classifyAnyOf`'s fallback guard: a `not`-guarded variant
+        // that also pins a `const` of its own contradicts the `not` beside
+        // it and is the union's own evidence for which member the
+        // discriminator is, not a catch-all. Without this guard it would
+        // survive `unionVariants(of:)` unfiltered and reach
+        // `discriminatorTag`, yielding an extra case or a thrown
+        // `unsupportedShape` instead of the documented deferral.
+        let fallbacks = variants.filter { $0[Self.notKey] != nil }
+        guard fallbacks.allSatisfy(isUnknownFallbackVariant) else {
+            return .deferredUnion(keyword: Self.oneOfKey)
+        }
+        return .taggedUnion
     }
 
     /// The JSON `type` keywords a constant union may be built from, and the
@@ -563,11 +607,12 @@ public struct SchemaGenerator: Sendable {
     /// agreement check with the odd variant silently unmodeled — so
     /// `classifyAnyOf` defers the whole definition to raw JSON instead.
     ///
-    /// That deferral is an `anyOf` guard. `oneOf` has none, so there a
-    /// catch-all reaches `discriminatorTag` — yielding an extra case, or a
-    /// thrown `unsupportedShape`. That path is unreached today: the vendored
-    /// schema contains no definition-level `oneOf` at all. Add the same guard
-    /// to `classifyOneOf` before relying on one.
+    /// `classifyOneOf` carries the same guard, for the same reason: a
+    /// contradictory fallback there would otherwise survive
+    /// `unionVariants(of:)` unfiltered and reach `discriminatorTag`. Both
+    /// guards are unreached today — the vendored schema contains no
+    /// definition-level `oneOf` at all — but must stay correct for when a
+    /// re-vendor introduces one.
     ///
     /// - Parameter variant: The union variant fragment.
     /// - Returns: `true` when the variant negates the known discriminators and
