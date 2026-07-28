@@ -459,17 +459,8 @@ public actor Connection {
             // is what makes deferred work provably follow the response
             // rather than merely being likely to.
             let hooks = ResponseHooks()
-            let outcome: Result<JSONValue, RequestError> = await Self.$currentResponseHooks.withValue(hooks) {
-                do {
-                    guard let handler else { throw RequestError.methodNotFound(method) }
-                    return .success(try await handler(method, params))
-                } catch is CancellationError {
-                    return .failure(.requestCancelled)
-                } catch let error as RequestError {
-                    return .failure(error)
-                } catch {
-                    return .failure(.internalError(detail: String(describing: error)))
-                }
+            let outcome = await Self.$currentResponseHooks.withValue(hooks) {
+                await Self.outcome(of: handler, method: method, params: params)
             }
             // Only run deferred hooks when a response was actually written:
             // `completeInbound` skips writing if the connection closed while
@@ -480,6 +471,42 @@ public actor Connection {
             }
         }
         inboundTasks[id] = task
+    }
+
+    /// Computes the outcome of invoking `handler` with `method`/`params`,
+    /// translating any thrown error into a typed `RequestError` outcome:
+    /// `.methodNotFound` when there is no handler at all, the thrown
+    /// `RequestError` verbatim when the handler raises one, `.requestCancelled`
+    /// for a `CancellationError`, and `.internalError` for anything else.
+    ///
+    /// A `static` helper rather than an actor method: it touches no actor
+    /// state, so keeping it outside actor isolation avoids an unnecessary hop
+    /// on this concurrency-critical dispatch path, and it keeps
+    /// `dispatchRequest`'s `Task` body from nesting a `do`/`catch` inside the
+    /// task-local `withValue` closure.
+    ///
+    /// - Parameters:
+    ///   - handler: The request handler to invoke, or `nil` when none is
+    ///     configured.
+    ///   - method: The JSON-RPC method name.
+    ///   - params: The request parameters, passed through verbatim.
+    /// - Returns: `.success` with the handler's result, or `.failure` with the
+    ///   translated error.
+    private static func outcome(
+        of handler: RequestHandler?,
+        method: String,
+        params: JSONValue?
+    ) async -> Result<JSONValue, RequestError> {
+        do {
+            guard let handler else { throw RequestError.methodNotFound(method) }
+            return .success(try await handler(method, params))
+        } catch is CancellationError {
+            return .failure(.requestCancelled)
+        } catch let error as RequestError {
+            return .failure(error)
+        } catch {
+            return .failure(.internalError(detail: String(describing: error)))
+        }
     }
 
     /// Retires one inbound handler task and sends its response, unless the
