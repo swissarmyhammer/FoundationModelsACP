@@ -16,6 +16,12 @@ enum Emitter {
     /// The indentation prefix for two nesting levels.
     private static let indent2 = indentUnit + indentUnit
 
+    /// The indentation prefix for three nesting levels.
+    private static let indent3 = indentUnit + indent2
+
+    /// The indentation prefix for four nesting levels.
+    private static let indent4 = indent2 + indent2
+
     /// Assembles a generated file from rendered declarations.
     ///
     /// - Parameters:
@@ -68,15 +74,15 @@ enum Emitter {
         var lines = docLines(documentation, indent: "")
         lines.append(contentsOf: [
             "public struct \(name): WireRawValueCodable, Hashable, Sendable {",
-            "    /// The opaque identifier string as it crosses the wire.",
-            "    public let rawValue: String",
+            indentUnit + "/// The opaque identifier string as it crosses the wire.",
+            indentUnit + "public let rawValue: String",
             "",
-            "    /// Creates a `\(name)` wrapping the given wire string.",
-            "    ///",
-            "    /// - Parameter rawValue: The opaque identifier string.",
-            "    public init(rawValue: String) {",
-            "        self.rawValue = rawValue",
-            "    }",
+            indentUnit + "/// Creates a `\(name)` wrapping the given wire string.",
+            indentUnit + "///",
+            indentUnit + "/// - Parameter rawValue: The opaque identifier string.",
+            indentUnit + "public init(rawValue: String) {",
+            indent2 + "self.rawValue = rawValue",
+            indentUnit + "}",
             "}",
         ])
         return lines.joined(separator: "\n")
@@ -114,8 +120,8 @@ enum Emitter {
         lines.append("public struct \(model.name): Codable, Hashable, Sendable {")
         guard !model.properties.isEmpty else {
             lines.append(contentsOf: [
-                "    /// Creates a `\(model.name)`.",
-                "    public init() {}",
+                indentUnit + "/// Creates a `\(model.name)`.",
+                indentUnit + "public init() {}",
                 "}",
             ])
             return lines.joined(separator: "\n")
@@ -124,7 +130,7 @@ enum Emitter {
         for (index, property) in model.properties.enumerated() {
             if index > 0 { lines.append("") }
             lines.append(contentsOf: docLines(property.documentation, indent: indentUnit))
-            lines.append("    public var \(property.swiftName): \(renderedType(of: property))")
+            lines.append(indentUnit + "public var \(property.swiftName): \(renderedType(of: property))")
         }
 
         lines.append("")
@@ -162,13 +168,13 @@ enum Emitter {
     /// - Parameter model: The struct's emission model.
     /// - Returns: The initializer lines, indented one level.
     private static func memberwiseInit(_ model: StructModel) -> [String] {
-        var lines = ["    /// Creates a `\(model.name)`.", "    public init("]
+        var lines = [indentUnit + "/// Creates a `\(model.name)`.", indentUnit + "public init("]
         lines.append(contentsOf: renderParameters(items: model.properties, render: initParameter))
-        lines.append("    ) {")
+        lines.append(indentUnit + ") {")
         for property in model.properties {
-            lines.append("        self.\(property.swiftName) = \(property.swiftName)")
+            lines.append(indent2 + "self.\(property.swiftName) = \(property.swiftName)")
         }
-        lines.append("    }")
+        lines.append(indentUnit + "}")
         return lines
     }
 
@@ -213,11 +219,11 @@ enum Emitter {
     /// - Parameter model: The struct's emission model.
     /// - Returns: The enum lines, indented one level.
     private static func codingKeys(_ model: StructModel) -> [String] {
-        var lines = ["    private enum CodingKeys: String, CodingKey {"]
+        var lines = [indentUnit + "private enum CodingKeys: String, CodingKey {"]
         for property in model.properties {
             lines.append(indent2 + codingKeyCase(property))
         }
-        lines.append("    }")
+        lines.append(indentUnit + "}")
         return lines
     }
 
@@ -241,19 +247,19 @@ enum Emitter {
     /// - Returns: The initializer lines, indented one level.
     private static func decoderInit(_ model: StructModel) -> [String] {
         var lines = [
-            "    /// Decodes a `\(model.name)`; forgiving fields degrade to their",
-            "    /// schema defaults instead of failing the message.",
-            "    ///",
-            "    /// - Parameter decoder: The decoder positioned at the object.",
-            "    /// - Throws: `DecodingError` when a strict field is missing, mistyped,",
-            "    ///   or violates a wire invariant.",
-            "    public init(from decoder: any Decoder) throws {",
-            "        let container = try decoder.container(keyedBy: CodingKeys.self)",
+            indentUnit + "/// Decodes a `\(model.name)`; forgiving fields degrade to their",
+            indentUnit + "/// schema defaults instead of failing the message.",
+            indentUnit + "///",
+            indentUnit + "/// - Parameter decoder: The decoder positioned at the object.",
+            indentUnit + "/// - Throws: `DecodingError` when a strict field is missing, mistyped,",
+            indentUnit + "///   or violates a wire invariant.",
+            indentUnit + "public init(from decoder: any Decoder) throws {",
+            indent2 + "let container = try decoder.container(keyedBy: CodingKeys.self)",
         ]
         for property in model.properties {
             lines.append(indent2 + decodeLine(property))
         }
-        lines.append("    }")
+        lines.append(indentUnit + "}")
         return lines
     }
 
@@ -320,28 +326,28 @@ enum Emitter {
     /// - Returns: The method lines, indented one level.
     private static func encodeMethod(_ model: StructModel) -> [String] {
         var lines = [
-            "    /// Encodes a `\(model.name)`, omitting nil optional fields — never",
-            "    /// emitting JSON null for an absent capability-gated field.",
+            indentUnit + "/// Encodes a `\(model.name)`, omitting nil optional fields — never",
+            indentUnit + "/// emitting JSON null for an absent capability-gated field.",
         ]
         if model.properties.contains(where: \.hasPatchSemantics) {
             lines.append(contentsOf: [
-                "    ///",
-                "    /// A patch-semantics field is the exception: `.cleared` writes an",
-                "    /// explicit `null` rather than omitting the key, since here `null` is",
-                "    /// itself the clear signal, not a stand-in for absence.",
+                indentUnit + "///",
+                indentUnit + "/// A patch-semantics field is the exception: `.cleared` writes an",
+                indentUnit + "/// explicit `null` rather than omitting the key, since here `null` is",
+                indentUnit + "/// itself the clear signal, not a stand-in for absence.",
             ])
         }
         lines.append(contentsOf: [
-            "    ///",
-            "    /// - Parameter encoder: The encoder to write the object into.",
-            "    /// - Throws: Rethrows any error from the underlying encoder.",
-            "    public func encode(to encoder: any Encoder) throws {",
-            "        var container = encoder.container(keyedBy: CodingKeys.self)",
+            indentUnit + "///",
+            indentUnit + "/// - Parameter encoder: The encoder to write the object into.",
+            indentUnit + "/// - Throws: Rethrows any error from the underlying encoder.",
+            indentUnit + "public func encode(to encoder: any Encoder) throws {",
+            indent2 + "var container = encoder.container(keyedBy: CodingKeys.self)",
         ])
         for property in model.properties {
             lines.append(indent2 + encodeCall(property))
         }
-        lines.append("    }")
+        lines.append(indentUnit + "}")
         return lines
     }
 
@@ -373,14 +379,14 @@ enum Emitter {
     /// - Returns: The `///` lines, indented one level.
     private static func unknownCaseDoc(discriminator: String) -> [String] {
         [
-            "    /// An unrecognized `\(discriminator)` value, captured alongside the members",
-            "    /// of the object that no other property owns, so a variant this revision",
-            "    /// does not list decodes without error and re-encodes unchanged.",
-            "    ///",
-            "    /// The payload holds neither `\(discriminator)` nor any member declared",
-            "    /// beside this union: those have their own storage, and a second copy",
-            "    /// here would win on re-encode. Encoding a payload that declares one is",
-            "    /// an `EncodingError`.",
+            indentUnit + "/// An unrecognized `\(discriminator)` value, captured alongside the members",
+            indentUnit + "/// of the object that no other property owns, so a variant this revision",
+            indentUnit + "/// does not list decodes without error and re-encodes unchanged.",
+            indentUnit + "///",
+            indentUnit + "/// The payload holds neither `\(discriminator)` nor any member declared",
+            indentUnit + "/// beside this union: those have their own storage, and a second copy",
+            indentUnit + "/// here would win on re-encode. Encoding a payload that declares one is",
+            indentUnit + "/// an `EncodingError`.",
         ]
     }
 
@@ -407,7 +413,7 @@ enum Emitter {
     ///     union.
     /// - Returns: The single declaration line, indented one level.
     private static func excludedMembersDeclaration(discriminator: String, siblingMembers: [String]) -> String {
-        "    private static let excludedMembers = \(ownedMembers(discriminator: discriminator, siblingMembers: siblingMembers))"
+        indentUnit + "private static let excludedMembers = \(ownedMembers(discriminator: discriminator, siblingMembers: siblingMembers))"
     }
 
     /// Renders the decode arm that captures an unrecognized discriminator.
@@ -420,8 +426,8 @@ enum Emitter {
     /// - Returns: The arm's two lines, indented two levels.
     private static func unknownDecodeArm(pattern: String, variable: String = "other") -> [String] {
         [
-            "        \(pattern):",
-            "            self = .unknown(\(variable), try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))",
+            indent2 + "\(pattern):",
+            indent3 + "self = .unknown(\(variable), try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))",
         ]
     }
 
@@ -488,9 +494,9 @@ enum Emitter {
     /// - Returns: The arm's three lines, indented two levels.
     private static func unknownEncodeArm(discriminator: String) -> [String] {
         [
-            "        case .unknown(let discriminator, let payload):",
-            "            try container.encode(discriminator, forKey: .\(discriminator))",
-            "            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)",
+            indent2 + "case .unknown(let discriminator, let payload):",
+            indent3 + "try container.encode(discriminator, forKey: .\(discriminator))",
+            indent3 + "try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)",
         ]
     }
 
@@ -510,13 +516,13 @@ enum Emitter {
         lines.append("public enum \(model.name): Codable, Hashable, Sendable {")
         for enumCase in model.cases {
             lines.append(contentsOf: docLines(enumCase.documentation, indent: indentUnit))
-            lines.append("    case \(enumCase.swiftName)")
+            lines.append(indentUnit + "case \(enumCase.swiftName)")
             lines.append("")
         }
         lines.append(contentsOf: [
-            "    /// An unrecognized wire value, captured verbatim so a newer peer's",
-            "    /// value decodes without error and re-encodes unchanged.",
-            "    case unknown(\(rawType))",
+            indentUnit + "/// An unrecognized wire value, captured verbatim so a newer peer's",
+            indentUnit + "/// value decodes without error and re-encodes unchanged.",
+            indentUnit + "case unknown(\(rawType))",
             "",
         ])
         lines.append(contentsOf: tagEnumDeclaration(
@@ -526,49 +532,49 @@ enum Emitter {
         ))
         lines.append(contentsOf: [
             "",
-            "    /// The value as it crosses the wire.",
-            "    public var wireValue: \(rawType) {",
-            "        switch self {",
+            indentUnit + "/// The value as it crosses the wire.",
+            indentUnit + "public var wireValue: \(rawType) {",
+            indent2 + "switch self {",
         ])
         for enumCase in model.cases {
-            lines.append("        case .\(enumCase.swiftName): Tag.\(enumCase.swiftName).rawValue")
+            lines.append(indent2 + "case .\(enumCase.swiftName): Tag.\(enumCase.swiftName).rawValue")
         }
         lines.append(contentsOf: [
-            "        case .unknown(let value): value",
-            "        }",
-            "    }",
+            indent2 + "case .unknown(let value): value",
+            indent2 + "}",
+            indentUnit + "}",
             "",
-            "    /// Creates the case matching a wire value, routing unrecognized",
-            "    /// values to `.unknown`.",
-            "    ///",
-            "    /// - Parameter wireValue: The value as it crosses the wire.",
-            "    public init(wireValue: \(rawType)) {",
-            "        switch wireValue {",
+            indentUnit + "/// Creates the case matching a wire value, routing unrecognized",
+            indentUnit + "/// values to `.unknown`.",
+            indentUnit + "///",
+            indentUnit + "/// - Parameter wireValue: The value as it crosses the wire.",
+            indentUnit + "public init(wireValue: \(rawType)) {",
+            indent2 + "switch wireValue {",
         ])
         for enumCase in model.cases {
-            lines.append("        case Tag.\(enumCase.swiftName).rawValue: self = .\(enumCase.swiftName)")
+            lines.append(indent2 + "case Tag.\(enumCase.swiftName).rawValue: self = .\(enumCase.swiftName)")
         }
         lines.append(contentsOf: [
-            "        default: self = .unknown(wireValue)",
-            "        }",
-            "    }",
+            indent2 + "default: self = .unknown(wireValue)",
+            indent2 + "}",
+            indentUnit + "}",
             "",
-            "    /// Decodes the wire value, never failing on unrecognized values.",
-            "    ///",
-            "    /// - Parameter decoder: The decoder positioned at the value.",
-            "    /// - Throws: `DecodingError` when the wire value is not a \(rawType).",
-            "    public init(from decoder: any Decoder) throws {",
-            "        self.init(wireValue: try decoder.singleValueContainer().decode(\(rawType).self))",
-            "    }",
+            indentUnit + "/// Decodes the wire value, never failing on unrecognized values.",
+            indentUnit + "///",
+            indentUnit + "/// - Parameter decoder: The decoder positioned at the value.",
+            indentUnit + "/// - Throws: `DecodingError` when the wire value is not a \(rawType).",
+            indentUnit + "public init(from decoder: any Decoder) throws {",
+            indent2 + "self.init(wireValue: try decoder.singleValueContainer().decode(\(rawType).self))",
+            indentUnit + "}",
             "",
-            "    /// Encodes the wire value; `.unknown` re-emits the value it captured.",
-            "    ///",
-            "    /// - Parameter encoder: The encoder to write the value into.",
-            "    /// - Throws: Rethrows any error from the underlying encoder.",
-            "    public func encode(to encoder: any Encoder) throws {",
-            "        var container = encoder.singleValueContainer()",
-            "        try container.encode(wireValue)",
-            "    }",
+            indentUnit + "/// Encodes the wire value; `.unknown` re-emits the value it captured.",
+            indentUnit + "///",
+            indentUnit + "/// - Parameter encoder: The encoder to write the value into.",
+            indentUnit + "/// - Throws: Rethrows any error from the underlying encoder.",
+            indentUnit + "public func encode(to encoder: any Encoder) throws {",
+            indent2 + "var container = encoder.singleValueContainer()",
+            indent2 + "try container.encode(wireValue)",
+            indentUnit + "}",
             "}",
         ])
         return lines.joined(separator: "\n")
@@ -606,19 +612,19 @@ enum Emitter {
         for unionCase in model.cases {
             lines.append(contentsOf: docLines(unionCase.documentation, indent: indentUnit))
             if let payload = unionCase.payloadType {
-                lines.append("    case \(unionCase.swiftName)(\(payload))")
+                lines.append(indentUnit + "case \(unionCase.swiftName)(\(payload))")
             } else {
-                lines.append("    case \(unionCase.swiftName)")
+                lines.append(indentUnit + "case \(unionCase.swiftName)")
             }
             lines.append("")
         }
         lines.append(contentsOf: unknownCaseDoc(discriminator: model.discriminator))
         lines.append(contentsOf: [
-            "    case unknown(String, JSONValue)",
+            indentUnit + "case unknown(String, JSONValue)",
             "",
-            "    private enum CodingKeys: String, CodingKey {",
-            "        case \(model.discriminator)",
-            "    }",
+            indentUnit + "private enum CodingKeys: String, CodingKey {",
+            indent2 + "case \(model.discriminator)",
+            indentUnit + "}",
             "",
         ])
         lines.append(contentsOf: tagDeclaration(cases: model.cases))
@@ -626,53 +632,53 @@ enum Emitter {
         lines.append(excludedMembersDeclaration(discriminator: model.discriminator, siblingMembers: model.siblingMembers))
         lines.append(contentsOf: [
             "",
-            "    /// Decodes by the `\(model.discriminator)` discriminator, routing",
-            "    /// unrecognized values to `.unknown`.",
-            "    ///",
-            "    /// - Parameter decoder: The decoder positioned at the object.",
-            "    /// - Throws: `DecodingError` when the discriminator is missing or a",
-            "    ///   known variant's payload is malformed.",
-            "    public init(from decoder: any Decoder) throws {",
-            "        let container = try decoder.container(keyedBy: CodingKeys.self)",
-            "        let discriminator = try container.decode(String.self, forKey: .\(model.discriminator))",
-            "        switch Tag(rawValue: discriminator) {",
+            indentUnit + "/// Decodes by the `\(model.discriminator)` discriminator, routing",
+            indentUnit + "/// unrecognized values to `.unknown`.",
+            indentUnit + "///",
+            indentUnit + "/// - Parameter decoder: The decoder positioned at the object.",
+            indentUnit + "/// - Throws: `DecodingError` when the discriminator is missing or a",
+            indentUnit + "///   known variant's payload is malformed.",
+            indentUnit + "public init(from decoder: any Decoder) throws {",
+            indent2 + "let container = try decoder.container(keyedBy: CodingKeys.self)",
+            indent2 + "let discriminator = try container.decode(String.self, forKey: .\(model.discriminator))",
+            indent2 + "switch Tag(rawValue: discriminator) {",
         ])
         for unionCase in model.cases {
-            lines.append("        case .\(unionCase.swiftName):")
+            lines.append(indent2 + "case .\(unionCase.swiftName):")
             if let payload = unionCase.payloadType {
-                lines.append("            self = .\(unionCase.swiftName)(try \(payload)(from: decoder))")
+                lines.append(indent3 + "self = .\(unionCase.swiftName)(try \(payload)(from: decoder))")
             } else {
-                lines.append("            self = .\(unionCase.swiftName)")
+                lines.append(indent3 + "self = .\(unionCase.swiftName)")
             }
         }
         lines.append(contentsOf: unknownDecodeArm(pattern: "case nil", variable: "discriminator"))
         lines.append(contentsOf: [
-            "        }",
-            "    }",
+            indent2 + "}",
+            indentUnit + "}",
             "",
-            "    /// Encodes the `\(model.discriminator)` discriminator, flattening the",
-            "    /// payload's fields into the same object.",
-            "    ///",
-            "    /// - Parameter encoder: The encoder to write the object into.",
-            "    /// - Throws: Rethrows any error from the underlying encoder.",
-            "    public func encode(to encoder: any Encoder) throws {",
-            "        var container = encoder.container(keyedBy: CodingKeys.self)",
-            "        switch self {",
+            indentUnit + "/// Encodes the `\(model.discriminator)` discriminator, flattening the",
+            indentUnit + "/// payload's fields into the same object.",
+            indentUnit + "///",
+            indentUnit + "/// - Parameter encoder: The encoder to write the object into.",
+            indentUnit + "/// - Throws: Rethrows any error from the underlying encoder.",
+            indentUnit + "public func encode(to encoder: any Encoder) throws {",
+            indent2 + "var container = encoder.container(keyedBy: CodingKeys.self)",
+            indent2 + "switch self {",
         ])
         for unionCase in model.cases {
             if unionCase.payloadType != nil {
-                lines.append("        case .\(unionCase.swiftName)(let payload):")
-                lines.append("            try container.encode(Tag.\(unionCase.swiftName).rawValue, forKey: .\(model.discriminator))")
-                lines.append("            try payload.encode(to: encoder)")
+                lines.append(indent2 + "case .\(unionCase.swiftName)(let payload):")
+                lines.append(indent3 + "try container.encode(Tag.\(unionCase.swiftName).rawValue, forKey: .\(model.discriminator))")
+                lines.append(indent3 + "try payload.encode(to: encoder)")
             } else {
-                lines.append("        case .\(unionCase.swiftName):")
-                lines.append("            try container.encode(Tag.\(unionCase.swiftName).rawValue, forKey: .\(model.discriminator))")
+                lines.append(indent2 + "case .\(unionCase.swiftName):")
+                lines.append(indent3 + "try container.encode(Tag.\(unionCase.swiftName).rawValue, forKey: .\(model.discriminator))")
             }
         }
         lines.append(contentsOf: unknownEncodeArm(discriminator: model.discriminator))
         lines.append(contentsOf: [
-            "        }",
-            "    }",
+            indent2 + "}",
+            indentUnit + "}",
             "}",
         ])
         return lines.joined(separator: "\n")
@@ -707,16 +713,16 @@ enum Emitter {
         lines.append("public enum \(model.name): Codable, Hashable, Sendable {")
         for unionCase in model.cases {
             lines.append(contentsOf: docLines(unionCase.documentation, indent: indentUnit))
-            lines.append("    case \(unionCase.swiftName)(\(unionCase.payloadType))")
+            lines.append(indentUnit + "case \(unionCase.swiftName)(\(unionCase.payloadType))")
             lines.append("")
         }
         lines.append(contentsOf: unknownCaseDoc(discriminator: model.discriminator))
         lines.append(contentsOf: [
-            "    case unknown(String, JSONValue)",
+            indentUnit + "case unknown(String, JSONValue)",
             "",
-            "    private enum CodingKeys: String, CodingKey {",
-            "        case \(model.discriminator)",
-            "    }",
+            indentUnit + "private enum CodingKeys: String, CodingKey {",
+            indent2 + "case \(model.discriminator)",
+            indentUnit + "}",
             "",
         ])
         lines.append(contentsOf: discriminatedTagDeclaration(cases: model.cases))
@@ -724,51 +730,51 @@ enum Emitter {
         lines.append(excludedMembersDeclaration(discriminator: model.discriminator, siblingMembers: []))
         lines.append(contentsOf: [
             "",
-            "    /// Decodes by the `\(model.discriminator)` discriminator; an absent",
-            "    /// discriminator selects the default variant and an unrecognized one",
-            "    /// routes to `.unknown`.",
-            "    ///",
-            "    /// - Parameter decoder: The decoder positioned at the object.",
-            "    /// - Throws: `DecodingError` when a known variant's payload is malformed.",
-            "    public init(from decoder: any Decoder) throws {",
-            "        let container = try decoder.container(keyedBy: CodingKeys.self)",
-            "        switch try container.decodeIfPresent(String.self, forKey: .\(model.discriminator)) {",
+            indentUnit + "/// Decodes by the `\(model.discriminator)` discriminator; an absent",
+            indentUnit + "/// discriminator selects the default variant and an unrecognized one",
+            indentUnit + "/// routes to `.unknown`.",
+            indentUnit + "///",
+            indentUnit + "/// - Parameter decoder: The decoder positioned at the object.",
+            indentUnit + "/// - Throws: `DecodingError` when a known variant's payload is malformed.",
+            indentUnit + "public init(from decoder: any Decoder) throws {",
+            indent2 + "let container = try decoder.container(keyedBy: CodingKeys.self)",
+            indent2 + "switch try container.decodeIfPresent(String.self, forKey: .\(model.discriminator)) {",
         ])
         for unionCase in model.cases {
             guard unionCase.tag != nil else { continue }
-            lines.append("        case Tag.\(unionCase.swiftName).rawValue?:")
-            lines.append("            self = .\(unionCase.swiftName)(try \(unionCase.payloadType)(from: decoder))")
+            lines.append(indent2 + "case Tag.\(unionCase.swiftName).rawValue?:")
+            lines.append(indent3 + "self = .\(unionCase.swiftName)(try \(unionCase.payloadType)(from: decoder))")
         }
         if let defaultCase = model.cases.first(where: { $0.tag == nil }) {
-            lines.append("        case nil:")
-            lines.append("            self = .\(defaultCase.swiftName)(try \(defaultCase.payloadType)(from: decoder))")
+            lines.append(indent2 + "case nil:")
+            lines.append(indent3 + "self = .\(defaultCase.swiftName)(try \(defaultCase.payloadType)(from: decoder))")
         }
         lines.append(contentsOf: unknownDecodeArm(pattern: "case let other?"))
         lines.append(contentsOf: [
-            "        }",
-            "    }",
+            indent2 + "}",
+            indentUnit + "}",
             "",
-            "    /// Encodes the `\(model.discriminator)` discriminator, flattening the",
-            "    /// payload's fields into the same object; the default variant omits",
-            "    /// the discriminator.",
-            "    ///",
-            "    /// - Parameter encoder: The encoder to write the object into.",
-            "    /// - Throws: Rethrows any error from the underlying encoder.",
-            "    public func encode(to encoder: any Encoder) throws {",
-            "        var container = encoder.container(keyedBy: CodingKeys.self)",
-            "        switch self {",
+            indentUnit + "/// Encodes the `\(model.discriminator)` discriminator, flattening the",
+            indentUnit + "/// payload's fields into the same object; the default variant omits",
+            indentUnit + "/// the discriminator.",
+            indentUnit + "///",
+            indentUnit + "/// - Parameter encoder: The encoder to write the object into.",
+            indentUnit + "/// - Throws: Rethrows any error from the underlying encoder.",
+            indentUnit + "public func encode(to encoder: any Encoder) throws {",
+            indent2 + "var container = encoder.container(keyedBy: CodingKeys.self)",
+            indent2 + "switch self {",
         ])
         for unionCase in model.cases {
-            lines.append("        case .\(unionCase.swiftName)(let payload):")
+            lines.append(indent2 + "case .\(unionCase.swiftName)(let payload):")
             if unionCase.tag != nil {
-                lines.append("            try container.encode(Tag.\(unionCase.swiftName).rawValue, forKey: .\(model.discriminator))")
+                lines.append(indent3 + "try container.encode(Tag.\(unionCase.swiftName).rawValue, forKey: .\(model.discriminator))")
             }
-            lines.append("            try payload.encode(to: encoder)")
+            lines.append(indent3 + "try payload.encode(to: encoder)")
         }
         lines.append(contentsOf: unknownEncodeArm(discriminator: model.discriminator))
         lines.append(contentsOf: [
-            "        }",
-            "    }",
+            indent2 + "}",
+            indentUnit + "}",
             "}",
         ])
         return lines.joined(separator: "\n")
@@ -854,15 +860,15 @@ enum Emitter {
         for property in leading {
             lines.append("")
             lines.append(contentsOf: docLines(property.documentation, indent: indentUnit))
-            lines.append("    public var \(property.swiftName): \(renderedType(of: property))")
+            lines.append(indentUnit + "public var \(property.swiftName): \(renderedType(of: property))")
         }
         lines.append("")
         lines.append(contentsOf: docLines(union.documentation, indent: indentUnit))
-        lines.append("    public var \(union.wireName): \(union.typeName)")
+        lines.append(indentUnit + "public var \(union.wireName): \(union.typeName)")
         if let meta {
             lines.append("")
             lines.append(contentsOf: docLines(meta.documentation, indent: indentUnit))
-            lines.append("    public var \(meta.swiftName): \(renderedType(of: meta))")
+            lines.append(indentUnit + "public var \(meta.swiftName): \(renderedType(of: meta))")
         }
         lines.append("")
         lines.append(contentsOf: unionStructInit(base: base, union: union, leading: leading, meta: meta))
@@ -882,19 +888,19 @@ enum Emitter {
     /// - Returns: The enum lines, indented one level.
     private static func valueUnionEnum(_ model: ObjectValueUnionModel) -> [String] {
         var lines = [
-            "    /// The value payload, selected by the `\(model.discriminator)` discriminator.",
-            "    public enum \(model.valueEnumName): Codable, Hashable, Sendable {",
+            indentUnit + "/// The value payload, selected by the `\(model.discriminator)` discriminator.",
+            indentUnit + "public enum \(model.valueEnumName): Codable, Hashable, Sendable {",
         ]
         for unionCase in model.cases {
             lines.append(contentsOf: docLines(unionCase.documentation, indent: indent2))
-            lines.append("        case \(unionCase.swiftName)(\(caseAssociatedValues(of: unionCase)))")
+            lines.append(indent2 + "case \(unionCase.swiftName)(\(caseAssociatedValues(of: unionCase)))")
         }
         lines.append(contentsOf: [
             "",
-            "        private enum CodingKeys: String, CodingKey {",
-            "            case \(model.discriminator)",
-            "            case \(model.valueWireName)",
-            "        }",
+            indent2 + "private enum CodingKeys: String, CodingKey {",
+            indent3 + "case \(model.discriminator)",
+            indent3 + "case \(model.valueWireName)",
+            indent2 + "}",
             "",
         ])
         let tagDeclaration = valueUnionTagDeclaration(cases: model.cases)
@@ -905,7 +911,7 @@ enum Emitter {
         lines.append(contentsOf: valueUnionDecoder(model))
         lines.append("")
         lines.append(contentsOf: valueUnionEncoder(model))
-        lines.append("    }")
+        lines.append(indentUnit + "}")
         return lines
     }
 
@@ -953,26 +959,26 @@ enum Emitter {
     /// - Returns: The initializer lines, indented two levels.
     private static func valueUnionDecoder(_ model: ObjectValueUnionModel) -> [String] {
         let capturesTag = model.cases.contains { $0.selector == .capturedTag }
-        var lines = ["        /// Decodes the value by its `\(model.discriminator)` discriminator,"]
+        var lines = [indent2 + "/// Decodes the value by its `\(model.discriminator)` discriminator,"]
         if capturesTag {
             lines.append(contentsOf: [
-                "        /// routing an unrecognized value to the default variant, which",
-                "        /// captures it so it round-trips unchanged on re-encode.",
+                indent2 + "/// routing an unrecognized value to the default variant, which",
+                indent2 + "/// captures it so it round-trips unchanged on re-encode.",
             ])
         } else {
             lines.append(contentsOf: [
-                "        /// falling back to the default variant when it is absent. That",
-                "        /// variant's own schema places no constraint on this member, so a",
-                "        /// present-but-unrecognized value also matches it — and, having no",
-                "        /// discriminator member of its own, does not round-trip on re-encode.",
+                indent2 + "/// falling back to the default variant when it is absent. That",
+                indent2 + "/// variant's own schema places no constraint on this member, so a",
+                indent2 + "/// present-but-unrecognized value also matches it — and, having no",
+                indent2 + "/// discriminator member of its own, does not round-trip on re-encode.",
             ])
         }
         lines.append(contentsOf: [
-            "        ///",
-            "        /// - Parameter decoder: The decoder positioned at the object.",
-            "        /// - Throws: `DecodingError` when the payload is missing or mistyped.",
-            "        public init(from decoder: any Decoder) throws {",
-            "            let container = try decoder.container(keyedBy: CodingKeys.self)",
+            indent2 + "///",
+            indent2 + "/// - Parameter decoder: The decoder positioned at the object.",
+            indent2 + "/// - Throws: `DecodingError` when the payload is missing or mistyped.",
+            indent2 + "public init(from decoder: any Decoder) throws {",
+            indent3 + "let container = try decoder.container(keyedBy: CodingKeys.self)",
         ])
         let hasTaggedCases = model.cases.contains {
             if case .tag = $0.selector { return true }
@@ -998,30 +1004,30 @@ enum Emitter {
     private static func valueUnionDecoderBody(_ model: ObjectValueUnionModel, capturesTag: Bool) -> [String] {
         var lines: [String] = []
         if capturesTag {
-            lines.append("            let discriminator = try container.decode(String.self, forKey: .\(model.discriminator))")
-            lines.append("            switch Tag(rawValue: discriminator) {")
+            lines.append(indent3 + "let discriminator = try container.decode(String.self, forKey: .\(model.discriminator))")
+            lines.append(indent3 + "switch Tag(rawValue: discriminator) {")
         } else {
-            lines.append("            let discriminator = try container.decodeIfPresent(String.self, forKey: .\(model.discriminator))")
-            lines.append("            switch discriminator.flatMap(Tag.init(rawValue:)) {")
+            lines.append(indent3 + "let discriminator = try container.decodeIfPresent(String.self, forKey: .\(model.discriminator))")
+            lines.append(indent3 + "switch discriminator.flatMap(Tag.init(rawValue:)) {")
         }
         for unionCase in model.cases {
             guard case .tag = unionCase.selector else { continue }
-            lines.append("            case .\(unionCase.swiftName):")
-            lines.append("                self = .\(unionCase.swiftName)(\(valueDecodeCall(unionCase, model)))")
+            lines.append(indent3 + "case .\(unionCase.swiftName):")
+            lines.append(indent4 + "self = .\(unionCase.swiftName)(\(valueDecodeCall(unionCase, model)))")
         }
         for unionCase in model.cases {
             switch unionCase.selector {
             case .tag:
                 continue
             case .untagged:
-                lines.append("            case nil:")
-                lines.append("                self = .\(unionCase.swiftName)(\(valueDecodeCall(unionCase, model)))")
+                lines.append(indent3 + "case nil:")
+                lines.append(indent4 + "self = .\(unionCase.swiftName)(\(valueDecodeCall(unionCase, model)))")
             case .capturedTag:
-                lines.append("            case nil:")
-                lines.append("                self = .\(unionCase.swiftName)(discriminator, \(valueDecodeCall(unionCase, model)))")
+                lines.append(indent3 + "case nil:")
+                lines.append(indent4 + "self = .\(unionCase.swiftName)(discriminator, \(valueDecodeCall(unionCase, model)))")
             }
         }
-        lines.append(contentsOf: ["            }", "        }"])
+        lines.append(contentsOf: [indent3 + "}", indent2 + "}"])
         return lines
     }
 
@@ -1040,20 +1046,20 @@ enum Emitter {
         let subject = capturesTag
             ? "try container.decode(String.self, forKey: .\(model.discriminator))"
             : "try container.decodeIfPresent(String.self, forKey: .\(model.discriminator))"
-        var lines = ["            switch \(subject) {"]
+        var lines = [indent3 + "switch \(subject) {"]
         for unionCase in model.cases {
             switch unionCase.selector {
             case .tag:
                 continue
             case .untagged:
-                lines.append("            default:")
-                lines.append("                self = .\(unionCase.swiftName)(\(valueDecodeCall(unionCase, model)))")
+                lines.append(indent3 + "default:")
+                lines.append(indent4 + "self = .\(unionCase.swiftName)(\(valueDecodeCall(unionCase, model)))")
             case .capturedTag:
-                lines.append("            case let other:")
-                lines.append("                self = .\(unionCase.swiftName)(other, \(valueDecodeCall(unionCase, model)))")
+                lines.append(indent3 + "case let other:")
+                lines.append(indent4 + "self = .\(unionCase.swiftName)(other, \(valueDecodeCall(unionCase, model)))")
             }
         }
-        lines.append(contentsOf: ["            }", "        }"])
+        lines.append(contentsOf: [indent3 + "}", indent2 + "}"])
         return lines
     }
 
@@ -1073,29 +1079,29 @@ enum Emitter {
     /// - Returns: The method lines, indented two levels.
     private static func valueUnionEncoder(_ model: ObjectValueUnionModel) -> [String] {
         var lines = [
-            "        /// Encodes the value, flattening its payload beside the object's own",
-            "        /// members; a default variant declaring no discriminator omits it.",
-            "        ///",
-            "        /// - Parameter encoder: The encoder to write the object into.",
-            "        /// - Throws: Rethrows any error from the underlying encoder.",
-            "        public func encode(to encoder: any Encoder) throws {",
-            "            var container = encoder.container(keyedBy: CodingKeys.self)",
-            "            switch self {",
+            indent2 + "/// Encodes the value, flattening its payload beside the object's own",
+            indent2 + "/// members; a default variant declaring no discriminator omits it.",
+            indent2 + "///",
+            indent2 + "/// - Parameter encoder: The encoder to write the object into.",
+            indent2 + "/// - Throws: Rethrows any error from the underlying encoder.",
+            indent2 + "public func encode(to encoder: any Encoder) throws {",
+            indent3 + "var container = encoder.container(keyedBy: CodingKeys.self)",
+            indent3 + "switch self {",
         ]
         for unionCase in model.cases {
             switch unionCase.selector {
             case .tag:
-                lines.append("            case .\(unionCase.swiftName)(let payload):")
-                lines.append("                try container.encode(Tag.\(unionCase.swiftName).rawValue, forKey: .\(model.discriminator))")
+                lines.append(indent3 + "case .\(unionCase.swiftName)(let payload):")
+                lines.append(indent4 + "try container.encode(Tag.\(unionCase.swiftName).rawValue, forKey: .\(model.discriminator))")
             case .untagged:
-                lines.append("            case .\(unionCase.swiftName)(let payload):")
+                lines.append(indent3 + "case .\(unionCase.swiftName)(let payload):")
             case .capturedTag:
-                lines.append("            case .\(unionCase.swiftName)(let discriminator, let payload):")
-                lines.append("                try container.encode(discriminator, forKey: .\(model.discriminator))")
+                lines.append(indent3 + "case .\(unionCase.swiftName)(let discriminator, let payload):")
+                lines.append(indent4 + "try container.encode(discriminator, forKey: .\(model.discriminator))")
             }
-            lines.append("                try container.encode(payload, forKey: .\(model.valueWireName))")
+            lines.append(indent4 + "try container.encode(payload, forKey: .\(model.valueWireName))")
         }
-        lines.append(contentsOf: ["            }", "        }"])
+        lines.append(contentsOf: [indent3 + "}", indent2 + "}"])
         return lines
     }
 
@@ -1118,17 +1124,17 @@ enum Emitter {
         if let meta {
             parameters.append(initParameter(meta))
         }
-        var lines = ["    /// Creates a `\(base.name)`.", "    public init("]
+        var lines = [indentUnit + "/// Creates a `\(base.name)`.", indentUnit + "public init("]
         lines.append(contentsOf: renderParameters(items: parameters, render: { $0 }))
-        lines.append("    ) {")
+        lines.append(indentUnit + ") {")
         for property in leading {
-            lines.append("        self.\(property.swiftName) = \(property.swiftName)")
+            lines.append(indent2 + "self.\(property.swiftName) = \(property.swiftName)")
         }
-        lines.append("        self.\(union.wireName) = \(union.wireName)")
+        lines.append(indent2 + "self.\(union.wireName) = \(union.wireName)")
         if let meta {
-            lines.append("        self.\(meta.swiftName) = \(meta.swiftName)")
+            lines.append(indent2 + "self.\(meta.swiftName) = \(meta.swiftName)")
         }
-        lines.append("    }")
+        lines.append(indentUnit + "}")
         return lines
     }
 
@@ -1147,22 +1153,22 @@ enum Emitter {
         meta: PropertyModel?
     ) -> [String] {
         var lines = [
-            "    /// Decodes a `\(base.name)`; forgiving fields degrade to their",
-            "    /// schema defaults instead of failing the message.",
-            "    ///",
-            "    /// - Parameter decoder: The decoder positioned at the object.",
-            "    /// - Throws: `DecodingError` when a strict field is missing or mistyped.",
-            "    public init(from decoder: any Decoder) throws {",
-            "        let container = try decoder.container(keyedBy: CodingKeys.self)",
+            indentUnit + "/// Decodes a `\(base.name)`; forgiving fields degrade to their",
+            indentUnit + "/// schema defaults instead of failing the message.",
+            indentUnit + "///",
+            indentUnit + "/// - Parameter decoder: The decoder positioned at the object.",
+            indentUnit + "/// - Throws: `DecodingError` when a strict field is missing or mistyped.",
+            indentUnit + "public init(from decoder: any Decoder) throws {",
+            indent2 + "let container = try decoder.container(keyedBy: CodingKeys.self)",
         ]
         for property in leading {
             lines.append(indent2 + decodeLine(property))
         }
-        lines.append("        self.\(union.wireName) = try \(union.typeName)(from: decoder)")
+        lines.append(indent2 + "self.\(union.wireName) = try \(union.typeName)(from: decoder)")
         if let meta {
             lines.append(indent2 + decodeLine(meta))
         }
-        lines.append("    }")
+        lines.append(indentUnit + "}")
         return lines
     }
 
@@ -1181,21 +1187,21 @@ enum Emitter {
         meta: PropertyModel?
     ) -> [String] {
         var lines = [
-            "    /// Encodes a `\(base.name)`, omitting nil optional fields.",
-            "    ///",
-            "    /// - Parameter encoder: The encoder to write the object into.",
-            "    /// - Throws: Rethrows any error from the underlying encoder.",
-            "    public func encode(to encoder: any Encoder) throws {",
-            "        var container = encoder.container(keyedBy: CodingKeys.self)",
+            indentUnit + "/// Encodes a `\(base.name)`, omitting nil optional fields.",
+            indentUnit + "///",
+            indentUnit + "/// - Parameter encoder: The encoder to write the object into.",
+            indentUnit + "/// - Throws: Rethrows any error from the underlying encoder.",
+            indentUnit + "public func encode(to encoder: any Encoder) throws {",
+            indent2 + "var container = encoder.container(keyedBy: CodingKeys.self)",
         ]
         for property in leading {
             lines.append(indent2 + encodeCall(property))
         }
-        lines.append("        try \(union.wireName).encode(to: encoder)")
+        lines.append(indent2 + "try \(union.wireName).encode(to: encoder)")
         if let meta {
             lines.append(indent2 + encodeCall(meta))
         }
-        lines.append("    }")
+        lines.append(indentUnit + "}")
         return lines
     }
 
