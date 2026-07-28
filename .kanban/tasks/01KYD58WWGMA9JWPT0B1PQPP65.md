@@ -188,6 +188,26 @@ comments:
 
     Task left in `doing`, ready for `/review`.
   timestamp: 2026-07-28T22:51:20.712034+00:00
+- actor: claude-code
+  id: 01kyng3mfstx87tcaaxpjgmqs1
+  text: |-
+    Pulled back from review into doing to address the 2026-07-28 17:58 review's one remaining root cause (reported as two checklist entries): `cancelOutbound` still manually built its outgoing `$/cancel_request` notification envelope instead of using the `outboundEnvelope` helper extracted in the prior round.
+
+    Verified current implementation via `get symbol` before editing (line numbers in the review findings were stale, as usual for this file after many rounds of edits): `cancelOutbound` was at line 754, manually constructing `JSONValue.object([jsonrpcKey: jsonrpcVersion, methodKey: .string(cancelRequestMethod), paramsKey: .object([requestIdKey: id])])`. Confirmed `RequestId` is `typealias RequestId = JSONValue` (in `Unresolved.generated.swift`), so the `id` parameter needed no wrapping/conversion to be used as a `JSONValue` dictionary value.
+
+    Fix: replaced the manual literal with `Self.outboundEnvelope(id: nil, method: Self.cancelRequestMethod, params: .object([Self.requestIdKey: id]))`. `id: nil` is correct because the original never stamped a top-level envelope `id` for this notification either — the `id` variable was only ever used inside `params`, never as the envelope's own id — and `outboundEnvelope` only adds the `idKey` member `if let id`, so passing `nil` reproduces the original's `{jsonrpc, method, params}` shape exactly (no stray `id: null`).
+
+    Verification (all fresh, this round):
+    - `swift build --build-tests`: clean, 0 errors/0 warnings.
+    - `mcp__sah__diagnostics check working`: 0 errors/0 warnings.
+    - Full `swift test`: 198 tests/16 suites (FoundationModelsACPTests) + 95 tests/12 suites (ACPGenerateTests) = 293/28, all green, matching baseline exactly.
+    - `swift test --filter PromptLifecycleTests --maximum-repetitions 30`: 8/8 tests green across all 30 repetitions, including the internal 500-iteration ordering-race check inside `promptResponseArrivesBeforeTheFirstStateUpdate` — the response-before-first-`state_update` guarantee holds after this change.
+    - `swift test --filter 'ConnectionTests|SubprocessReapTests|SessionLifecycleTests'`: 46/46 green, explicitly including the cancellation-flow tests `cancelRequestNotificationCancelsRunningHandlerAndAnswersRequestCancelled`, `closingTransportReapsSpawnedChild`, `closingConnectionReapsChildAgent`, and `concurrentBidirectionalRequestsCorrelateToCallers` — confirming `cancelOutbound`'s cancellation behavior (the code path this change directly touches) is unaffected.
+
+    Adversarial double-check (via really-done, `double-check` agent, which independently re-ran `git diff` scope check, `swift build --build-tests`, the full suite, and the `PromptLifecycleTests --maximum-repetitions 30` filter): verdict PASS. It also grepped the file to confirm no other hand-built `jsonrpc`/`method`/`params` envelope literal remains outside `outboundEnvelope` itself (the two response-shaped envelopes in `respond`/`respondParseError` are a different shape — `jsonrpc/id/result|error` — correctly out of scope for this helper).
+
+    Task left in `doing`, ready for `/review`.
+  timestamp: 2026-07-28T23:14:11.065089+00:00
 depends_on:
 - 01KYD58WV07Q982G94JHT1SH5G
 position_column: doing
@@ -300,5 +320,16 @@ Verification (fresh, this round): `swift build --build-tests` clean (0 errors/0 
 **Mutation testing** (per task instructions, to verify behavior-preservation rather than mere visual similarity): temporarily mutated the helper to unconditionally stamp `envelope[Self.idKey] = id ?? .null` (so every notification would gain an `id: null` member instead of omitting `id` entirely). Re-ran the full suite: this single-line mutation was caught hard — 40 issues across `PromptLifecycleTests`, `SessionLifecycleTests`, and `ConnectionTests` (e.g. `notificationsRouteToHandlerInSendOrder`, `outOfOrderNotificationsAreDeliveredWithoutReordering`, `promptResponseArrivesBeforeTheFirstStateUpdate`), confirming the suite actually exercises the shared envelope path and would catch a broken extraction, not just a differently-shaped-but-passing one. Reverted the mutation; re-verified clean build and full green suite (293/28) afterward.
 
 Adversarial double-check (via really-done, `double-check` agent, which independently ran `git diff`, re-ran `swift build --build-tests`, full `swift test`, and the `PromptLifecycleTests --maximum-repetitions 30` filter itself, and additionally confirmed `NDJSONCodec.encode` uses `.sortedKeys` output formatting so the helper's field-declaration-order difference from the original inline blocks has zero effect on wire bytes): verdict PASS, no findings.
+
+Task left in `doing`, ready for `/review`.
+
+## Review Findings (2026-07-28 17:58)
+
+Scope reviewed: `review sha HEAD~1..HEAD` (commit `b417930`, the outboundEnvelope extraction checkpoint that closed out the 2026-07-28 17:36 finding). This round's engine did NOT re-flag `nextRequestID`/`nextRequestId` casing. It surfaced one new, legitimate finding (reported by the engine as two checklist entries against the same root cause): `cancelOutbound` still builds its outgoing `$/cancel_request` notification by hand instead of calling the just-extracted `outboundEnvelope` helper, leaving a second manual envelope-construction call site that the extraction was meant to eliminate.
+
+- [x] `Sources/FoundationModelsACP/Connection/Connection.swift:595` — The cancelOutbound function manually constructs a notification envelope, re-implementing the pattern just extracted into outboundEnvelope. After consolidating envelope building for requests and notifications, this pre-existing code duplicates that shared logic. Replace the manual envelope construction with: let notification = Self.outboundEnvelope(id: nil, method: Self.cancelRequestMethod, params: .object([Self.requestIdKey: id])). **FIXED 2026-07-28**: replaced `cancelOutbound`'s manual `JSONValue.object([...])` literal with `Self.outboundEnvelope(id: nil, method: Self.cancelRequestMethod, params: .object([Self.requestIdKey: id]))`. `RequestId` is `typealias RequestId = JSONValue`, so `id` needed no wrapping to serve as the params dictionary's value. `id: nil` correctly matches the original, which never stamped a top-level envelope id for this notification either.
+- [x] `Sources/FoundationModelsACP/Connection/Connection.swift:619` — The diff extracts `outboundEnvelope` to centralize envelope construction and avoid duplication, but `cancelOutbound` still builds a notification envelope inline with the identical structure (jsonrpc, method, params), creating a sibling call site that will diverge if envelope encoding changes and defeating the stated purpose of the extraction ('exactly one call site'). Replace the inline envelope construction with a call to the extracted helper: `Self.outboundEnvelope(id: nil, method: Self.cancelRequestMethod, params: .object([Self.requestIdKey: id]))`. **FIXED** — same root cause as the finding above, covered by the same edit.
+
+Verification (fresh, 2026-07-28): `swift build --build-tests` clean (0 errors/0 warnings). `mcp__sah__diagnostics check working`: 0/0. Full `swift test`: 198 tests/16 suites + 95 tests/12 suites = 293/28, all green, matching baseline exactly. `swift test --filter PromptLifecycleTests --maximum-repetitions 30`: 8/8 tests green across all 30 repetitions, including the internal 500-iteration ordering-race check inside `promptResponseArrivesBeforeTheFirstStateUpdate` — the response-before-first-`state_update` guarantee holds. `swift test --filter 'ConnectionTests|SubprocessReapTests|SessionLifecycleTests'`: 46/46 green, explicitly covering the cancellation-flow tests (`cancelRequestNotificationCancelsRunningHandlerAndAnswersRequestCancelled`, `closingTransportReapsSpawnedChild`, `closingConnectionReapsChildAgent`, `concurrentBidirectionalRequestsCorrelateToCallers`) — `cancelOutbound`'s cancellation behavior is unaffected. Adversarial double-check (via really-done, `double-check` agent, independently re-ran the diff-scope check, build, full suite, and PromptLifecycleTests filter, and confirmed no other hand-built jsonrpc/method/params envelope literal remains outside `outboundEnvelope`): verdict PASS.
 
 Task left in `doing`, ready for `/review`.

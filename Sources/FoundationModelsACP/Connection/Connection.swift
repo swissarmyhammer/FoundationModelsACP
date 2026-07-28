@@ -754,11 +754,8 @@ public actor Connection {
     private func cancelOutbound(id: RequestId) async {
         guard fail(id: id, with: CancellationError()) else { return }
         guard !isClosed else { return }
-        let notification = JSONValue.object([
-            Self.jsonrpcKey: Self.jsonrpcVersion,
-            Self.methodKey: .string(Self.cancelRequestMethod),
-            Self.paramsKey: .object([Self.requestIdKey: id]),
-        ])
+        let notification = Self.outboundEnvelope(
+            id: nil, method: Self.cancelRequestMethod, params: .object([Self.requestIdKey: id]))
         await writeEncoded(notification, logMessage: "failed to send $/cancel_request")
     }
 
