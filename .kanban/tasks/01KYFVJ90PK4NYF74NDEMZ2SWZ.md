@@ -83,6 +83,30 @@ comments:
 
     Final state: 269 tests / 26 suites / 0 failures / 0 warnings (up from 268/26 baseline, +1 new test). swift package --allow-writing-to-package-directory generate-acp reports "nothing regenerated"; git diff on Sources/FoundationModelsACP/Generated is empty. Both review findings fixed and verified. Leaving in `doing` for `/review`.
   timestamp: 2026-07-28T03:39:56.840798+00:00
+- actor: claude-code
+  id: 01kykdrghras2prdnpdz614kb2
+  text: |-
+    Fixed the last open review finding (2026-07-27 22:45 checklist): the repeated \"string\" JSON-schema-type-keyword literal.
+
+    Verified current line numbers before editing since the task description's cited lines (274/927) had drifted from prior rounds' edits. Current occurrences at the time of this fix: line 267 (`case \"string\":` in `classify(name:members:)`) and line 1608 (`scalarTypes` dict key). A third \"string\" literal exists at line 492 in the unrelated `enumRawKinds` table, keyed alongside \"integer\" — left untouched, matching the finding's own scope (it names exactly 2 occurrences, not 3) and matching the precedent from M1's closing review, which declined touching `enumRawKinds`/`scalarTypes` literal overlap as \"independent dictionary keys in two unrelated lookup tables, not real logic duplication.\" This fix is different in character from that declined finding: `objectTypeName` already extracts to a constant used in exactly this same two-site shape (a `switch case` plus a `scalarTypes` dict key, see line 268 and line 1615), so extracting `stringTypeName` for the same two sites follows an already-established convention rather than reopening the declined dictionary-key finding.
+
+    Change: added `private static let stringTypeName = \"string\"` immediately after `objectTypeName`'s declaration, then replaced both cited occurrences with `Self.stringTypeName`.
+
+    Verified: swift build --build-tests clean (0 warnings, exit 0). swift test: 185 tests/15 suites + 84 tests/11 suites = 269 tests/26 suites, 0 failures, 0 warnings — identical to baseline (pure refactor, no behavior change, no new tests needed). swift package --allow-writing-to-package-directory generate-acp reports \"nothing regenerated\"; git diff on Sources/FoundationModelsACP/Generated is empty. No swift format run. Diagnostics check on working tree: 0 errors, 0 warnings. Diff is exactly 3 changed lines plus the new constant declaration in Sources/ACPGenerateCore/SchemaGenerator.swift — no other files touched.
+
+    Leaving in `doing` pending double-check and then /review.
+  timestamp: 2026-07-28T03:54:40.568438+00:00
+- actor: claude-code
+  id: 01kykdz4hzw2ym3zwgjpm86mq7
+  text: |-
+    Double-check adversarial review: REVISE, one non-blocking finding — logging justification per really-done's contract rather than acting on it, since it is out of scope for this task.
+
+    Finding: the working tree also carries uncommitted changes to an unrelated task's files, `.kanban/tasks/01KYD58WWGMA9JWPT0B1PQPP65.md`/`.jsonl` ("M6 Prompt lifecycle"). Investigated: this is not something this session touched. It is a comment added by a concurrent `/finish` orchestration run at 2026-07-28T02:33:12Z (before this session's own task-start timestamp of 02:33:59Z), marking that other task STUCK over an unrelated `nextRequestId`/`nextRequestID` casing-rule contradiction in a different file (Connection.swift). It has nothing to do with `SchemaGenerator.swift` or the `stringTypeName` extraction. Since `/implement` does not commit — that is a separate step owned by `/finish` or the `commit` skill — there is no actual risk of it being \"swept into the same commit\" right now; whoever runs the commit step for this task's change can and should scope the commit to just this task's own kanban files plus SchemaGenerator.swift, leaving the other task's file alone (it belongs to that other task's own history).
+
+    All of the double-check's substantive verification passed cleanly: the SchemaGenerator.swift diff is exactly the 3 described hunks and nothing else; both replacement sites are valid Swift matching the pre-existing objectTypeName pattern; exactly one \"string\" literal remains (in enumRawKinds), confirmed a defensible precedented scope call, not a scope-dodge; fresh swift test run reproduced 269 tests/26 suites/0 failures/0 warnings; fresh generate-acp reported nothing regenerated with an empty diff on Generated/; no swift format churn.
+
+    All checklist items on this card are now checked (progress 1.0). Leaving in `doing` for `/review`.
+  timestamp: 2026-07-28T03:58:17.663638+00:00
 position_column: doing
 position_ordinal: '80'
 title: Generator follow-ups deferred during M0
@@ -125,3 +149,7 @@ They are legitimate quality suggestions on a file that is now ~2,000 lines and c
 
 - [x] `Sources/ACPGenerateCore/SchemaGenerator.swift:362` — `classifyOneOf` explicitly rejects empty oneOf with "empty union" error (via `Self.emptyUnionDetail`), but `classifyAnyOf` has no corresponding guard and would silently defer an empty anyOf to raw JSON via `return .deferredUnion(keyword: Self.anyOfKey)`. For symmetric handling of the two union keywords, both should either throw the same error or both should defer. Add a matching empty-check guard to the start of classifyAnyOf that throws `GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail)`, or document in classifyOneOf's guard why oneOf is stricter. Consistency prevents users from being surprised that empty-anyOf silently succeeds while empty-oneOf fails.
 - [x] `Tests/ACPGenerateTests/TaggedUnionTests.swift:89` — The test `oneOfFallbackPinningItsOwnConstDefersRatherThanMismodeling` verifies a schema with contradictory fallback is deferred to a typealias, but doesn't verify the message in that typealias. The change added `deferredUnionReason` to produce the message content (that it's "Deferred" vs "Permanently deferred" based on variant discriminators), but no assertion confirms the message is correct. If `deferredUnionReason` logic is wrong, this test still passes. Add an assertion verifying the placeholder message: `#expect(unresolved.contents.contains("Deferred: this `oneOf` union's variants pin discriminators"))` to confirm the logic that distinguishes "Deferred" (contradictory fallback) from "Permanently deferred" (no discriminators) is working.
+
+## Review Findings (2026-07-27 22:45)
+
+- [x] `Sources/ACPGenerateCore/SchemaGenerator.swift:274` — The JSON schema type keyword literal "string" is repeated 2 times (lines 274 and 927) and should be extracted as a named constant, consistent with how objectTypeName is already extracted at line 199. Add `private static let stringTypeName = "string"` near line 199 alongside objectTypeName, then replace both occurrences: line 274 use `case Self.stringTypeName:` and line 927 use `Self.stringTypeName: ("String", .absolutePath),`.

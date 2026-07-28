@@ -188,6 +188,9 @@ public struct SchemaGenerator: Sendable {
     /// The JSON Schema `type` value for an object fragment.
     private static let objectTypeName = "object"
 
+    /// The JSON Schema `type` value for a string fragment.
+    private static let stringTypeName = "string"
+
     /// The JSON Schema `type` value for JSON's null.
     private static let nullTypeName = "null"
 
@@ -264,7 +267,7 @@ public struct SchemaGenerator: Sendable {
         switch members[Self.typeKey]?.stringValue {
         case Self.objectTypeName:
             return .objectStruct
-        case "string":
+        case Self.stringTypeName:
             return .stringIdentifier
         case nil where members[Self.typeKey] == nil:
             return .freeform
@@ -1605,7 +1608,7 @@ public struct SchemaGenerator: Sendable {
     /// `object` without a `$ref` is a free-form map (`additionalProperties`),
     /// so it maps to raw JSON.
     private static let scalarTypes: [String: (swiftName: String, allowedInvariant: GeneratorConfig.InvariantType?)] = [
-        "string": ("String", .absolutePath),
+        Self.stringTypeName: ("String", .absolutePath),
         "integer": ("Int", .lineNumber),
         "boolean": ("Bool", nil),
         "number": ("Double", nil),
