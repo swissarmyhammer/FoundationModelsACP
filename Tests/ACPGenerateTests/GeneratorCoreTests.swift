@@ -312,7 +312,7 @@ import Testing
                 )
             ]
         )
-        let source = Emitter.structDeclaration(model)
+        let source = Emitter.structDeclaration(model: model)
         #expect(source.contains(#"case aBC = "a\"b\\c""#))
         #expect(!source.contains(#"case aBC = "a"b\c""#))
     }
@@ -342,7 +342,7 @@ import Testing
                 )
             ]
         )
-        let source = Emitter.structDeclaration(model)
+        let source = Emitter.structDeclaration(model: model)
         #expect(source.contains(#"case aBC = "a\nb\tc\rd""#))
         #expect(!source.contains("a\nb\tc\rd"))
     }

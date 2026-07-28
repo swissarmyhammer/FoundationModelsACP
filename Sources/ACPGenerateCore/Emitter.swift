@@ -190,7 +190,7 @@ enum Emitter {
     ///
     /// - Parameter model: The struct's emission model.
     /// - Returns: The rendered struct declaration.
-    static func structDeclaration(_ model: StructModel) -> String {
+    static func structDeclaration(model: StructModel) -> String {
         var lines = docLines(text: model.documentation, indent: "")
         lines.append("public struct \(model.name): \(standardPublicProtocols) {")
         guard !model.properties.isEmpty else {
@@ -213,7 +213,7 @@ enum Emitter {
         lines.append("")
         lines.append(contentsOf: codingKeys(model: model))
         lines.append("")
-        lines.append(contentsOf: decoderInit(model))
+        lines.append(contentsOf: decoderInit(model: model))
         lines.append("")
         lines.append(contentsOf: encodeMethod(model: model))
         lines.append("}")
@@ -226,7 +226,7 @@ enum Emitter {
     /// field with patch semantics, otherwise the plain type with `?` when
     /// optional.
     ///
-    /// - Parameter property: The property model.
+    /// - Parameter of: The property model.
     /// - Returns: The type expression as written after the colon.
     private static func renderedType(of property: PropertyModel) -> String {
         if property.hasPatchSemantics {
@@ -320,7 +320,7 @@ enum Emitter {
     ///
     /// - Parameter model: The struct's emission model.
     /// - Returns: The initializer lines, indented one level.
-    private static func decoderInit(_ model: StructModel) -> [String] {
+    private static func decoderInit(model: StructModel) -> [String] {
         var lines = [
             indentUnit + "/// Decodes a `\(model.name)`; forgiving fields degrade to their",
             indentUnit + schemaDefaultsDoc,
@@ -332,7 +332,7 @@ enum Emitter {
             indent2 + decoderContainerDeclaration,
         ]
         for property in model.properties {
-            lines.append(indent2 + decodeLine(property))
+            lines.append(indent2 + decodeLine(property: property))
         }
         lines.append(indentUnit + "}")
         return lines
@@ -342,9 +342,9 @@ enum Emitter {
     ///
     /// - Parameter property: The property model.
     /// - Returns: The `self.x = …` statement.
-    private static func decodeLine(_ property: PropertyModel) -> String {
+    private static func decodeLine(property: PropertyModel) -> String {
         if property.hasPatchSemantics {
-            return patchDecodeLine(property)
+            return patchDecodeLine(property: property)
         }
         let name = property.swiftName
         let type = property.typeExpression
@@ -376,7 +376,7 @@ enum Emitter {
     ///
     /// - Parameter property: The property model.
     /// - Returns: The `self.x = …` statement.
-    private static func patchDecodeLine(_ property: PropertyModel) -> String {
+    private static func patchDecodeLine(property: PropertyModel) -> String {
         let name = property.swiftName
         let type = property.typeExpression
         switch property.strategy {
@@ -420,7 +420,7 @@ enum Emitter {
             indent2 + encoderContainerDeclaration,
         ])
         for property in model.properties {
-            lines.append(indent2 + encodeCall(property))
+            lines.append(indent2 + encodeCall(property: property))
         }
         lines.append(indentUnit + "}")
         return lines
@@ -434,7 +434,7 @@ enum Emitter {
     ///
     /// - Parameter property: The property model.
     /// - Returns: The `try container.encode…` statement, without indentation.
-    private static func encodeCall(_ property: PropertyModel) -> String {
+    private static func encodeCall(property: PropertyModel) -> String {
         let name = property.swiftName
         if property.hasPatchSemantics {
             return "try container.encodePatch(\(name), forKey: .\(name))"
@@ -585,7 +585,7 @@ enum Emitter {
     ///
     /// - Parameter model: The enum's emission model.
     /// - Returns: The rendered enum declaration.
-    static func scalarEnumDeclaration(_ model: ScalarEnumModel) -> String {
+    static func scalarEnumDeclaration(model: ScalarEnumModel) -> String {
         let rawType = model.rawKind.swiftTypeName
         var lines = docLines(text: model.documentation, indent: "")
         lines.append("public enum \(model.name): \(standardPublicProtocols) {")
@@ -989,7 +989,7 @@ enum Emitter {
         }
         lines.append(contentsOf: valueUnionDecoder(model: model))
         lines.append("")
-        lines.append(contentsOf: valueUnionEncoder(model))
+        lines.append(contentsOf: valueUnionEncoder(model: model))
         lines.append(indentUnit + "}")
         return lines
     }
@@ -1017,7 +1017,7 @@ enum Emitter {
     /// The catch-all default takes the matched discriminator ahead of the
     /// value, since it is the one case whose tag is not fixed by its name.
     ///
-    /// - Parameter unionCase: The value-union case model.
+    /// - Parameter of: The value-union case model.
     /// - Returns: The associated-value types, comma-separated.
     private static func caseAssociatedValues(of unionCase: ValueUnionCaseModel) -> String {
         switch unionCase.selector {
@@ -1156,7 +1156,7 @@ enum Emitter {
     ///
     /// - Parameter model: The object-value-union emission model.
     /// - Returns: The method lines, indented two levels.
-    private static func valueUnionEncoder(_ model: ObjectValueUnionModel) -> [String] {
+    private static func valueUnionEncoder(model: ObjectValueUnionModel) -> [String] {
         var lines = [
             indent2 + "/// Encodes the value, flattening its payload beside the object's own",
             indent2 + "/// members; a default variant declaring no discriminator omits it.",
@@ -1241,11 +1241,11 @@ enum Emitter {
             indent2 + decoderContainerDeclaration,
         ]
         for property in leading {
-            lines.append(indent2 + decodeLine(property))
+            lines.append(indent2 + decodeLine(property: property))
         }
         lines.append(indent2 + "self.\(union.wireName) = try \(union.typeName)(from: decoder)")
         if let meta {
-            lines.append(indent2 + decodeLine(meta))
+            lines.append(indent2 + decodeLine(property: meta))
         }
         lines.append(indentUnit + "}")
         return lines
@@ -1274,11 +1274,11 @@ enum Emitter {
             indent2 + encoderContainerDeclaration,
         ]
         for property in leading {
-            lines.append(indent2 + encodeCall(property))
+            lines.append(indent2 + encodeCall(property: property))
         }
         lines.append(indent2 + "try \(union.wireName).encode(to: encoder)")
         if let meta {
-            lines.append(indent2 + encodeCall(meta))
+            lines.append(indent2 + encodeCall(property: meta))
         }
         lines.append(indentUnit + "}")
         return lines

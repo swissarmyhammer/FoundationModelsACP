@@ -96,7 +96,7 @@ public struct SchemaGenerator: Sendable {
                 )
             case .scalarEnum(let rawKind):
                 unions.append(
-                    Emitter.scalarEnumDeclaration(try scalarEnumModel(name: name, rawKind: rawKind, fragment: fragment))
+                    Emitter.scalarEnumDeclaration(model: try scalarEnumModel(name: name, rawKind: rawKind, fragment: fragment))
                 )
             case .taggedUnion:
                 unions.append(
@@ -133,7 +133,7 @@ public struct SchemaGenerator: Sendable {
             case .objectStruct:
                 let model = try structModel(name: name, fragment: fragment)
                 structModels.append(model)
-                modelDeclarations.append(Emitter.structDeclaration(model))
+                modelDeclarations.append(Emitter.structDeclaration(model: model))
             }
         }
 
@@ -197,6 +197,15 @@ public struct SchemaGenerator: Sendable {
 
     /// The JSON Schema `type` value for JSON's null.
     private static let nullTypeName = "null"
+
+    /// The JSON Schema `type` value for a boolean fragment.
+    private static let booleanTypeName = "boolean"
+
+    /// The JSON Schema `type` value for a number fragment.
+    private static let numberTypeName = "number"
+
+    /// The JSON Schema `type` value for an array fragment.
+    private static let arrayTypeName = "array"
 
     /// The `anyOf` arity of the nullable-type pattern (`T | null`): one
     /// concrete variant alongside a `null` variant. Used by
@@ -337,7 +346,7 @@ public struct SchemaGenerator: Sendable {
     /// other word — including one that is already all-caps, such as an
     /// earlier `typeRenames` result — passes through unchanged.
     ///
-    /// - Parameter name: A PascalCase Swift type name.
+    /// - Parameter to: A PascalCase Swift type name.
     /// - Returns: `name` with every recognized acronym word uppercased.
     private func applyKnownAcronymCasing(to name: String) -> String {
         guard !config.knownAcronyms.isEmpty else { return name }
@@ -366,7 +375,7 @@ public struct SchemaGenerator: Sendable {
     /// through here instead, so a doc comment can never fall behind the
     /// identifiers it quotes.
     ///
-    /// - Parameter fragment: The schema fragment carrying the description.
+    /// - Parameter of: The schema fragment carrying the description.
     /// - Returns: The description text with acronyms cased, or `nil` when
     ///   the fragment has none.
     private func description(of fragment: JSONValue) -> String? {
@@ -429,7 +438,7 @@ public struct SchemaGenerator: Sendable {
 
     /// A string-keyed map's entries in deterministic key order.
     ///
-    /// - Parameter members: The map to order.
+    /// - Parameter of: The map to order.
     /// - Returns: The entries sorted by key.
     private static func orderedEntries<Value>(of members: [String: Value]) -> [(key: String, value: Value)] {
         members.sorted { $0.key < $1.key }
@@ -438,7 +447,7 @@ public struct SchemaGenerator: Sendable {
     /// Unwraps a fragment's object members, failing loudly otherwise.
     ///
     /// - Parameters:
-    ///   - fragment: The schema fragment.
+    ///   - of: The schema fragment.
     ///   - context: The definition or field, for error messages.
     ///   - subject: What the fragment is (`definition`/`fragment`), for the
     ///     error message.
@@ -528,7 +537,7 @@ public struct SchemaGenerator: Sendable {
     /// The raw kind a union's variants agree on, when every variant is a
     /// constant of one scalar JSON type.
     ///
-    /// - Parameter variants: The union's variant fragments.
+    /// - Parameter of: The union's variant fragments.
     /// - Returns: The shared raw kind, or `nil` when the variants disagree,
     ///   name a type no enum is emitted for, or there are none.
     private static func agreedEnumRawKind(of variants: [JSONValue]) -> EnumRawKind? {
@@ -634,7 +643,7 @@ public struct SchemaGenerator: Sendable {
     /// The member names a union's variants pin with a `const` — its
     /// discriminators, usually exactly one.
     ///
-    /// - Parameter variants: The union's variant fragments.
+    /// - Parameter of: The union's variant fragments.
     /// - Returns: Every pinned member name.
     private func pinnedDiscriminators(of variants: [JSONValue]) -> Set<String> {
         Set(
@@ -690,7 +699,7 @@ public struct SchemaGenerator: Sendable {
     /// Shared by `classifyOneOf` and `classifyAnyOf`, whose fallback guards
     /// are otherwise identical but for which keyword their caller defers.
     ///
-    /// - Parameter variants: The union's variant fragments.
+    /// - Parameter of: The union's variant fragments.
     /// - Returns: `true` when every `not`-guarded variant is a genuine
     ///   catch-all (vacuously true when none is `not`-guarded).
     private func fallbacksAreGenuineCatchAlls(of variants: [JSONValue]) -> Bool {
@@ -745,7 +754,7 @@ public struct SchemaGenerator: Sendable {
     /// enum names its cases from each variant's `title` instead.
     ///
     /// - Parameters:
-    ///   - variant: The `const`-pinning variant fragment.
+    ///   - of: The `const`-pinning variant fragment.
     ///   - rawKind: The scalar JSON type the constant takes.
     ///   - context: The variant's error context.
     /// - Returns: The case model.
@@ -845,7 +854,7 @@ public struct SchemaGenerator: Sendable {
     private func objectTaggedUnionModel(name: String, fragment: JSONValue) throws -> ObjectTaggedUnionModel {
         let base = try structModel(name: name, fragment: fragment)
         let union = try taggedUnionModel(name: name, fragment: fragment)
-        try validateUnclaimed([union.discriminator], by: base, context: name)
+        try validateUnclaimed(names: [union.discriminator], by: base, context: name)
         return ObjectTaggedUnionModel(
             base: base,
             union: TaggedUnionModel(
@@ -865,7 +874,7 @@ public struct SchemaGenerator: Sendable {
     /// member.
     ///
     /// - Parameters:
-    ///   - variant: The union variant fragment.
+    ///   - of: The union variant fragment.
     ///   - context: The variant's error context.
     /// - Returns: The discriminator wire name and its `const` tag value.
     /// - Throws: `GeneratorError.unsupportedShape` when the variant deviates
@@ -926,7 +935,7 @@ public struct SchemaGenerator: Sendable {
     /// variants must, which is what `discriminatedPayloadType` adds.
     ///
     /// - Parameters:
-    ///   - variant: The union variant fragment.
+    ///   - of: The union variant fragment.
     ///   - context: The variant's error context.
     /// - Returns: The emitted payload type name, or `nil` when the variant
     ///   declares no `allOf`.
@@ -945,7 +954,7 @@ public struct SchemaGenerator: Sendable {
     /// Resolves the single `$ref` payload a discriminated variant flattens.
     ///
     /// - Parameters:
-    ///   - variant: The `anyOf` variant fragment.
+    ///   - of: The `anyOf` variant fragment.
     ///   - context: The variant's error context.
     /// - Returns: The emitted payload type name.
     /// - Throws: `GeneratorError.unsupportedShape` when the variant flattens no
@@ -1024,7 +1033,7 @@ public struct SchemaGenerator: Sendable {
     /// Names a discriminator-less default variant from its `title`.
     ///
     /// - Parameters:
-    ///   - variant: The default variant fragment.
+    ///   - of: The default variant fragment.
     ///   - context: The variant's error context.
     /// - Returns: The camelCase Swift case name.
     /// - Throws: `GeneratorError.unsupportedShape` when the variant carries no
@@ -1104,7 +1113,7 @@ public struct SchemaGenerator: Sendable {
         guard let valueWireName else {
             throw GeneratorError.unsupportedShape(context: name, detail: Self.emptyUnionDetail)
         }
-        try validateUnclaimed([discriminator, valueWireName], by: base, context: name)
+        try validateUnclaimed(names: [discriminator, valueWireName], by: base, context: name)
         guard defaultCount == 1 else {
             throw GeneratorError.unsupportedShape(context: name, detail: "expected exactly one default value variant, found \(defaultCount)")
         }
@@ -1129,10 +1138,10 @@ public struct SchemaGenerator: Sendable {
     ///
     /// - Parameters:
     ///   - names: The wire member names the union encodes.
-    ///   - base: The base struct model.
+    ///   - by: The base struct model.
     ///   - context: The definition name for error messages.
     /// - Throws: `GeneratorError.unsupportedShape` naming the collision.
-    private func validateUnclaimed(_ names: [String], by base: StructModel, context: String) throws {
+    private func validateUnclaimed(names: [String], by base: StructModel, context: String) throws {
         let claimed = base.properties.map(\.wireName).filter(names.contains)
         guard claimed.isEmpty else {
             throw GeneratorError.unsupportedShape(
@@ -1149,7 +1158,7 @@ public struct SchemaGenerator: Sendable {
     /// unknown variant — still be told apart from the value member.
     ///
     /// - Parameters:
-    ///   - variants: The union's variant fragments.
+    ///   - of: The union's variant fragments.
     ///   - context: The definition's error context.
     /// - Returns: The discriminator's wire name.
     /// - Throws: `GeneratorError.unsupportedShape` when no variant pins a
@@ -1171,7 +1180,7 @@ public struct SchemaGenerator: Sendable {
     /// Finds the single non-discriminator `value` payload member of a variant.
     ///
     /// - Parameters:
-    ///   - properties: The variant's inline properties.
+    ///   - of: The variant's inline properties.
     ///   - discriminator: The union's discriminator wire name, excluded from
     ///     the search whether or not this variant pins it.
     ///   - context: The variant's error context.
@@ -1211,7 +1220,7 @@ public struct SchemaGenerator: Sendable {
     /// identifier, and its exact casing is part of what the case means.
     ///
     /// - Parameters:
-    ///   - wireValue: The wire string (e.g. `switch_mode`).
+    ///   - fromWire: The wire string (e.g. `switch_mode`).
     ///   - context: `Definition variant` for error messages.
     /// - Returns: The camelCase Swift identifier (e.g. `switchMode`).
     /// - Throws: `GeneratorError.unsupportedShape` when the wire value does
@@ -1234,7 +1243,7 @@ public struct SchemaGenerator: Sendable {
     /// same check.
     ///
     /// - Parameters:
-    ///   - wireName: The JSON member name (e.g. `value`).
+    ///   - fromWireName: The JSON member name (e.g. `value`).
     ///   - context: The definition name for error messages.
     /// - Returns: The UpperCamelCase Swift type name (e.g. `Value`).
     /// - Throws: `GeneratorError.unsupportedShape` when the wire name does not
@@ -1253,7 +1262,7 @@ public struct SchemaGenerator: Sendable {
     /// the name from.
     ///
     /// - Parameters:
-    ///   - title: The schema title (e.g. `Parse error`).
+    ///   - fromTitle: The schema title (e.g. `Parse error`).
     ///   - context: `Definition variant` for error messages.
     /// - Returns: The camelCase Swift identifier (e.g. `parseError`).
     /// - Throws: `GeneratorError.unsupportedShape` when the title does not map
@@ -1357,7 +1366,7 @@ public struct SchemaGenerator: Sendable {
 
     /// Orders properties required-first, optional second, `_meta` last.
     ///
-    /// - Parameter property: The property model.
+    /// - Parameter of: The property model.
     /// - Returns: The property's group rank.
     private func emissionRank(of property: PropertyModel) -> Int {
         if property.wireName == "_meta" { return 2 }
@@ -1491,7 +1500,7 @@ public struct SchemaGenerator: Sendable {
     /// Parses a property fragment's schema `default`, if any.
     ///
     /// - Parameters:
-    ///   - fragment: The property's schema fragment.
+    ///   - of: The property's schema fragment.
     ///   - type: The property's resolved type.
     ///   - context: `Definition.field` for error messages.
     /// - Returns: The parsed default state; `.none` when absent.
@@ -1522,7 +1531,7 @@ public struct SchemaGenerator: Sendable {
     /// 0-based line must stay a decode-time error.
     ///
     /// - Parameters:
-    ///   - fragment: The property's schema fragment.
+    ///   - of: The property's schema fragment.
     ///   - resolved: The property's resolved type.
     ///   - override: The wire-invariant newtype, if configured.
     ///   - isOptional: Whether the property is `Optional` in Swift.
@@ -1568,7 +1577,7 @@ public struct SchemaGenerator: Sendable {
     /// Wire names are already camelCase; ACP's reserved `_meta` drops its
     /// leading underscore (mapped back through CodingKeys).
     ///
-    /// - Parameter wireName: The JSON member name.
+    /// - Parameter forWireName: The JSON member name.
     /// - Returns: The Swift property name.
     private func swiftName(forWireName wireName: String) -> String {
         String(wireName.drop(while: { $0 == "_" }))
@@ -1667,17 +1676,6 @@ public struct SchemaGenerator: Sendable {
         return nil
     }
 
-    /// Resolves a scalar or array `type` keyword to a Swift type.
-    ///
-    /// - Parameters:
-    ///   - typeName: The JSON schema type keyword (e.g. `string`).
-    ///   - nullable: Whether the wire value admits JSON `null`.
-    ///   - members: The fragment's object members, for `items`.
-    ///   - override: The wire-invariant newtype the scalar position maps to.
-    ///   - context: `Definition.field` for error messages.
-    /// - Returns: The resolved type.
-    /// - Throws: `GeneratorError.unsupportedShape` for unknown keywords and
-    ///   un-modelable arrays.
     /// The scalar JSON `type` keywords mapped to Swift types and the
     /// wire-invariant kind each may carry.
     ///
@@ -1686,11 +1684,22 @@ public struct SchemaGenerator: Sendable {
     private static let scalarTypes: [String: (swiftName: String, allowedInvariant: GeneratorConfig.InvariantType?)] = [
         Self.stringTypeName: ("String", .absolutePath),
         Self.integerTypeName: ("Int", .lineNumber),
-        "boolean": ("Bool", nil),
-        "number": ("Double", nil),
+        Self.booleanTypeName: ("Bool", nil),
+        Self.numberTypeName: ("Double", nil),
         Self.objectTypeName: ("JSONValue", nil),
     ]
 
+    /// Resolves a scalar or array `type` keyword to a Swift type.
+    ///
+    /// - Parameters:
+    ///   - named: The JSON schema type keyword (e.g. `string`).
+    ///   - nullable: Whether the wire value admits JSON `null`.
+    ///   - members: The fragment's object members, for `items`.
+    ///   - override: The wire-invariant newtype the scalar position maps to.
+    ///   - context: `Definition.field` for error messages.
+    /// - Returns: The resolved type.
+    /// - Throws: `GeneratorError.unsupportedShape` for unknown keywords and
+    ///   un-modelable arrays.
     private func resolveScalarType(
         named typeName: String,
         nullable: Bool,
@@ -1705,7 +1714,7 @@ public struct SchemaGenerator: Sendable {
             }
             return ResolvedType(base: base, element: nil, nullable: nullable)
         }
-        guard typeName == "array" else {
+        guard typeName == Self.arrayTypeName else {
             throw GeneratorError.unsupportedShape(context: context, detail: "unhandled scalar type \"\(typeName)\"")
         }
         guard let items = members["items"] else {
@@ -1768,7 +1777,7 @@ public struct SchemaGenerator: Sendable {
     /// target type's own per-field defaults, so `Type()` is value-faithful.
     ///
     /// - Parameters:
-    ///   - value: The schema default (never JSON null).
+    ///   - for: The schema default (never JSON null).
     ///   - type: The property's resolved type.
     ///   - context: `Definition.field` for error messages.
     /// - Returns: The expression and whether it is a `Type()` empty instance.
@@ -1997,7 +2006,7 @@ extension SchemaGenerator {
 
     /// A side's position in emission order (agent, client, protocol).
     ///
-    /// - Parameter side: The side to rank.
+    /// - Parameter of: The side to rank.
     /// - Returns: The side's emission rank.
     private static func rank(of side: MethodSide) -> Int {
         manifestGroups.firstIndex { $0.side == side } ?? manifestGroups.count
@@ -2014,7 +2023,7 @@ extension SchemaGenerator {
 
     /// A routing group's entries ordered by wire method name.
     ///
-    /// - Parameter group: The group's routing key → wire method map.
+    /// - Parameter of: The group's routing key → wire method map.
     /// - Returns: The entries sorted by wire method name.
     private static func orderedByWireMethod(of group: [String: String]) -> [(key: String, value: String)] {
         group.sorted { $0.value < $1.value }
@@ -2026,7 +2035,7 @@ extension SchemaGenerator {
     /// filtering accessors below and the classifier consume this directly;
     /// every emission stage goes through one of them.
     ///
-    /// - Parameter fragment: The definition's schema fragment.
+    /// - Parameter of: The definition's schema fragment.
     /// - Returns: The variant fragments in schema order, empty when absent.
     private func declaredUnionVariants(of fragment: JSONValue) -> [JSONValue] {
         fragment[Self.oneOfKey]?.arrayValue ?? fragment[Self.anyOfKey]?.arrayValue ?? []
@@ -2040,7 +2049,7 @@ extension SchemaGenerator {
     /// payload beside it. Modeling the catch-all again would emit a duplicate
     /// case, or fail looking for the `allOf` payload `$ref` it does not carry.
     ///
-    /// - Parameter fragment: The definition's schema fragment.
+    /// - Parameter of: The definition's schema fragment.
     /// - Returns: The modeled variant fragments in schema order.
     private func unionVariants(of fragment: JSONValue) -> [JSONValue] {
         declaredUnionVariants(of: fragment).filter { !isUnknownFallbackVariant($0) }
@@ -2056,7 +2065,7 @@ extension SchemaGenerator {
     /// the union's discriminator-less default to absorb an unrecognized tag as
     /// before.
     ///
-    /// - Parameter fragment: The definition's schema fragment.
+    /// - Parameter of: The definition's schema fragment.
     /// - Returns: The modeled variant fragments in schema order.
     private func valueUnionVariants(of fragment: JSONValue) -> [JSONValue] {
         let variants = declaredUnionVariants(of: fragment)
@@ -2173,7 +2182,7 @@ extension SchemaGenerator {
 
     /// Indexes the schema's `x-side`/`x-method` annotations.
     ///
-    /// - Parameter definitions: The schema's `$defs` object.
+    /// - Parameter from: The schema's `$defs` object.
     /// - Returns: Each annotated (side, method) route mapped to its
     ///   definition names, in name order.
     /// - Throws: `GeneratorError.unsupportedShape` when a definition carries
@@ -2376,7 +2385,7 @@ extension SchemaGenerator {
     /// - Parameters:
     ///   - handlerName: The derived handler name to register.
     ///   - side: The side the handler serves, for the error message.
-    ///   - seen: The side's already-registered handler names.
+    ///   - in: The side's already-registered handler names.
     ///   - label: The table being built (`handler` / `unstable handler`),
     ///     for the error message.
     /// - Throws: `GeneratorError.invalidSchema` when the name is taken.

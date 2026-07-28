@@ -117,7 +117,7 @@ import Testing
             rawKind: .string,
             cases: [EnumCaseModel(wireValue: #"a"b\c"#, swiftName: "aBC", documentation: nil)]
         )
-        let source = Emitter.scalarEnumDeclaration(model)
+        let source = Emitter.scalarEnumDeclaration(model: model)
         #expect(source.contains(#"case aBC = "a\"b\\c""#))
         #expect(source.contains("case .aBC: Tag.aBC.rawValue"))
         #expect(source.contains("case Tag.aBC.rawValue: self = .aBC"))
