@@ -597,6 +597,23 @@ enum Emitter {
         }
     }
 
+    /// Renders the private `CodingKeys` enum that names a union's sole coding
+    /// key: its discriminator field. Shared by `taggedUnionDeclaration` and
+    /// `discriminatedUnionDeclaration`, which differ only in which field name
+    /// is the discriminator.
+    ///
+    /// - Parameters:
+    ///   - discriminator: The discriminator field's Swift name.
+    ///   - baseIndent: The indentation the enum declaration itself sits at.
+    /// - Returns: The three declaration lines.
+    private static func unionCodingKeysDeclaration(discriminator: String, baseIndent: String) -> [String] {
+        [
+            baseIndent + "private enum CodingKeys: String, CodingKey {",
+            baseIndent + indentUnit + "case \(discriminator)",
+            baseIndent + "}",
+        ]
+    }
+
     /// Renders a tagged union as an enum with hand-rolled `Codable`.
     ///
     /// Cases carry associated payload values and coding is keyed on the
@@ -619,14 +636,10 @@ enum Emitter {
             lines.append("")
         }
         lines.append(contentsOf: unknownCaseDoc(discriminator: model.discriminator))
-        lines.append(contentsOf: [
-            indentUnit + "case unknown(String, JSONValue)",
-            "",
-            indentUnit + "private enum CodingKeys: String, CodingKey {",
-            indent2 + "case \(model.discriminator)",
-            indentUnit + "}",
-            "",
-        ])
+        lines.append(indentUnit + "case unknown(String, JSONValue)")
+        lines.append("")
+        lines.append(contentsOf: unionCodingKeysDeclaration(discriminator: model.discriminator, baseIndent: indentUnit))
+        lines.append("")
         lines.append(contentsOf: tagDeclaration(cases: model.cases))
         lines.append("")
         lines.append(excludedMembersDeclaration(discriminator: model.discriminator, siblingMembers: model.siblingMembers))
@@ -717,14 +730,10 @@ enum Emitter {
             lines.append("")
         }
         lines.append(contentsOf: unknownCaseDoc(discriminator: model.discriminator))
-        lines.append(contentsOf: [
-            indentUnit + "case unknown(String, JSONValue)",
-            "",
-            indentUnit + "private enum CodingKeys: String, CodingKey {",
-            indent2 + "case \(model.discriminator)",
-            indentUnit + "}",
-            "",
-        ])
+        lines.append(indentUnit + "case unknown(String, JSONValue)")
+        lines.append("")
+        lines.append(contentsOf: unionCodingKeysDeclaration(discriminator: model.discriminator, baseIndent: indentUnit))
+        lines.append("")
         lines.append(contentsOf: discriminatedTagDeclaration(cases: model.cases))
         lines.append("")
         lines.append(excludedMembersDeclaration(discriminator: model.discriminator, siblingMembers: []))
