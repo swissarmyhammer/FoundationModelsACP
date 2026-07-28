@@ -41,6 +41,10 @@ enum Emitter {
     /// unchanged, indented one level.
     private static let unknownUnionCaseDeclaration = indentUnit + "case unknown(String, JSONValue)"
 
+    /// The blank line separating top-level declarations (and the header
+    /// banner) in a generated file.
+    private static let declarationSeparator = "\n\n"
+
     /// Assembles a generated file from rendered declarations.
     ///
     /// - Parameters:
@@ -50,11 +54,11 @@ enum Emitter {
     /// - Returns: The complete file text, header included.
     static func file(declarations: [String], namespace: String? = nil) -> String {
         guard let namespace else {
-            return ([header] + declarations).joined(separator: "\n\n") + "\n"
+            return ([header] + declarations).joined(separator: declarationSeparator) + "\n"
         }
-        let nested = declarations.map(indented(declaration:)).joined(separator: "\n\n")
+        let nested = declarations.map(indented(declaration:)).joined(separator: declarationSeparator)
         let wrapped = "public enum \(namespace) {\n\(nested)\n}"
-        return ([header, wrapped]).joined(separator: "\n\n") + "\n"
+        return ([header, wrapped]).joined(separator: declarationSeparator) + "\n"
     }
 
     /// Indents every non-empty line of a declaration by one nesting level.
