@@ -151,7 +151,7 @@ public actor Connection {
     private let onClose: CloseHandler?
 
     /// Monotonic id for outbound requests.
-    private var nextRequestId = 1
+    private var nextRequestID = 1
     /// Outbound requests awaiting a response, keyed by their wire id.
     private var pending: [RequestId: PendingRequest] = [:]
     /// In-flight inbound request handlers, keyed by the request's own wire
@@ -223,8 +223,8 @@ public actor Connection {
         timeout: Duration? = nil
     ) async throws -> JSONValue {
         guard !isClosed else { throw ConnectionError.closed }
-        let id: RequestId = .number(Double(nextRequestId))
-        nextRequestId += 1
+        let id: RequestId = .number(Double(nextRequestID))
+        nextRequestID += 1
         var envelope: [String: JSONValue] = [
             "jsonrpc": Self.jsonrpcVersion,
             "id": id,
