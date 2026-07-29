@@ -4,6 +4,9 @@ import Testing
 
 @testable import FoundationModelsACP
 
+/// The per-test time limit, in minutes, for the golden session below.
+private let standardTestTimeout = 1  // minute
+
 /// The representative full v2 session (plan.md M9, *Testing strategy*):
 /// `initialize`, `session/new`, `session/prompt`, a streamed turn (thought and
 /// message chunks, a tool call with a content chunk and a display terminal
@@ -91,23 +94,23 @@ import Testing
         /// - Parameter prompt: The prompt's content blocks, echoed as the
         ///   user message.
         private func runTurn(prompt: [ContentBlock]) async {
-            await send(.stateUpdate(.running(RunningStateUpdate())))
+            await send(update: .stateUpdate(.running(RunningStateUpdate())))
             for block in prompt {
-                await send(.userMessageChunk(ContentChunk(content: block, messageId: Fixed.userMessageId)))
+                await send(update: .userMessageChunk(ContentChunk(content: block, messageId: Fixed.userMessageId)))
             }
             await send(
-                .agentThoughtChunk(
+                update: .agentThoughtChunk(
                     ContentChunk(content: .text(TextContent(text: "Planning to run ls.")), messageId: Fixed.thoughtMessageId)
                 )
             )
             await send(
-                .agentMessageChunk(
+                update: .agentMessageChunk(
                     ContentChunk(content: .text(TextContent(text: "Running ls now.")), messageId: Fixed.agentMessageId)
                 )
             )
 
             await send(
-                .toolCallUpdate(
+                update: .toolCallUpdate(
                     ToolCallUpdate(
                         toolCallId: Fixed.toolCallId,
                         kind: .value(.execute),
@@ -118,26 +121,26 @@ import Testing
                 )
             )
             await send(
-                .toolCallContentChunk(
+                update: .toolCallContentChunk(
                     ToolCallContentChunk(content: .terminal(Terminal(terminalId: Fixed.terminalId)), toolCallId: Fixed.toolCallId)
                 )
             )
             await send(
-                .terminalUpdate(
+                update: .terminalUpdate(
                     TerminalUpdate(terminalId: Fixed.terminalId, command: .value("ls"), cwd: .value(Fixed.workingDirectory))
                 )
             )
             await send(
-                .terminalOutputChunk(
+                update: .terminalOutputChunk(
                     TerminalOutputChunk(data: Data("total 0\n".utf8).base64EncodedString(), terminalId: Fixed.terminalId)
                 )
             )
             await send(
-                .terminalUpdate(TerminalUpdate(terminalId: Fixed.terminalId, exitStatus: .value(TerminalExitStatus(exitCode: 0))))
+                update: .terminalUpdate(TerminalUpdate(terminalId: Fixed.terminalId, exitStatus: .value(TerminalExitStatus(exitCode: 0))))
             )
-            await send(.toolCallUpdate(ToolCallUpdate(toolCallId: Fixed.toolCallId, status: .value(.completed))))
+            await send(update: .toolCallUpdate(ToolCallUpdate(toolCallId: Fixed.toolCallId, status: .value(.completed))))
 
-            await send(.stateUpdate(.requiresAction(RequiresActionStateUpdate())))
+            await send(update: .stateUpdate(.requiresAction(RequiresActionStateUpdate())))
             _ = try? await connection.requestPermission(
                 RequestPermissionRequest(
                     options: [PermissionOption(kind: .allowOnce, name: "Allow", optionId: Fixed.permissionOptionId)],
@@ -148,9 +151,9 @@ import Testing
                     )
                 )
             )
-            await send(.stateUpdate(.running(RunningStateUpdate())))
+            await send(update: .stateUpdate(.running(RunningStateUpdate())))
 
-            await send(.stateUpdate(.idle(IdleStateUpdate(stopReason: .endTurn))))
+            await send(update: .stateUpdate(.idle(IdleStateUpdate(stopReason: .endTurn))))
         }
 
         /// Sends one `session/update` notification, swallowing a closed
@@ -158,7 +161,7 @@ import Testing
         /// observing.
         ///
         /// - Parameter update: The update payload to send.
-        private func send(_ update: SessionUpdate) async {
+        private func send(update: SessionUpdate) async {
             try? await connection.sessionUpdate(UpdateSessionNotification(sessionId: Fixed.sessionId, update: update))
         }
     }
@@ -211,7 +214,7 @@ import Testing
 
     // MARK: - Test
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test(.timeLimit(.minutes(standardTestTimeout)))
     func goldenSessionReproducesExpectedStateAndByteStreamExactly() async throws {
         let (clientEnd, rawAgentEnd) = InMemoryTransport.pair()
         let capture = CapturingTransport(underlying: rawAgentEnd)
@@ -274,6 +277,6 @@ import Testing
         await agentConn.close()
         await client.close()
 
-        try expectGolden(capture.captured.data, matchesFixture: "full-session-agent.ndjson")
+        try expectGolden(actual: capture.captured.data, matchesFixture: "full-session-agent.ndjson")
     }
 }

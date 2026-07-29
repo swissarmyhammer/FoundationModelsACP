@@ -28,7 +28,7 @@ import Testing
     /// - Parameter update: The update payload to wrap.
     /// - Returns: The full envelope, ready to encode as one ndJSON line.
     /// - Throws: Rethrows any encoding failure.
-    private static func envelope(_ update: SessionUpdate) throws -> JSONValue {
+    private static func envelope(for update: SessionUpdate) throws -> JSONValue {
         let notification = UpdateSessionNotification(sessionId: Self.sessionId, update: update)
         return .object([
             "jsonrpc": .string("2.0"),
@@ -68,7 +68,7 @@ import Testing
         ]
         var script = Data()
         for update in updates {
-            script.append(try NDJSONCodec.encode(Self.envelope(update)))
+            script.append(try NDJSONCodec.encode(Self.envelope(for: update)))
         }
         return script
     }

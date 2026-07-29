@@ -32,7 +32,7 @@ import Testing
     private actor CallLog {
         private(set) var calls: [String] = []
 
-        func record(_ name: String) {
+        func record(name: String) {
             calls.append(name)
         }
     }
@@ -47,7 +47,7 @@ import Testing
         let log: CallLog
 
         func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
-            await log.record("initialize")
+            await log.record(name: "initialize")
             return InitializeResponse(
                 info: Implementation(name: "recording-agent", version: "0.0.0"),
                 protocolVersion: .v2,
@@ -56,53 +56,53 @@ import Testing
         }
 
         func newSession(_ params: NewSessionRequest) async throws -> NewSessionResponse {
-            await log.record("newSession")
+            await log.record(name: "newSession")
             return NewSessionResponse(sessionId: SessionId(rawValue: "s1"))
         }
 
         func listSessions(_ params: ListSessionsRequest) async throws -> ListSessionsResponse {
-            await log.record("listSessions")
+            await log.record(name: "listSessions")
             return ListSessionsResponse(sessions: [])
         }
 
         func resumeSession(_ params: ResumeSessionRequest) async throws -> ResumeSessionResponse {
-            await log.record("resumeSession")
+            await log.record(name: "resumeSession")
             return ResumeSessionResponse()
         }
 
         func closeSession(_ params: CloseSessionRequest) async throws -> CloseSessionResponse {
-            await log.record("closeSession")
+            await log.record(name: "closeSession")
             return CloseSessionResponse()
         }
 
         func prompt(_ params: PromptRequest) async throws -> PromptResponse {
-            await log.record("prompt")
+            await log.record(name: "prompt")
             return PromptResponse()
         }
 
         func sessionCancel(_ params: CancelSessionNotification) async {
-            await log.record("sessionCancel")
+            await log.record(name: "sessionCancel")
         }
 
         func loginAuth(_ params: LoginAuthRequest) async throws -> LoginAuthResponse {
-            await log.record("loginAuth")
+            await log.record(name: "loginAuth")
             return LoginAuthResponse()
         }
 
         func logoutAuth(_ params: LogoutAuthRequest) async throws -> LogoutAuthResponse {
-            await log.record("logoutAuth")
+            await log.record(name: "logoutAuth")
             return LogoutAuthResponse()
         }
 
         func deleteSession(_ params: DeleteSessionRequest) async throws -> DeleteSessionResponse {
-            await log.record("deleteSession")
+            await log.record(name: "deleteSession")
             return DeleteSessionResponse()
         }
 
         func setSessionConfigOption(
             _ params: SetSessionConfigOptionRequest
         ) async throws -> SetSessionConfigOptionResponse {
-            await log.record("setSessionConfigOption")
+            await log.record(name: "setSessionConfigOption")
             return SetSessionConfigOptionResponse(configOptions: [])
         }
     }
@@ -115,13 +115,13 @@ import Testing
         let log: CallLog
 
         func sessionUpdate(_ notification: UpdateSessionNotification) async {
-            await log.record("sessionUpdate")
+            await log.record(name: "sessionUpdate")
         }
 
         func requestPermission(
             _ params: RequestPermissionRequest
         ) async throws -> RequestPermissionResponse {
-            await log.record("requestPermission")
+            await log.record(name: "requestPermission")
             return RequestPermissionResponse(
                 outcome: .selected(SelectedPermissionOutcome(optionId: PermissionOptionId(rawValue: "allow")))
             )
@@ -147,7 +147,7 @@ import Testing
     /// arrival order, so awaiting a *later* request's response guarantees the
     /// notification in front of it was already dispatched.
     private static func driveAgentHandler(
-        _ handlerName: String,
+        named handlerName: String,
         client: ClientSideConnection
     ) async throws {
         switch handlerName {
@@ -199,7 +199,7 @@ import Testing
             let agentConn = await AgentSideConnection(stream: agentEnd) { _ in RecordingAgent(log: log) }
             let client = await ClientSideConnection(stream: clientEnd) { _ in RecordingClient(log: log) }
 
-            try await Self.driveAgentHandler(entry.handlerName, client: client)
+            try await Self.driveAgentHandler(named: entry.handlerName, client: client)
 
             let calls = await log.calls
             // `sessionCancel` is a notification: its driver appends a
@@ -226,7 +226,7 @@ import Testing
     /// `requestPermission` round trip for the same reason `sessionCancel`
     /// does above.
     private static func driveClientHandler(
-        _ handlerName: String,
+        named handlerName: String,
         agentConnection: AgentSideConnection
     ) async throws {
         switch handlerName {
@@ -268,7 +268,7 @@ import Testing
             let agentConn = await AgentSideConnection(stream: agentEnd) { _ in RecordingAgent(log: log) }
             let client = await ClientSideConnection(stream: clientEnd) { _ in RecordingClient(log: log) }
 
-            try await Self.driveClientHandler(entry.handlerName, agentConnection: agentConn)
+            try await Self.driveClientHandler(named: entry.handlerName, agentConnection: agentConn)
 
             let calls = await log.calls
             let expected = entry.handlerName == "sessionUpdate" ? ["sessionUpdate", "requestPermission"] : [entry.handlerName]

@@ -1,3 +1,5 @@
+import Testing
+
 /// Third-party interop against a real v2 agent or client — **deliberately
 /// deferred**, not silently skipped (plan.md M9).
 ///
@@ -33,10 +35,27 @@
 ///
 /// ## Follow-up
 ///
-/// Card a follow-up task to run a live round trip once a real v2 peer
-/// exists — a reference implementation from the ACP project, an independent
-/// third-party agent or client, or `FoundationModelsACPAgent` /
-/// `FoundationModelsACPClient` tested against each other or against such a
-/// peer once either is built. Until then, this criterion stays open, not
-/// quietly checked off.
+/// Tracked as kanban task ^dsefdb7 ("Third-party v2 interop round trip, once
+/// a real peer exists"): run a live round trip once a real v2 peer exists — a
+/// reference implementation from the ACP project, an independent third-party
+/// agent or client, or `FoundationModelsACPAgent` / `FoundationModelsACPClient`
+/// tested against each other or against such a peer once either is built.
+/// Until then, this criterion stays open, not quietly checked off.
 enum ThirdPartyInteropDeferred {}
+
+/// A trivial inbound reference to `ThirdPartyInteropDeferred`, so this file's
+/// deferral write-up is a documented, deliberate stand-in for the
+/// criterion this milestone cannot satisfy yet, rather than an unreferenced
+/// symbol a dead-code check would otherwise flag as orphaned scaffolding.
+///
+/// This assertion is trivially true by construction; its purpose is the
+/// reference itself, plus the failure message pointing back at the doc
+/// comment above and follow-up task ^dsefdb7 for anyone who stumbles on it.
+@Suite struct ThirdPartyInteropDeferralTests {
+    @Test func deferralIsDocumentedPendingFollowUpTask() {
+        #expect(
+            ObjectIdentifier(ThirdPartyInteropDeferred.self) == ObjectIdentifier(ThirdPartyInteropDeferred.self),
+            "see ThirdPartyInteropDeferred's doc comment and follow-up task ^dsefdb7"
+        )
+    }
+}

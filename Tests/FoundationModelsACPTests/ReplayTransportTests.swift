@@ -66,7 +66,7 @@ import Testing
     }
 
     @Test func replayedFixtureCapturesEmissionsMatchingGoldenFile() async throws {
-        let transport = ReplayTransport(script: try fixture("replay-script.ndjson"))
+        let transport = ReplayTransport(script: try fixture(named: "replay-script.ndjson"))
         // A toy agent loop: decode each scripted client message and emit one
         // deterministic response per message through the codec's encoder.
         for try await frame in NDJSONCodec.frames(from: transport.bytes, logger: .disabled) {
@@ -85,7 +85,7 @@ import Testing
             ])
             try await transport.write(NDJSONCodec.encode(response))
         }
-        try expectGolden(transport.capturedOutput, matchesFixture: "replay-golden.ndjson")
+        try expectGolden(actual: transport.capturedOutput, matchesFixture: "replay-golden.ndjson")
     }
 
     // MARK: - Session-level unknown-value preservation
@@ -101,7 +101,7 @@ import Testing
     /// - Parameter notification: The notification payload to wrap.
     /// - Returns: The full envelope, ready to encode as one ndJSON line.
     /// - Throws: Rethrows any encoding failure.
-    private static func sessionUpdateEnvelope(_ notification: UpdateSessionNotification) throws -> JSONValue {
+    private static func sessionUpdateEnvelope(for notification: UpdateSessionNotification) throws -> JSONValue {
         .object([
             "jsonrpc": .string("2.0"),
             "method": .string("session/update"),
@@ -157,7 +157,7 @@ import Testing
         ]
         var script = Data()
         for notification in notifications {
-            script.append(try NDJSONCodec.encode(Self.sessionUpdateEnvelope(notification)))
+            script.append(try NDJSONCodec.encode(Self.sessionUpdateEnvelope(for: notification)))
         }
         return script
     }
@@ -180,13 +180,13 @@ import Testing
                 continue
             }
             let notification = try params.decoded(as: UpdateSessionNotification.self)
-            let reencoded = try Self.sessionUpdateEnvelope(notification)
+            let reencoded = try Self.sessionUpdateEnvelope(for: notification)
             try await transport.write(NDJSONCodec.encode(reencoded))
         }
 
         // The strongest form of the claim: re-encoding reproduced the exact
         // scripted bytes, not merely bytes equivalent to some other fixture.
         #expect(transport.capturedOutput == script)
-        try expectGolden(transport.capturedOutput, matchesFixture: "unknown-values-transcript.ndjson")
+        try expectGolden(actual: transport.capturedOutput, matchesFixture: "unknown-values-transcript.ndjson")
     }
 }
