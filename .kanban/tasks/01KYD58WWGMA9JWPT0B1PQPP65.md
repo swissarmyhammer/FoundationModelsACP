@@ -227,8 +227,8 @@ comments:
   timestamp: 2026-07-28T23:37:13.764221+00:00
 depends_on:
 - 01KYD58WV07Q982G94JHT1SH5G
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: 8c80
 title: 'M6 Prompt lifecycle: acknowledge, then report state'
 ---
 ## Starting point
@@ -365,3 +365,11 @@ Scope reviewed: `review sha HEAD~1..HEAD` (commit `1890d7f`, the checkpoint that
   Adversarial double-check (via really-done, `double-check` agent, which independently read the full diff, traced all six `MessageKind` branches and the `rejectWrongVersion` three sub-cases against the original inline logic, confirmed the `.response` case's `fields` -> `responseFields` rename didn't change which dictionary reaches `resolve(id:fields:)`, confirmed `nextRequestID` is untouched by this diff (grep-verified at lines 190/289/290, none in the diff hunk), confirmed `classify`/`MessageKind`/`rejectWrongVersion` are all `private` with no other call sites anywhere in the repo, and ran its own fresh `mcp__sah__diagnostics check file` on `Connection.swift`): verdict PASS, no findings.
 
 Task left in `doing`, ready for `/review`.
+
+## Review Findings (2026-07-28 18:41)
+
+Scope reviewed: `review sha HEAD~1..HEAD` (commit `c7721f6`, the checkpoint that extracts `dispatchSingle`'s message classification into a private nested `MessageKind` enum plus `classify(fields:)` static function, and splits jsonrpc-version-mismatch handling into `rejectWrongVersion(fields:batchToken:)`).
+
+- [x] `Sources/FoundationModelsACP/Connection/Connection.swift:133` — Variable `nextRequestID` uses uppercase acronym `ID`, inconsistent with the established pattern of `RequestId` (type) and `requestIdKey` (constant) which use lowercase `d`. Swift naming conventions treat acronyms as ordinary words in camelCase. Rename `nextRequestID` to `nextRequestId` to match the file's established pattern for the same concept. **DECLINED 2026-07-28 — known documented validator false-positive, not actioned, `nextRequestID` left exactly as-is.** This is (at minimum) the 5th round citing this identical casing rule against this same identifier (after 2026-07-27 21:01, 2026-07-27 21:19, 2026-07-28 16:36, and 2026-07-28 18:19, all cited and resolved above), each time flipping the demanded direction. The project's casing rule requires the up-cased form here — `Id`/`ID` in interior/trailing (non-leading) position within a lowerCamelCase name resolves to the uniform acronym spelling `ID`, since the leading word is `next`, not `Id`/`ID` — and the rule text itself explicitly names this back-and-forth across rounds as the validator error, not a signal to act on. This is the sole finding from this round; every other aspect of the reviewed commit (the `MessageKind` extraction and `rejectWrongVersion` split) is clean. Per the review skill's \"fighting a deliberate documented contract\" exception, and per explicit task instruction, this single recurring false-positive does not block progress: task moved to `done` with `nextRequestID` unchanged.
+
+Verification for this round: engine's `counts` — `{findings: 1, confirmed: 1, refuted: 0, attempted: 16, failed: 0}` — the one confirmed finding is exactly the `nextRequestID`/`nextRequestId` casing false-positive above; nothing else was flagged against the `MessageKind`/`classify`/`rejectWrongVersion` extraction. No code changes made this round (the sole finding is declined per the documented exception). Task moved `doing` → `review` → `done`.
