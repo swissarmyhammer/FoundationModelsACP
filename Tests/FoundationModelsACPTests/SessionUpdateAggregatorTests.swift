@@ -339,9 +339,11 @@ import Testing
     // MARK: - Update kinds with no per-item identity are no-ops
 
     @Test func updateKindsWithNoPerItemIdentityLeaveAccumulatedStateUntouched() {
+        let contextWindowSize = 1000
+        let tokensUsedSoFar = 10
         var aggregator = SessionUpdateAggregator()
         aggregator.apply(.stateUpdate(.idle(IdleStateUpdate())))
-        aggregator.apply(.usageUpdate(UsageUpdate(size: 1000, used: 10)))
+        aggregator.apply(.usageUpdate(UsageUpdate(size: contextWindowSize, used: tokensUsedSoFar)))
         #expect(aggregator.messages.isEmpty)
         #expect(aggregator.toolCalls.isEmpty)
         #expect(aggregator.terminals.isEmpty)
@@ -351,6 +353,13 @@ import Testing
 
 // MARK: - Terminal is a ToolCallContent variant, not a ContentBlock variant
 
+/// `Terminal` is a display-only reference variant of `ToolCallContent`, not
+/// of `ContentBlock` — `ContentBlock` is `text` / `image` / `audio` /
+/// `resource_link` / `resource` and has no `terminal` case.
+///
+/// These tests are the proof of that placement: a `terminal` payload decodes
+/// to the known `.terminal` case as `ToolCallContent`, but only reaches the
+/// generated `.unknown` fallback when offered as a `ContentBlock`.
 @Suite struct TerminalContentPlacementTests {
     @Test func terminalToolCallContentRoundTrips() throws {
         let content = try WireRoundTrip.expectLossless(ToolCallContent.self, """
