@@ -108,6 +108,27 @@ extension KeyedDecodingContainer {
     }
 }
 
+extension PatchField {
+    /// Folds a newly received patch state onto a previously accumulated one.
+    ///
+    /// `.unchanged` — the incoming update omitted the field — leaves whatever
+    /// was accumulated before untouched; `.cleared` and `.value` each replace
+    /// it outright. This is the upsert rule ACP v2 states in prose for every
+    /// patch-semantics field ("omitted fields leave the existing value
+    /// unchanged, `null` clears it, and concrete values replace it"), applied
+    /// one field at a time by something folding a stream of updates — see
+    /// `SessionUpdateAggregator`.
+    ///
+    /// - Parameter previous: The field's previously accumulated state.
+    /// - Returns: The field's newly accumulated state.
+    func folded(onto previous: PatchField<Wrapped>) -> PatchField<Wrapped> {
+        switch self {
+        case .unchanged: previous
+        case .cleared, .value: self
+        }
+    }
+}
+
 extension KeyedEncodingContainer {
     /// Encodes a field with patch semantics: `.unchanged` omits the key
     /// entirely, `.cleared` writes an explicit `null`, and `.value` writes

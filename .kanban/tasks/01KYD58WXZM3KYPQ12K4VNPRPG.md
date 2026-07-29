@@ -28,64 +28,34 @@ comments:
 
     **One conformance gap is deliberately left here, and it is this milestone's.** v2 gives upsert fields three wire states — omitted leaves the stored value unchanged, `null` clears it, a value replaces it — and every one of them generates as a Swift `Optional`, which has two. Omitted and `null` both decode to `nil` and both re-encode as an omitted key, so a client meaning "clear" sends "unchanged". It affects the six upsert types (`UserMessage`, `AgentMessage`, `AgentThought`, `SessionInfoUpdate`, `TerminalUpdate`, `ToolCallUpdate`) — their `_meta` says so explicitly, and their definition-level prose says the same of their other fields. Carded as ^1pfngj1 with the design constraints, and pinned in its current-behaviour form by `MetaFieldTests.upsertMetaCannotYetDistinguishOmittedFromNull`, so it fails loudly when fixed.
   timestamp: 2026-07-26T19:18:44.994678+00:00
+- actor: claude-code
+  id: 01kypvb47pzp3vr1pd3e3qymr3
+  text: |-
+    Implemented. Summary of what was found already done vs. what this session built.
+
+    Already done before this session (verified, not re-touched):
+    - All 17 SessionUpdate anyOf members (16 named + unknown fallback) generated in Unions.generated.swift, exhaustively round-tripped by the existing TaggedUnionRoundTripTests (declaredTags-driven, reads tags from Schema/acp-v2.json).
+    - PatchField<Wrapped> three-state (unchanged/cleared/value) wiring for all 22 patchSemanticsFields config entries (UserMessage/AgentMessage/AgentThought.content+_meta, SessionInfoUpdate, TerminalUpdate, ToolCallUpdate) via GeneratorConfig.acpV2 — this is the ^1pfngj1 work, confirmed already landed.
+    - SessionUpdateRouter.swift (fan-out, straggler tolerance, drop-when-no-subscriber) and SessionUpdateStreamTests.swift — recovered in M3, already present with 4 passing tests.
+    - ToolCallContent.terminal variant (not a ContentBlock variant), extensible ToolCallStatus/PlanEntryStatus/StopReason with .unknown, Diff/DiffChange/DiffPathChange/DiffPathPairChange/DiffPatch(Format) — all already generated correctly from the schema.
+
+    What this session built (the actual gap, per the acceptance criteria's create/patch/append/replace behaviors — none of that was enforced anywhere; a decoded ToolCallUpdate or TerminalUpdate is only ever one update in isolation):
+    1. `PatchField.folded(onto:)` (Sources/FoundationModelsACP/Core/PatchField.swift) — folds a newly-received patch state onto a previously accumulated one (.unchanged keeps previous, .cleared/.value replace).
+    2. `SessionUpdateAggregator` + `AccumulatedTerminal` (new file Sources/FoundationModelsACP/Session/SessionUpdateAggregator.swift) — materializes the upsert/append/replace rules: whole-message upserts w/ 3-state content, *_chunk append, tool_call_update create-then-patch keyed by toolCallId, tool_call_content_chunk append with content-field-replaces-then-later-chunks-append-to-replacement, terminal_update upsert keyed by terminalId (output field is an authoritative snapshot REPLACE, decoded from base64; malformed base64 dropped rather than corrupting the buffer), terminal_output_chunk base64-decode-and-append, plan_update replace-entries-by-planId (unknown PlanUpdateContent variant is a no-op, wire payload already preserved by the generated fallback).
+    3. Tests: new Tests/FoundationModelsACPTests/SessionUpdateAggregatorTests.swift (29 tests) plus a `TerminalContentPlacementTests` suite (2 tests) in the same file, plus one added test in SessionUpdateStreamTests.swift (`updateForASessionWithNoSubscriberIsDroppedWithoutError`).
+
+    Adversarial double-check round: found no correctness bugs (verified folded(onto:) argument order at all 12 call sites, all 16+1 SessionUpdate cases handled, content-replace-then-append and terminal snapshot-vs-append logic all correct by inspection and against the generated wire types) — only 5 test-coverage gaps for edge cases (tool_call_content_chunk after a .cleared prior state; terminal_update clearing one field AND replacing output in the same message; malformed base64 in a terminal_update snapshot vs. a chunk; plan_update with an unrecognized PlanUpdateContent variant; direct unit tests for folded(onto:) itself). All 5 added.
+
+    Verification: clean full rebuild (`rm -rf .build && swift build --build-tests`) — 0 errors, 0 warnings. `swift test` — 230 tests / 18 suites (FoundationModelsACPTests) + 95 tests / 12 suites (ACPGenerateTests) = 325 tests / 30 suites, 0 failures. Baseline before this task was 293 tests / 28 suites, so +32 tests / +2 suites net (25 from the first pass + 7 from the double-check round). `mcp__sah__diagnostics check working` — 0 errors, 0 warnings.
+
+    Did not touch Connection.swift (no PromptLifecycleTests re-run needed) or any *.generated.swift file (no `nextRequestID` concern applies). No `swift format` run.
+
+    Task left in `doing`, ready for `/review`.
+  timestamp: 2026-07-29T11:49:45.334180+00:00
 depends_on:
 - 01KYD58WWGMA9JWPT0B1PQPP65
-position_column: todo
-position_ordinal: '8780'
+position_column: doing
+position_ordinal: '80'
 title: 'M7 Session updates: upserts, chunks, and display terminals'
 ---
-## Starting point
-
-**This is a rewrite** — see `plan.md` -> *Starting point*. The v1 `Connection/SessionUpdateRouter.swift` and `SessionUpdateStreamTests` were deleted. The router's **fan-out and straggler-tolerance** behaviour (per-session `AsyncStream`, updates for a session with no subscriber are dropped, late updates tolerated) is version-agnostic and worth recovering from git history.
-
-The **update semantics are not.** v1 appended; v2 upserts. `tool_call` create is gone, three-state `content` semantics are new, and `messageId` is now required everywhere. Recover the plumbing, rewrite the semantics.
-
-**Display terminals are confirmed real and stable** — M0 settled this against the vendored `Schema/acp-v2.json`. The earlier doubt (a truncated schema fetch, plus the content-page variant list) is resolved; build the terminal section as specified below.
-
-## What
-
-`plan.md` -> **M7**. `session/update` carries everything that happens in a session.
-
-**The sixteen variants**, in schema order: `user_message_chunk`, `user_message`, `agent_message_chunk`, `agent_message`, `agent_thought_chunk`, `agent_thought`, `state_update`, `tool_call_content_chunk`, `tool_call_update`, `terminal_update`, `terminal_output_chunk`, `plan_update`, `available_commands_update`, `config_option_update`, `session_info_update`, `usage_update` — plus an explicit unknown-discriminator fallback (seventeen `anyOf` members in all). Every one is modeled and round-tripped here. `state_update`'s *lifecycle semantics* (`running` / `idle` with `stopReason` / `requires_action`) belong to **M6**; this card owns its wire shape like any other variant.
-
-**Messages.** `user_message` / `agent_message` / `agent_thought` are **whole-message upserts** taking `content` arrays with three-state semantics: **omitted = unchanged, `null`/`[]` = cleared, concrete array = replaced.** The `*_chunk` variants **append**. Every chunk and update carries a required, agent-generated **`messageId`**.
-
-**Tool calls.** `tool_call` create is **removed**; `tool_call_update` is an upsert that both creates and patches -- the first update with a new `toolCallId` creates it. Only `toolCallId` is required, though agents should include `title` on first report. `tool_call_content_chunk` appends individual content items; an update carrying `content` **replaces** accumulated content, and later chunks append to that replacement. `status` gains **`cancelled`** and becomes **extensible**.
-
-**Display terminals.** Agents own them; clients only render:
-- the terminal reference is a variant of **`ToolCallContent`** -- `{"type": "terminal", "terminalId": …}`, alongside `content` and `diff`. It is **not** a `ContentBlock` variant: `ContentBlock` is `text` / `image` / `audio` / `resource_link` / `resource`, and that is why the content docs page shows no terminal. Model it in the right union.
-- `terminal_update` upserts keyed by `terminalId`, patching `command`, absolute `cwd`, an output snapshot, and `exitStatus`. Patch semantics as elsewhere: omitted leaves the stored value unchanged, `null` clears, a value replaces; on a new `terminalId` omitted fields start unknown.
-- `terminal_output_chunk` appends **base64-encoded bytes** (RFC 4648) in `data`
-- output is an **authoritative replacement snapshot** for replay, correction, or resynchronization
-- the schema carries **no** input, resize, interrupt, kill, wait, release, or execution surface — display only. `TerminalId` also appears on `CommandPermissionSubject` as *"the associated terminal, when already known."*
-
-**Plans.** `plan` becomes `plan_update` carrying a tagged `PlanUpdateContent`; its one known variant, `type: "items"`, holds the required `planId` and the `entries` list. Each update replaces that plan's entries. Entry `status` gains `cancelled` and is extensible.
-
-**Diffs.** A `changes` array of operations (`add`, `delete`, `modify`, `move`, `copy`) with absolute `path` — `move` and `copy` also carrying `oldPath` — plus optional `fileType` and `mimeType`, replacing v1's single `path` + `oldText`/`newText`; plus an optional renderable `patch` (`format` / `text`, where `git_patch` is the only ACP-defined format).
-
-Also: `config_option_update`, `session_info_update`, `usage_update`, and slash-command availability (`available_commands_update`) with a required `type: "text"` discriminator on command `input`.
-
-*Blocked on the M1 seam:* `PlanUpdate.plan` is `JSONValue` — required, so every `plan_update` carries an untyped payload — until `PlanUpdateContent` resolves.
-
-## Acceptance Criteria
-
-- [ ] Every one of the sixteen `session/update` variants is modeled and round-trips, and the unknown-discriminator fallback preserves what it received.
-- [ ] Three-state `content` semantics implemented exactly (omitted / cleared / replaced).
-- [ ] `tool_call_update` creates on first sight of a `toolCallId` and patches thereafter.
-- [ ] `tool_call_content_chunk` appends; a `content` field replaces, and later chunks append to the replacement.
-- [ ] The terminal reference is modeled as a `ToolCallContent` variant, not a `ContentBlock` variant.
-- [ ] Terminal upserts and base64 output chunks handled.
-- [ ] `plan_update` replaces entries per `planId`.
-- [ ] Extensible `status` enums preserve unknown values.
-- [ ] Per-session update stream with straggler tolerance restored.
-
-## Tests
-
-- [ ] Omitted vs `null` vs `[]` vs array each produce the specified result -- four distinct assertions, since silently conflating them corrupts history.
-- [ ] First `tool_call_update` creates; second patches; neither duplicates.
-- [ ] Content replace-then-append ordering matches spec.
-- [ ] Base64 terminal output decodes to exact bytes, including non-UTF8.
-- [ ] A terminal snapshot replaces prior accumulated output.
-- [ ] A `terminal` `ToolCallContent` round-trips; a `terminal` payload offered where a `ContentBlock` is expected does **not** decode as a known variant.
-- [ ] Unknown `status` and unknown update variants survive a round trip.
-- [ ] Updates for a session with no subscriber are dropped without error.
+## Starting point\n\n**This is a rewrite** — see `plan.md` -> *Starting point*. The v1 `Connection/SessionUpdateRouter.swift` and `SessionUpdateStreamTests` were deleted. The router's **fan-out and straggler-tolerance** behaviour (per-session `AsyncStream`, updates for a session with no subscriber are dropped, late updates tolerated) is version-agnostic and worth recovering from git history.\n\nThe **update semantics are not.** v1 appended; v2 upserts. `tool_call` create is gone, three-state `content` semantics are new, and `messageId` is now required everywhere. Recover the plumbing, rewrite the semantics.\n\n**Display terminals are confirmed real and stable** — M0 settled this against the vendored `Schema/acp-v2.json`. The earlier doubt (a truncated schema fetch, plus the content-page variant list) is resolved; build the terminal section as specified below.\n\n## What\n\n`plan.md` -> **M7**. `session/update` carries everything that happens in a session.\n\n**The sixteen variants**, in schema order: `user_message_chunk`, `user_message`, `agent_message_chunk`, `agent_message`, `agent_thought_chunk`, `agent_thought`, `state_update`, `tool_call_content_chunk`, `tool_call_update`, `terminal_update`, `terminal_output_chunk`, `plan_update`, `available_commands_update`, `config_option_update`, `session_info_update`, `usage_update` — plus an explicit unknown-discriminator fallback (seventeen `anyOf` members in all). Every one is modeled and round-tripped here. `state_update`'s *lifecycle semantics* (`running` / `idle` with `stopReason` / `requires_action`) belong to **M6**; this card owns its wire shape like any other variant.\n\n**Messages.** `user_message` / `agent_message` / `agent_thought` are **whole-message upserts** taking `content` arrays with three-state semantics: **omitted = unchanged, `null`/`[]` = cleared, concrete array = replaced.** The `*_chunk` variants **append**. Every chunk and update carries a required, agent-generated **`messageId`**.\n\n**Tool calls.** `tool_call` create is **removed**; `tool_call_update` is an upsert that both creates and patches -- the first update with a new `toolCallId` creates it. Only `toolCallId` is required, though agents should include `title` on first report. `tool_call_content_chunk` appends individual content items; an update carrying `content` **replaces** accumulated content, and later chunks append to that replacement. `status` gains **`cancelled`** and becomes **extensible**.\n\n**Display terminals.** Agents own them; clients only render:\n- the terminal reference is a variant of **`ToolCallContent`** -- `{\"type\": \"terminal\", \"terminalId\": …}`, alongside `content` and `diff`. It is **not** a `ContentBlock` variant: `ContentBlock` is `text` / `image` / `audio` / `resource_link` / `resource`, and that is why the content docs page shows no terminal. Model it in the right union.\n- `terminal_update` upserts keyed by `terminalId`, patching `command`, absolute `cwd`, an output snapshot, and `exitStatus`. Patch semantics as elsewhere: omitted leaves the stored value unchanged, `null` clears, a value replaces; on a new `terminalId` omitted fields start unknown.\n- `terminal_output_chunk` appends **base64-encoded bytes** (RFC 4648) in `data`\n- output is an **authoritative replacement snapshot** for replay, correction, or resynchronization\n- the schema carries **no** input, resize, interrupt, kill, wait, release, or execution surface — display only. `TerminalId` also appears on `CommandPermissionSubject` as *\"the associated terminal, when already known.\"*\n\n**Plans.** `plan` becomes `plan_update` carrying a tagged `PlanUpdateContent`; its one known variant, `type: \"items\"`, holds the required `planId` and the `entries` list. Each update replaces that plan's entries. Entry `status` gains `cancelled` and is extensible.\n\n**Diffs.** A `changes` array of operations (`add`, `delete`, `modify`, `move`, `copy`) with absolute `path` — `move` and `copy` also carrying `oldPath` — plus optional `fileType` and `mimeType`, replacing v1's single `path` + `oldText`/`newText`; plus an optional renderable `patch` (`format` / `text`, where `git_patch` is the only ACP-defined format).\n\nAlso: `config_option_update`, `session_info_update`, `usage_update`, and slash-command availability (`available_commands_update`) with a required `type: \"text\"` discriminator on command `input`.\n\n*Blocked on the M1 seam:* `PlanUpdate.plan` is `JSONValue` — required, so every `plan_update` carries an untyped payload — until `PlanUpdateContent` resolves.\n\n## Acceptance Criteria\n\n- [x] Every one of the sixteen `session/update` variants is modeled and round-trips, and the unknown-discriminator fallback preserves what it received.\n- [x] Three-state `content` semantics implemented exactly (omitted / cleared / replaced).\n- [x] `tool_call_update` creates on first sight of a `toolCallId` and patches thereafter.\n- [x] `tool_call_content_chunk` appends; a `content` field replaces, and later chunks append to the replacement.\n- [x] The terminal reference is modeled as a `ToolCallContent` variant, not a `ContentBlock` variant.\n- [x] Terminal upserts and base64 output chunks handled.\n- [x] `plan_update` replaces entries per `planId`.\n- [x] Extensible `status` enums preserve unknown values.\n- [x] Per-session update stream with straggler tolerance restored.\n\n## Tests\n\n- [x] Omitted vs `null` vs `[]` vs array each produce the specified result -- four distinct assertions, since silently conflating them corrupts history.\n- [x] First `tool_call_update` creates; second patches; neither duplicates.\n- [x] Content replace-then-append ordering matches spec.\n- [x] Base64 terminal output decodes to exact bytes, including non-UTF8.\n- [x] A terminal snapshot replaces prior accumulated output.\n- [x] A `terminal` `ToolCallContent` round-trips; a `terminal` payload offered where a `ContentBlock` is expected does **not** decode as a known variant.\n- [x] Unknown `status` and unknown update variants survive a round trip.\n- [x] Updates for a session with no subscriber are dropped without error.\n

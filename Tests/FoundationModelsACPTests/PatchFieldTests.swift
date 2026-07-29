@@ -136,4 +136,27 @@ import Testing
         let probe = try WireRoundTrip.decode(Probe.self, from: #"{"items":"not an array"}"#)
         #expect(probe.items == .unchanged)
     }
+
+    // MARK: - `folded(onto:)`: an accumulator's upsert-merge rule
+
+    /// `SessionUpdateAggregator` folds each newly received field onto the
+    /// previously accumulated one this way, one field at a time — these
+    /// pin the three self-cases against both possible `previous` values.
+    @Test func unchangedFoldsOntoAndPreservesWhateverWasThereBefore() {
+        #expect(PatchField<Int>.unchanged.folded(onto: .unchanged) == .unchanged)
+        #expect(PatchField<Int>.unchanged.folded(onto: .cleared) == .cleared)
+        #expect(PatchField<Int>.unchanged.folded(onto: .value(1)) == .value(1))
+    }
+
+    @Test func clearedFoldsOntoAndReplacesWhateverWasThereBefore() {
+        #expect(PatchField<Int>.cleared.folded(onto: .unchanged) == .cleared)
+        #expect(PatchField<Int>.cleared.folded(onto: .cleared) == .cleared)
+        #expect(PatchField<Int>.cleared.folded(onto: .value(1)) == .cleared)
+    }
+
+    @Test func valueFoldsOntoAndReplacesWhateverWasThereBefore() {
+        #expect(PatchField.value(2).folded(onto: .unchanged) == .value(2))
+        #expect(PatchField.value(2).folded(onto: .cleared) == .value(2))
+        #expect(PatchField.value(2).folded(onto: .value(1)) == .value(2))
+    }
 }

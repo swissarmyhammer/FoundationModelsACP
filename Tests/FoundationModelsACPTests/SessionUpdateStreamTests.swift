@@ -200,6 +200,25 @@ func postCancelTrailingUpdatesThenCancelledStopReasonInOrder() async throws {
     await client.close()
 }
 
+// MARK: - Straggler policy: no subscriber at all
+
+@Test(.timeLimit(.minutes(1)))
+func updateForASessionWithNoSubscriberIsDroppedWithoutError() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+
+    // Nobody ever subscribes to sessionTwo. sessionOne's subscriber proves
+    // the read loop kept working past the drop instead of wedging on it.
+    var firstUpdates = client.updates(for: sessionOne).makeAsyncIterator()
+
+    try await send(sessionUpdateEnvelope(notification(for: sessionTwo, messageChunk("nobody-listens"))), over: agentEnd)
+    try await send(sessionUpdateEnvelope(notification(for: sessionOne, messageChunk("still-here"))), over: agentEnd)
+
+    #expect(await firstUpdates.next() == messageChunk("still-here"))
+
+    await client.close()
+}
+
 // MARK: - Stream finish on disconnect
 
 @Test(.timeLimit(.minutes(1)))
