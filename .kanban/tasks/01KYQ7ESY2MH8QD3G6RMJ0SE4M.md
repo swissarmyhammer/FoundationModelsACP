@@ -30,8 +30,8 @@ comments:
 
     Final state verified: `git status --short` shows only staged adds/modifies, nothing untracked. `git status --short --ignored` shows `.validators/` no longer ignored (only pre-existing tool dirs and `.kanban/tasks/.trash/` remain `!!`). `swift build` — Build complete, no errors. Ready for review.
   timestamp: 2026-07-29T15:55:28.941429+00:00
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9280'
 title: Commit or ignore the untracked .kanban and .validators artifacts
 ---
 git status shows untracked: .kanban/actors/zed.*, two .kanban/tags/* pairs, .kanban/tasks/.trash/, and .validators/. Decide for each path: commit the board state, or add .gitignore entries for the trash and validator scratch.
