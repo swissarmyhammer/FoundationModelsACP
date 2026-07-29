@@ -32,12 +32,14 @@ let package = Package(
         .executableTarget(
             name: "acp-generate",
             dependencies: ["ACPGenerateCore"],
-            path: "Sources/acp-generate"
+            path: "Sources/acp-generate",
+            resources: [.copy("Documentation.docc")]
         ),
         .executableTarget(
             name: "acp-test-agent",
             dependencies: ["FoundationModelsACP"],
-            path: "Sources/acp-test-agent"
+            path: "Sources/acp-test-agent",
+            resources: [.copy("Documentation.docc")]
         ),
         .plugin(
             name: "GenerateACP",
