@@ -1,0 +1,17 @@
+{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"session":{}},"info":{"name":"golden-agent","version":"1.0.0"},"protocolVersion":2}}
+{"id":2,"jsonrpc":"2.0","result":{"sessionId":"golden-session"}}
+{"id":3,"jsonrpc":"2.0","result":{}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"sessionUpdate":"state_update","state":"running"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"content":{"text":"Please run ls.","type":"text"},"messageId":"user-msg-1","sessionUpdate":"user_message_chunk"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"content":{"text":"Planning to run ls.","type":"text"},"messageId":"agent-thought-1","sessionUpdate":"agent_thought_chunk"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"content":{"text":"Running ls now.","type":"text"},"messageId":"agent-msg-1","sessionUpdate":"agent_message_chunk"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"kind":"execute","rawInput":{"command":"ls"},"sessionUpdate":"tool_call_update","status":"pending","title":"Run ls","toolCallId":"call-1"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"content":{"terminalId":"term-1","type":"terminal"},"sessionUpdate":"tool_call_content_chunk","toolCallId":"call-1"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"command":"ls","cwd":"/work","sessionUpdate":"terminal_update","terminalId":"term-1"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"data":"dG90YWwgMAo=","sessionUpdate":"terminal_output_chunk","terminalId":"term-1"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"exitStatus":{"exitCode":0},"sessionUpdate":"terminal_update","terminalId":"term-1"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"sessionUpdate":"tool_call_update","status":"completed","toolCallId":"call-1"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"sessionUpdate":"state_update","state":"requires_action"}}}
+{"id":1,"jsonrpc":"2.0","method":"session/request_permission","params":{"options":[{"kind":"allow_once","name":"Allow","optionId":"allow-once"}],"sessionId":"golden-session","subject":{"toolCall":{"title":"Run ls","toolCallId":"call-1"},"type":"tool_call"},"title":"Run ls?"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"sessionUpdate":"state_update","state":"running"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"golden-session","update":{"sessionUpdate":"state_update","state":"idle","stopReason":"end_turn"}}}

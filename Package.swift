@@ -58,7 +58,8 @@ let package = Package(
         .testTarget(
             name: "FoundationModelsACPTests",
             dependencies: ["FoundationModelsACP", "acp-test-agent"],
-            path: "Tests/FoundationModelsACPTests"
+            path: "Tests/FoundationModelsACPTests",
+            exclude: ["Fixtures"]
         ),
         .testTarget(
             name: "ACPGenerateTests",

@@ -1,0 +1,2 @@
+{"id":"req-1","jsonrpc":"2.0","method":"initialize","params":{}}
+{"id":"req-2","jsonrpc":"2.0","method":"session/new","params":{"cwd":"/work"}}

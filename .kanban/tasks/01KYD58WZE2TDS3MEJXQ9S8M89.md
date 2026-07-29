@@ -19,8 +19,8 @@ comments:
   timestamp: 2026-07-26T15:23:45.694507+00:00
 depends_on:
 - 01KYD58WXZM3KYPQ12K4VNPRPG
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8e80'
 title: M8 Permissions (elicitation deferred to a re-vendor)
 ---
 ## Starting point

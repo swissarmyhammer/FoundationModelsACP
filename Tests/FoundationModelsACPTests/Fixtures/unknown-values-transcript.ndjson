@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"state_update","state":"running"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"_meta":{"phase":"warming_up"},"percent":42,"sessionUpdate":"_vendor_progress"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"_meta":{"vendor.example/priority":1},"sessionUpdate":"tool_call_update","status":"_vendor_queued","toolCallId":"call-1"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"plan":{"planId":"plan-1","type":"_vendor_outline"},"sessionUpdate":"plan_update"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"state_update","state":"idle","stopReason":"_vendor_paused"}}}

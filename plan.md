@@ -433,8 +433,57 @@ replayable script.
   stable** — `elicitation/create` and `elicitation/complete` are unstable-only
   in the vendored `schema-v2.0.0-alpha.2`, with no request/response types in the
   stable schema to generate from. Pick this up when a re-vendor promotes them.
-- [ ] **M9 — Replay and interop.** `ReplayTransport` with golden fixtures, and a
-  round-trip against a real third-party v2 agent or client once one exists.
+- [x] **M9 — Replay and interop.** `ReplayTransport` recovered from git history
+  (protocol-version-agnostic, as M3's connection layer was) and re-tested on
+  its own mechanics, plus a session-level fixture proving unrecognized enum
+  values and `_`-prefixed extensions round-trip losslessly across a whole
+  transcript, not one decoded value at a time. A live-`InMemoryTransport`
+  golden fixture (`GoldenSessionEndToEndTests`) covers the representative full
+  session end to end — `initialize`, `session/new`, `session/prompt`, streamed
+  thought/message chunks, a tool call with a content chunk and a display
+  terminal reference, the terminal's own upserts, a
+  `session/request_permission` round trip, and the closing `idle` — captured
+  byte-for-byte against a committed golden fixture.
+
+  **`ReplayTransport` deliberately does not drive the permission-inclusive
+  session.** Its whole script is queued into `bytes` at construction rather
+  than paced by consumption, so a live `Connection`'s read loop can race ahead
+  of an outbound call's pending-continuation registration — safe for scripts
+  where the code under test only answers inbound calls and emits
+  notifications, unsafe for anything requiring a peer's *reactive* answer to
+  an outbound request. The representative session's
+  `session/request_permission` round trip is exactly that case, so it runs
+  over a live pair instead; `OutOfOrderConvergenceTests` and the unknown-value
+  transcript stay with `ReplayTransport` because neither needs one.
+
+  **Routing coverage extends M2's static `RoleRoutingTests`
+  (`RoleDispatchTests.swift`) rather than duplicating it.** That suite pins
+  `ACPMethodTable`'s own internal consistency but never calls
+  `AgentSideConnection`/`ClientSideConnection`'s hand-written dispatch
+  switches — precisely where the real TS-SDK `setSessionModel` /
+  `session/set_mode` bug class lives. `RoutingCoverageTests` drives every one
+  of the 11 agent-side and 2 client-side stable handlers through a live
+  connection with recording stand-ins, confirmed sensitive by two separate
+  mutations (a swapped case-label pair, and a shadowed case) during
+  development, both reverted afterward.
+
+  **Third-party interop is explicitly deferred, not silently skipped or
+  faked.** No real v2 agent or client exists yet to round-trip against — both
+  intended consumers (`FoundationModelsACPAgent`, `FoundationModelsACPClient`)
+  are themselves unimplemented, and this is a draft schema with no known
+  independent implementation. A mock "interop" test against our own `Agent`/
+  `Client` would only rename a unit test and cannot falsify "we implement v2"
+  versus "we implement our reading of v2" — the entire point of this
+  criterion. See `Tests/FoundationModelsACPTests/ThirdPartyInterop.swift` for
+  the full reasoning and the follow-up task carding the real round trip once
+  a peer exists.
+
+  This closes the last open milestone. Every wire-layer guarantee this plan
+  set out to establish — types, both role protocols, connections and
+  transports, initialization, sessions, the prompt lifecycle, all sixteen
+  `session/update` variants, permissions, and now replay/interop — has test
+  coverage exercising the real generated v2 types end to end, not just
+  hand-asserted shapes.
 
 ## References
 
