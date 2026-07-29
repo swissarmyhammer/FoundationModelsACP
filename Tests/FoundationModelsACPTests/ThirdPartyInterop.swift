@@ -1,5 +1,3 @@
-import Testing
-
 /// Third-party interop against a real v2 agent or client — **deliberately
 /// deferred**, not silently skipped (plan.md M9).
 ///
@@ -41,21 +39,16 @@ import Testing
 /// agent or client, or `FoundationModelsACPAgent` / `FoundationModelsACPClient`
 /// tested against each other or against such a peer once either is built.
 /// Until then, this criterion stays open, not quietly checked off.
-enum ThirdPartyInteropDeferred {}
-
-/// A trivial inbound reference to `ThirdPartyInteropDeferred`, so this file's
-/// deferral write-up is a documented, deliberate stand-in for the
-/// criterion this milestone cannot satisfy yet, rather than an unreferenced
-/// symbol a dead-code check would otherwise flag as orphaned scaffolding.
 ///
-/// This assertion is trivially true by construction; its purpose is the
-/// reference itself, plus the failure message pointing back at the doc
-/// comment above and follow-up task ^dsefdb7 for anyone who stumbles on it.
-@Suite struct ThirdPartyInteropDeferralTests {
-    @Test func deferralIsDocumentedPendingFollowUpTask() {
-        #expect(
-            ObjectIdentifier(ThirdPartyInteropDeferred.self) == ObjectIdentifier(ThirdPartyInteropDeferred.self),
-            "see ThirdPartyInteropDeferred's doc comment and follow-up task ^dsefdb7"
-        )
-    }
-}
+/// ## Why no runtime test
+///
+/// This is an uninhabited (zero-case) enum: a documentation anchor, not a
+/// value or behavior anything could exercise. A prior review round flagged
+/// it as dead code for lacking an inbound caller, and a runtime test was
+/// added purely to give it one — but the only assertion available for a
+/// type with no cases and no behavior was an `ObjectIdentifier` compared to
+/// itself, which passes unconditionally and checked nothing. That test has
+/// been removed rather than kept as a tautology; the deferral itself is
+/// verified by inspection (this comment, and the review process that reads
+/// it), not by a test that could never fail.
+enum ThirdPartyInteropDeferred {}
