@@ -381,7 +381,7 @@ replayable script.
   payload inventory above is now read off the schema, and every question the
   plan had open about it — `session/delete`, the `session/update` variant list,
   display terminals, `mcp/*`, message deletion — is answered in place.
-- [ ] **M1 — Types and conventions.** Generated models, unions, and enums from
+- [x] **M1 — Types and conventions.** Generated models, unions, and enums from
   the v2 schema, plus the hand-written pieces that are deliberately never
   generated: `JSONValue`, `AbsolutePath`, `ACP`, and `RequestError`. Every
   deferred union shape resolved — see the table under *Starting point* for what
@@ -405,21 +405,21 @@ replayable script.
   `MetaFieldTests.upsertMetaCannotYetDistinguishOmittedFromNull` pins the gap so
   it stays visible.
 
-- [ ] **M2 — Role protocols.** `Agent` (ten methods plus `session/cancel`) and
+- [x] **M2 — Role protocols.** `Agent` (ten methods plus `session/cancel`) and
   `Client` (`session/request_permission` plus the `session/update`
   notification). Capability-gated methods default to method-not-found.
-- [ ] **M3 — Connections and transports.** Both connection sides, the read loop,
+- [x] **M3 — Connections and transports.** Both connection sides, the read loop,
   continuation correlation, per-request `Task` dispatch, fail-loud disconnect,
   stdio and `InMemoryTransport`.
-- [ ] **M4 — Initialization and capabilities.** `initialize` with required `info`
+- [x] **M4 — Initialization and capabilities.** `initialize` with required `info`
   and `capabilities`, empty-object support markers, nested
   `capabilities.session.*` (including `mcp.stdio` / `mcp.http` /
   `additionalDirectories`), and `protocolVersion: 2`.
-- [ ] **M5 — Sessions.** `session/new` / `list` / `resume` / `close` / `delete`, `mcpServers`
+- [x] **M5 — Sessions.** `session/new` / `list` / `resume` / `close` / `delete`, `mcpServers`
   on new and resume, `replayFrom`, config options.
-- [ ] **M6 — Prompt lifecycle.** `session/prompt` immediate ack, `state_update`
+- [x] **M6 — Prompt lifecycle.** `session/prompt` immediate ack, `state_update`
   states, `stopReason` on idle, `session/cancel` → cancelled idle.
-- [ ] **M7 — Updates.** All sixteen `session/update` variants: messages and
+- [x] **M7 — Updates.** All sixteen `session/update` variants: messages and
   chunks with `messageId`, tool-call upserts and content chunks, terminal
   upserts and base64 output chunks (confirmed stable in M0), plans, available
   commands, config options, session info, usage.
@@ -427,7 +427,7 @@ replayable script.
   (omitted leaves unchanged, `null` clears, a value replaces) that a Swift
   `Optional` cannot express. M1 typed their payloads; expressing the third
   state is this milestone's.
-- [ ] **M8 — Permissions.** `session/request_permission` with `title` /
+- [x] **M8 — Permissions.** `session/request_permission` with `title` /
   `description` / tagged `subject` (`tool_call` or `command`, the latter
   optionally naming a `terminalId`). **Elicitation is out of scope until it is
   stable** — `elicitation/create` and `elicitation/complete` are unstable-only
