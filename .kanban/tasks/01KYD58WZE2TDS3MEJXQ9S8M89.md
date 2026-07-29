@@ -19,8 +19,8 @@ comments:
   timestamp: 2026-07-26T15:23:45.694507+00:00
 depends_on:
 - 01KYD58WXZM3KYPQ12K4VNPRPG
-position_column: todo
-position_ordinal: '8880'
+position_column: doing
+position_ordinal: '80'
 title: M8 Permissions (elicitation deferred to a re-vendor)
 ---
 ## Starting point
@@ -66,14 +66,26 @@ Deferred acceptance/tests, for the follow-on card: elicitation form and URL mode
 
 ## Acceptance Criteria
 
-- [ ] Permission requests model `title` / `description` / tagged `subject` with both variants.
-- [ ] `command` subject requires an absolute `cwd`, enforced at decode time.
-- [ ] `subject` is optional, and an omitted `subject` round-trips.
-- [ ] The unknown-`subject`-tag fallback preserves what it received.
-- [ ] Nothing elicitation-related is implemented or stubbed against the unstable manifest.
+- [x] Permission requests model `title` / `description` / tagged `subject` with both variants.
+- [x] `command` subject requires an absolute `cwd`, enforced at decode time.
+- [x] `subject` is optional, and an omitted `subject` round-trips.
+- [x] The unknown-`subject`-tag fallback preserves what it received.
+- [x] Nothing elicitation-related is implemented or stubbed against the unstable manifest.
 
 ## Tests
 
-- [ ] Both `subject` variants round-trip; a relative `cwd` in a `command` subject fails decoding.
-- [ ] A `command` subject carrying `toolCallId` and `terminalId` round-trips.
-- [ ] A pending permission request does not block concurrent notifications on the same connection.
+- [x] Both `subject` variants round-trip; a relative `cwd` in a `command` subject fails decoding.
+- [x] A `command` subject carrying `toolCallId` and `terminalId` round-trips.
+- [x] A pending permission request does not block concurrent notifications on the same connection.
+
+## Implementation note (2026-07-29)
+
+M1-M3 and M6 had already fully built this card's production surface: the generated types (`RequestPermissionRequest`/`Response`, the `RequestPermissionSubject` tagged union with `.toolCall`/`.command`/`.unknown`, `CommandPermissionSubject` with a required absolute-path `cwd` via the `AbsolutePath` newtype), `Client.requestPermission(_:)`, and the connection plumbing (`AgentSideConnection.requestPermission`, `ClientSideConnection`'s dispatch to it, and `Connection.dispatchRequest` spawning a `Task` per inbound request so the read loop is never blocked). Nothing in `Sources/` needed to change.
+
+What this card added: `Tests/FoundationModelsACPTests/PermissionRequestTests.swift` —
+- wire round-trips for `title`/`description`/tagged `subject` (`tool_call` and `command`, the latter both with only its required fields and with `toolCallId`/`terminalId` present), an omitted `subject`, and a `command` subject's relative-`cwd` decode failure (mirroring `WireInvariantTests`' pattern for the same `AbsolutePath` invariant elsewhere);
+- a real end-to-end concurrency test (`aPendingPermissionRequestDoesNotBlockAConcurrentSessionUpdate`) using the actual `AgentSideConnection`/`ClientSideConnection`/`Client` API — not the raw `Connection` stand-in `ConnectionTests.slowRequestHandlerDoesNotDelaySubsequentNotification` already used — proving a `session/update` notification sent while a `session/request_permission` is still pending on the same connection is still delivered before the permission request resolves.
+
+The unknown-`subject`-tag fallback criterion is satisfied by pre-existing generic coverage: `RequestPermissionSubject` is already in `TaggedUnionRoundTripTests.unionsUnderTest`, so `everyUnionReadsTheDiscriminatorItsVariantsPin`/`everyDeclaredTagSelectsAModeledCase` already exercise it. The "nothing elicitation-related" criterion is satisfied by pre-existing `ClientProtocolTests.clientCarriesNoUnstableOnlyMethod` plus a manual grep of `Sources/` confirming `elicitation` appears only in the generated unstable routing table and a `Client.swift` doc comment.
+
+Verified: `swift build --build-tests` clean (0 warnings), `swift test` green at 331 tests / 31 suites (236/19 in `FoundationModelsACPTests`, up from 230/18 by this file's 6 tests and 1 suite; 95/12 in `ACPGenerateTests`, unchanged) / 0 failures. `double-check` adversarial review returned PASS.
