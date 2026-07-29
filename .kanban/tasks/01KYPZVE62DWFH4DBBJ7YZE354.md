@@ -20,8 +20,8 @@ comments:
 
     Did not run `swift format` (repo policy — it rewrites checked-in generated files the CI diff gate pins byte-for-byte). Did not commit/push. Left in `doing` for `/review` per process.
   timestamp: 2026-07-29T15:05:14.135748+00:00
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9080'
 title: Fix pre-existing DocC warnings on acp-test-agent/acp-generate catalogs
 ---
 `swift package generate-documentation` emits 2 warnings, confirmed pre-existing (present both before and after the M9 ^p68s7v7 changes — verified via git stash comparison):
