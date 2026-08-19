@@ -87,6 +87,31 @@ func write(file: GeneratedFile) throws {
     print("wrote \(destination.path)")
 }
 
+/// Removes generated files the set no longer emits.
+///
+/// Sharding can shrink the emitted set between runs — a shard the new output
+/// no longer produces would stay on disk and declare duplicate symbols. The
+/// stale computation is namespace-scoped, so a set never removes another
+/// set's files from a shared output directory.
+///
+/// - Parameters:
+///   - emitted: The files the current run wrote.
+///   - namespace: The set's output namespace, or `nil` for the top-level set.
+/// - Throws: An error when the directory cannot be listed or a stale file
+///   cannot be removed.
+func removeStaleFiles(emitted: [GeneratedFile], namespace: String?) throws {
+    let existing = try FileManager.default.contentsOfDirectory(atPath: outputDirectory.path)
+    for name in SchemaGenerator.staleGeneratedFileNames(
+        existing: existing,
+        emitted: emitted,
+        namespace: namespace
+    ) {
+        let stale = outputDirectory.appendingPathComponent(name)
+        try FileManager.default.removeItem(at: stale)
+        print("removed stale \(stale.path)")
+    }
+}
+
 do {
     try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
     for schemaSet in SchemaSet.all {
@@ -109,6 +134,7 @@ do {
             for file in files {
                 try write(file: file)
             }
+            try removeStaleFiles(emitted: files, namespace: schemaSet.outputNamespace)
             print("\(schemaSet.versionLabel): regenerated \(files.count) files (schema hash \(hash))")
         }
     }

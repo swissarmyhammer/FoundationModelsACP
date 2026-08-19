@@ -64,8 +64,59 @@ comments:
     - commit: none — the tree is not green
     - decision: the red tests need the wiring that task ^2g9jejv owns. The freshness test RoutingTableTests compares the checked-in MethodTable with a fresh generation, thus a revert of Generated/ is not possible. The two tasks become green only together. Next step: implement ^2g9jejv in the same tree, then test, then make one checkpoint commit for both.
   timestamp: 2026-08-19T12:49:53.008871+00:00
+- actor: claude-code
+  id: 01m0d3rerqtbtcsh1eckh7kzxy
+  text: |-
+    ### review — findings
+    - evidence: 1 finding in this card's scope — Sources/FoundationModelsACP/Generated/Models.generated.swift:1 (review-engine/prompt-cap). Engine counts for the range: 2 findings, 2 confirmed, 0 refuted. The second finding, at Sources/FoundationModelsACP/Connection/Client.swift:52, is in the scope of task ^2g9jejv.
+    - scope: review sha HEAD~1..HEAD (commit 9d41eb9), backend local.
+    - acceptance check: the diff satisfies the What, the Acceptance Criteria, and the Tests sections of this card. The generator classifies the flattened untagged scope union, emits the structs and scope enums, and the tests in Tests/ACPGenerateTests/FlattenedScopeUnionTests.swift cover the decode probes and the negative case.
+    - next: split Sources/FoundationModelsACP/Generated/Models.generated.swift into smaller generated modules that fit the 262144-byte review prompt cap, then run the review again.
+  timestamp: 2026-08-19T13:35:50.039916+00:00
+- actor: claude-code
+  id: 01m0d3sw1thnt40b3me5vhswqe
+  text: |-
+    ### finish iteration 2 — findings
+    - implement: changed (iteration 1) — carried into this iteration
+    - test: green — swift test, 253 + 101 tests, 0 failures (after ^2g9jejv wiring)
+    - commit: 9d41eb9 — one checkpoint for ^ww8hhfm and ^2g9jejv
+    - review: findings — Sources/FoundationModelsACP/Generated/Models.generated.swift:1 is 754599 bytes, over the 262144-byte review cap; the duplication validator could not review it. Correction: the emitter must split the generated models into smaller files that fit the cap.
+    - next: implement the split, update the VendoredSchemaTests file-name pins, make sure the plugin removes files it no longer emits.
+  timestamp: 2026-08-19T13:36:36.410824+00:00
+- actor: claude-code
+  id: 01m0d46q978ehrjmp36nb4tg74
+  text: |-
+    Research for the prompt-cap finding:
+
+    - Sizes now on disk: Models.generated.swift 322284 bytes, Unions 82706, Identifiers 6059, MethodTable 9191, Unresolved 4153. Only Models is over the 262144-byte cap.
+    - The review rendered the 322284-byte file as 754599 bytes (ratio ~2.34). The render for a full rewrite holds the old content, the new content, and per-line overhead. Thus a shard budget of ~200KB is NOT safe: 2.34 x 200KB > 262144. The budget must be below 262144 / 2.4 ≈ 109KB. I select 102400 bytes (100 KiB): worst-case render ≈ 240KB, under the cap.
+    - Plan: SchemaGenerator.generate builds the four declaration files (Identifiers, Models, Unions, Unresolved) through one shared shard function. The function collects rendered declarations in order into shards. A shard closes when the next declaration makes the rendered file larger than the budget. Shard 1 keeps the base name (Models.generated.swift); shard n > 1 gets the name Models<n>.generated.swift. Small synthetic schemas thus keep one file with the old name, and the many tests that look up "Models.generated.swift" stay correct.
+    - Stale files: acp-generate writes but never deletes. Add a pure function that computes the stale generated file names for a set (namespace scoped), and call it from main.swift after a .regenerated write. The hash gate is unchanged: it hashes only the artifacts, so a generator-only change needs a stamp delete to regenerate; VendoredSchemaTests.checkedInOutputMatchesAFreshRun already catches a stale directory.
+    - Tests to update: VendoredSchemaTests count pins (Models splits into shards) and the tests that read vendored Models content (join the shards); new test that no generated file exceeds the budget; new test for the stale-name function. TDD order: red test first.
+  timestamp: 2026-08-19T13:43:37.511428+00:00
+- actor: claude-code
+  id: 01m0d4ha52v5vwvx6h9fejkcgz
+  text: |-
+    Correction of the prompt-cap finding is complete. TDD was used: each test was red first, and then the code made it green.
+
+    What changed:
+    - Sources/ACPGenerateCore/SchemaGenerator.swift: new public constant `generatedFileByteBudget` (102400 bytes). The four declaration files (Identifiers, Models, Unions, Unresolved) now go through one shared shard function `declarationFiles(baseName:declarations:namespace:)`. The function fills shards in declaration order and closes a shard when the next declaration makes the rendered file larger than the budget. Shard 1 keeps the base name; shard n > 1 gets the name `<base><n>.generated.swift`. Small schemas thus keep one file with the old name, and the synthetic-schema tests did not change. New public function `staleGeneratedFileNames(existing:emitted:namespace:)` computes the names a set no longer emits, with namespace-scoped ownership.
+    - Sources/acp-generate/main.swift: after a `.regenerated` write, `removeStaleFiles` deletes the stale `.generated.swift` files of the set. A shrunk shard set thus cannot leave duplicate symbols on disk.
+    - Budget selection: the review rendered the 322284-byte file as 754599 bytes (ratio ~2.34, old + new + per-line overhead for a full rewrite). Thus the ~200KB budget from the dispatch instructions is NOT safe: 2.34 x 200KB > 262144. 102400 bytes keeps the worst case near 240KB, under the cap.
+    - Regeneration: the artifact hash does not include the generator, thus the stamp was deleted one time to make the tool regenerate. Output now: Models 98454, Models2 101724, Models3 101621, Models4 20845 bytes (plus the unchanged Identifiers/MethodTable/Unions/Unresolved). A second run reports "up to date". No stale file remains.
+    - Tests: new VendoredSchemaTests.noGeneratedFileExceedsTheReviewPromptCap (every emitted file <= budget); new Tests/ACPGenerateTests/StaleGeneratedFileTests.swift (5 tests for the stale-name function); VendoredSchemaTests got a `modelsSource(in:)` helper that joins the Models shards in numeric shard order, the count pin now lists the four shards (39/38/36/7), and the order test also makes sure the joined shards keep the global sorted order.
+
+    Result: `swift test` (full suite) — 253 + 107 tests, 24 + 14 suites, zero failures, zero warnings. `swift package --allow-writing-to-package-directory generate-acp` exits 0 and is stable on a second run.
+  timestamp: 2026-08-19T13:49:24.514828+00:00
+- actor: claude-code
+  id: 01m0d4hfx64vjyh1d6y4pvyrxw
+  text: |-
+    ### implement — changed
+    - evidence: 7 files — Sources/ACPGenerateCore/SchemaGenerator.swift, Sources/acp-generate/main.swift, Tests/ACPGenerateTests/VendoredSchemaTests.swift, Tests/ACPGenerateTests/StaleGeneratedFileTests.swift (new), Sources/FoundationModelsACP/Generated/Models.generated.swift (98454 B), Models2 (101724 B, new), Models3 (101621 B, new), Models4 (20845 B, new). Full suite `swift test`: 253 + 107 tests, zero failures, zero warnings. `generate-acp` exits 0, second run "up to date", no stale files.
+    - next: /review. Not committed, per the dispatch instructions.
+  timestamp: 2026-08-19T13:49:30.406572+00:00
 position_column: doing
-position_ordinal: '80'
+position_ordinal: '8280'
 title: 'Generator: support flattened untagged scope union (Elicitation modes)'
 ---
 # Generator: support flattened untagged scope union (Elicitation modes)
@@ -107,3 +158,11 @@ Use synthetic schemas for tests in this task. Do not depend on the full vendored
 - Use `/tdd` — write failing tests first, then implement to make them pass.
 
 #elicitation
+
+## Review Findings (2026-08-19 08:03)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 26 file(s) reviewed, 7 not reviewed.
+
+- [x] `Sources/FoundationModelsACP/Generated/Models.generated.swift:1` `review-engine/prompt-cap` — This file exceeds the review prompt cap — 754599 rendered bytes against the 262144-byte per-file cap — so these validators could not review it: duplication. Split the file into smaller modules that fit the review prompt cap.
+
+Note: The engine reported one more finding, at `Sources/FoundationModelsACP/Connection/Client.swift:52` (`completeness/inverse-operation-coverage`). That finding points at the Connection wiring. Task ^2g9jejv owns that scope. The review of task ^2g9jejv will record it. Related fact from this review: the generator emits `CreateElicitationResponse` as `public typealias CreateElicitationResponse = JSONValue` in `Sources/FoundationModelsACP/Generated/Unresolved.generated.swift`, and `Tests/ACPGenerateTests/VendoredSchemaTests.swift` asserts that name in the unresolved set.

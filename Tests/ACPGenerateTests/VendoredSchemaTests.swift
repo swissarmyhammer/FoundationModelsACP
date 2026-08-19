@@ -65,6 +65,32 @@ import FoundationModelsACP
         return Dictionary(uniqueKeysWithValues: files.map { ($0.name, $0.contents) })
     }
 
+    /// The concatenated source of every `Models` shard, in shard order.
+    ///
+    /// `generate` shards the model declarations at
+    /// `SchemaGenerator.generatedFileByteBudget`, so assertions over the whole
+    /// vendored model surface read the shards joined back together. The first
+    /// shard carries the plain base name and each later shard carries its
+    /// ordinal (`Models2.generated.swift`, …), so the join sorts by ordinal —
+    /// numerically, so a tenth shard cannot sort before the second.
+    ///
+    /// - Parameter generated: The generated files, keyed by file name.
+    /// - Returns: The shard sources joined in shard order.
+    /// - Throws: A test failure when no `Models` shard exists.
+    private static func modelsSource(in generated: [String: String]) throws -> String {
+        let shards = generated
+            .compactMap { name, contents -> (ordinal: Int, contents: String)? in
+                guard name.hasPrefix("Models"), name.hasSuffix(".generated.swift") else { return nil }
+                let ordinalText = name.dropFirst("Models".count).dropLast(".generated.swift".count)
+                guard !ordinalText.isEmpty else { return (1, contents) }
+                guard let ordinal = Int(ordinalText) else { return nil }
+                return (ordinal, contents)
+            }
+            .sorted { $0.ordinal < $1.ordinal }
+        try #require(!shards.isEmpty, "the generated set holds no Models shard")
+        return shards.map(\.contents).joined()
+    }
+
     /// The same JSON document with every object's members re-emitted in
     /// ascending key order.
     ///
@@ -146,9 +172,10 @@ import FoundationModelsACP
             #expect(checkedIn == contents, "\(name) drifted from the vendored schema; run `swift package generate-acp`")
         }
         // Comparing only the files the generator emits leaves a file it no
-        // longer emits invisible — and `acp-generate` writes but never deletes,
-        // so CI's `git diff` cannot see one either. The directory must hold
-        // exactly the emitted set.
+        // longer emits invisible. `acp-generate` removes stale files only when
+        // it regenerates, and a generator-only change leaves the stamp
+        // matching, so nothing regenerates and CI's `git diff` stays silent.
+        // The directory must hold exactly the emitted set.
         let checkedInNames = try FileManager.default
             .contentsOfDirectory(atPath: Self.packageRoot.appendingPathComponent(Self.generatedDirectory).path)
             .filter { $0.hasSuffix(".swift") }
@@ -232,7 +259,7 @@ import FoundationModelsACP
         // The fourth is the inverse shape: a routed params object whose value
         // union closes with a catch-all that leaves the tag unpinned, so the
         // default case captures the tag beside the raw value.
-        let models = try #require(generated["Models.generated.swift"])
+        let models = try Self.modelsSource(in: generated)
         #expect(models.contains("public struct SetSessionConfigOptionRequest: Codable, Hashable, Sendable"))
         #expect(models.contains("case other(String, JSONValue)"))
     }
@@ -269,7 +296,7 @@ import FoundationModelsACP
         )
         #expect(unions.contains("case unknown(Int)"))
         // And the base objects whose union is nested inside them.
-        let models = try #require(generated["Models.generated.swift"])
+        let models = try Self.modelsSource(in: generated)
         #expect(Self.declarationsNesting("    public enum Payload: Codable", in: models) == ["CreateElicitationRequest", "DiffChange", "SessionConfigOption"])
         #expect(Self.declarationsNesting("    public enum Value: Codable", in: models) == ["SetSessionConfigOptionRequest"])
         // The elicitation modes nest the flattened scope union instead: no
@@ -335,7 +362,7 @@ import FoundationModelsACP
 
     @Test func absolutePathDefinitionResolvesToTheHandWrittenInvariant() throws {
         let generated = try Self.generateFromVendoredArtifacts()
-        let models = try #require(generated["Models.generated.swift"])
+        let models = try Self.modelsSource(in: generated)
         // v2 models absolute paths as a schema definition, so the invariant
         // type follows the `$ref` — no per-field configuration.
         //
@@ -450,27 +477,58 @@ import FoundationModelsACP
         // `MCPServerHTTP` would). `originalSchemaNames()` recovers the true
         // spelling for both.
         let schemaNames = try Self.originalSchemaNames()
-        let emitted = try Self.generateFromVendoredArtifacts().mapValues { contents in
+        let generated = try Self.generateFromVendoredArtifacts()
+        let emitted = generated.mapValues { contents in
             Self.declaredTypeNames(in: contents).map { schemaNames[$0] ?? $0 }
         }
         for (file, names) in emitted {
             #expect(names == names.sorted(), "\(file) emits declarations out of schema-name order")
         }
+        // Sharding must keep the global order too. Each shard sorted on its
+        // own does not prove it: swapped shards stay per-file sorted. The
+        // shards, joined in shard order, must spell out one sorted list.
+        let joinedModelNames = Self.declaredTypeNames(in: try Self.modelsSource(in: generated))
+            .map { schemaNames[$0] ?? $0 }
+        #expect(
+            joinedModelNames == joinedModelNames.sorted(),
+            "the Models shards break the global schema-name order"
+        )
         // `[] == [].sorted()` is true, so the ordering assertion alone would go
         // green the moment `declaredTypeName(on:)` stopped recognizing a
         // declaration — an attribute line, an indent, or a non-`nil`
         // `outputNamespace` nesting everything one level deeper. Pinning the
         // counts keeps a parse that quietly stops seeing declarations from
-        // reading as success.
+        // reading as success — and the per-shard counts also pin the shard
+        // boundaries, which the byte budget makes deterministic.
         #expect(
             emitted.mapValues(\.count) == [
                 "Identifiers.generated.swift": 13,
                 "MethodTable.generated.swift": 2,
-                "Models.generated.swift": 120,
+                "Models.generated.swift": 39,
+                "Models2.generated.swift": 38,
+                "Models3.generated.swift": 36,
+                "Models4.generated.swift": 7,
                 "Unions.generated.swift": 27,
                 "Unresolved.generated.swift": 10,
             ]
         )
+    }
+
+    @Test func noGeneratedFileExceedsTheReviewPromptCap() throws {
+        // The review engine inlines each reviewed file into a prompt and caps
+        // the rendered bytes per file at 262144. A render of a fully rewritten
+        // file holds the old content, the new content, and per-line overhead —
+        // about 2.4 times the file's own bytes — so the generator shards its
+        // declaration files at `SchemaGenerator.generatedFileByteBudget`,
+        // which keeps that worst case under the cap. Every emitted file must
+        // honor the budget; a single file over it re-opens the review gap.
+        let generated = try Self.generateFromVendoredArtifacts()
+        for (name, contents) in generated.sorted(by: { $0.key < $1.key }) {
+            #expect(
+                contents.utf8.count <= SchemaGenerator.generatedFileByteBudget,
+                "\(name) is \(contents.utf8.count) bytes, over the \(SchemaGenerator.generatedFileByteBudget)-byte budget"
+            )
+        }
     }
 
     @Test func generationIgnoresSchemaMemberOrder() throws {

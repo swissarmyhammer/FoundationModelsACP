@@ -26,6 +26,17 @@ public struct GeneratedFile: Equatable, Sendable {
 /// tagged unions, the method-routing table, and placeholder seams for the
 /// definitions later generator stages resolve.
 public struct SchemaGenerator: Sendable {
+    /// The byte budget for one generated declaration file.
+    ///
+    /// The review engine inlines each reviewed file into a prompt and caps the
+    /// rendered bytes per file at 262144. The render of a fully rewritten file
+    /// holds the old content, the new content, and per-line overhead — about
+    /// 2.4 times the file's own bytes (measured: a 322284-byte file rendered
+    /// as 754599 bytes). 100 KiB keeps that worst case near 240 KB, safely
+    /// under the cap. `generate` closes a declaration shard when the next
+    /// declaration would push the rendered file over this budget.
+    public static let generatedFileByteBudget = 102_400
+
     /// The configuration for this generator run.
     ///
     /// Describes renames, hand-written types, wire-invariant field
@@ -143,24 +154,11 @@ public struct SchemaGenerator: Sendable {
 
         try validateEmptyInstanceDefaults(models: structModels)
 
-        var files = [
-            GeneratedFile(
-                name: "Identifiers.generated.swift",
-                contents: Emitter.file(declarations: identifiers, namespace: namespace)
-            ),
-            GeneratedFile(
-                name: "Models.generated.swift",
-                contents: Emitter.file(declarations: modelDeclarations, namespace: namespace)
-            ),
-            GeneratedFile(
-                name: "Unions.generated.swift",
-                contents: Emitter.file(declarations: unions, namespace: namespace)
-            ),
-            GeneratedFile(
-                name: "Unresolved.generated.swift",
-                contents: Emitter.file(declarations: placeholders, namespace: namespace)
-            ),
-        ]
+        var files =
+            Self.declarationFiles(baseName: "Identifiers", declarations: identifiers, namespace: namespace)
+            + Self.declarationFiles(baseName: "Models", declarations: modelDeclarations, namespace: namespace)
+            + Self.declarationFiles(baseName: "Unions", declarations: unions, namespace: namespace)
+            + Self.declarationFiles(baseName: "Unresolved", declarations: placeholders, namespace: namespace)
         if let metaJSON {
             files.append(
                 try methodTableFile(
@@ -177,6 +175,101 @@ public struct SchemaGenerator: Sendable {
         return files.map { file in
             GeneratedFile(name: "\(namespace).\(file.name)", contents: file.contents)
         }
+    }
+
+    // MARK: - Declaration file sharding
+
+    /// The suffix every generated Swift file name carries.
+    private static let generatedFileNameSuffix = ".generated.swift"
+
+    /// Builds the generated files for one declaration list, sharded to the
+    /// byte budget.
+    ///
+    /// The split is deterministic and keeps the declaration order: shards fill
+    /// front to back, and a shard closes when the next declaration would push
+    /// the rendered file over `generatedFileByteBudget`. The first shard keeps
+    /// the plain base name (`Models.generated.swift`), so a list that fits one
+    /// shard produces the same file name as before sharding; each later shard
+    /// appends its ordinal (`Models2.generated.swift`, …). A single
+    /// declaration larger than the whole budget occupies one shard alone and
+    /// exceeds the budget; the vendored-output byte test guards the real
+    /// schema against that.
+    ///
+    /// - Parameters:
+    ///   - baseName: The base file name, without the `.generated.swift` suffix.
+    ///   - declarations: Rendered type declarations, already sorted.
+    ///   - namespace: An enclosing namespace enum to nest the declarations in,
+    ///     or `nil` to emit them at the top level.
+    /// - Returns: One generated file per shard, in declaration order.
+    private static func declarationFiles(
+        baseName: String,
+        declarations: [String],
+        namespace: String?
+    ) -> [GeneratedFile] {
+        var shards: [[String]] = []
+        var current: [String] = []
+        for declaration in declarations {
+            let rendered = Emitter.file(declarations: current + [declaration], namespace: namespace)
+            if !current.isEmpty, rendered.utf8.count > generatedFileByteBudget {
+                shards.append(current)
+                current = []
+            }
+            current.append(declaration)
+        }
+        shards.append(current)
+        return shards.enumerated().map { index, shard in
+            GeneratedFile(
+                name: shardFileName(baseName: baseName, index: index),
+                contents: Emitter.file(declarations: shard, namespace: namespace)
+            )
+        }
+    }
+
+    /// The file name of one declaration shard.
+    ///
+    /// - Parameters:
+    ///   - baseName: The base file name, without the `.generated.swift` suffix.
+    ///   - index: The zero-based shard position.
+    /// - Returns: `<baseName>.generated.swift` for the first shard, and
+    ///   `<baseName><index + 1>.generated.swift` for every later shard.
+    private static func shardFileName(baseName: String, index: Int) -> String {
+        let ordinal = index == 0 ? "" : "\(index + 1)"
+        return "\(baseName)\(ordinal)\(generatedFileNameSuffix)"
+    }
+
+    /// The generated file names a set no longer emits.
+    ///
+    /// The writer calls this after a regeneration to remove stale files: a
+    /// shard the shrunk output no longer produces would otherwise stay on
+    /// disk and declare duplicate symbols. Ownership is scoped by the set's
+    /// namespace, because sets can share one output directory: a namespaced
+    /// set owns the names that carry its `<namespace>.` prefix, and the
+    /// top-level set owns the names whose base carries no prefix (no `.`
+    /// before the `.generated.swift` suffix). Only `.generated.swift` names
+    /// are candidates; hand-written files and stamp files are never reported.
+    ///
+    /// - Parameters:
+    ///   - existing: The file names present in the output directory.
+    ///   - emitted: The files the current run produced.
+    ///   - namespace: The set's output namespace, or `nil` for the top-level
+    ///     set.
+    /// - Returns: The stale file names, sorted.
+    public static func staleGeneratedFileNames(
+        existing: [String],
+        emitted: [GeneratedFile],
+        namespace: String?
+    ) -> [String] {
+        let emittedNames = Set(emitted.map(\.name))
+        return existing
+            .filter { name in
+                guard name.hasSuffix(generatedFileNameSuffix), !emittedNames.contains(name) else {
+                    return false
+                }
+                let base = name.dropLast(generatedFileNameSuffix.count)
+                guard let namespace else { return !base.contains(".") }
+                return base.hasPrefix("\(namespace).")
+            }
+            .sorted()
     }
 
     // MARK: - Schema keywords
