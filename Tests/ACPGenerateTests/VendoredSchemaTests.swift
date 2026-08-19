@@ -65,30 +65,51 @@ import FoundationModelsACP
         return Dictionary(uniqueKeysWithValues: files.map { ($0.name, $0.contents) })
     }
 
-    /// The concatenated source of every `Models` shard, in shard order.
+    /// The concatenated source of every shard of one declaration set, in
+    /// shard order.
     ///
-    /// `generate` shards the model declarations at
-    /// `SchemaGenerator.generatedFileByteBudget`, so assertions over the whole
-    /// vendored model surface read the shards joined back together. The first
+    /// `generate` shards each declaration set at
+    /// `SchemaGenerator.generatedFileByteBudget`, so assertions over a whole
+    /// vendored set surface read the shards joined back together. The first
     /// shard carries the plain base name and each later shard carries its
     /// ordinal (`Models2.generated.swift`, …), so the join sorts by ordinal —
     /// numerically, so a tenth shard cannot sort before the second.
     ///
-    /// - Parameter generated: The generated files, keyed by file name.
+    /// - Parameters:
+    ///   - baseName: The set's base name, for example `Models` or `Unions`.
+    ///   - generated: The generated files, keyed by file name.
     /// - Returns: The shard sources joined in shard order.
-    /// - Throws: A test failure when no `Models` shard exists.
-    private static func modelsSource(in generated: [String: String]) throws -> String {
+    /// - Throws: A test failure when the set has no shard.
+    private static func shardedSource(baseName: String, in generated: [String: String]) throws -> String {
         let shards = generated
             .compactMap { name, contents -> (ordinal: Int, contents: String)? in
-                guard name.hasPrefix("Models"), name.hasSuffix(".generated.swift") else { return nil }
-                let ordinalText = name.dropFirst("Models".count).dropLast(".generated.swift".count)
+                guard name.hasPrefix(baseName), name.hasSuffix(".generated.swift") else { return nil }
+                let ordinalText = name.dropFirst(baseName.count).dropLast(".generated.swift".count)
                 guard !ordinalText.isEmpty else { return (1, contents) }
                 guard let ordinal = Int(ordinalText) else { return nil }
                 return (ordinal, contents)
             }
             .sorted { $0.ordinal < $1.ordinal }
-        try #require(!shards.isEmpty, "the generated set holds no Models shard")
+        try #require(!shards.isEmpty, "the generated set holds no \(baseName) shard")
         return shards.map(\.contents).joined()
+    }
+
+    /// The concatenated source of every `Models` shard, in shard order.
+    ///
+    /// - Parameter generated: The generated files, keyed by file name.
+    /// - Returns: The shard sources joined in shard order.
+    /// - Throws: A test failure when no `Models` shard exists.
+    private static func modelsSource(in generated: [String: String]) throws -> String {
+        try shardedSource(baseName: "Models", in: generated)
+    }
+
+    /// The concatenated source of every `Unions` shard, in shard order.
+    ///
+    /// - Parameter generated: The generated files, keyed by file name.
+    /// - Returns: The shard sources joined in shard order.
+    /// - Throws: A test failure when no `Unions` shard exists.
+    private static func unionsSource(in generated: [String: String]) throws -> String {
+        try shardedSource(baseName: "Unions", in: generated)
     }
 
     /// The same JSON document with every object's members re-emitted in
@@ -202,7 +223,7 @@ import FoundationModelsACP
     }
 
     @Test func sessionUpdateCarriesEveryVariantInSchemaOrder() throws {
-        let unions = try #require(try Self.generateFromVendoredArtifacts()["Unions.generated.swift"])
+        let unions = try Self.unionsSource(in: Self.generateFromVendoredArtifacts())
         let declaration = try #require(Self.declaration(named: "SessionUpdate", in: unions))
         // The v1→v2 migration guide's display-terminal stream is real and
         // stable: `terminalUpdate` and `terminalOutputChunk` are `session/update`
@@ -222,7 +243,7 @@ import FoundationModelsACP
     }
 
     @Test func toolCallContentCarriesTheTerminalReference() throws {
-        let unions = try #require(try Self.generateFromVendoredArtifacts()["Unions.generated.swift"])
+        let unions = try Self.unionsSource(in: Self.generateFromVendoredArtifacts())
         // The `terminal` variant lives on tool-call content, not on the
         // message-level `ContentBlock` — which is why the docs' five-variant
         // content list showed no terminal.
@@ -234,7 +255,7 @@ import FoundationModelsACP
     }
 
     @Test func contentBlockHasExactlyTheFiveStandardVariantsPlusFallback() throws {
-        let unions = try #require(try Self.generateFromVendoredArtifacts()["Unions.generated.swift"])
+        let unions = try Self.unionsSource(in: Self.generateFromVendoredArtifacts())
         let declaration = try #require(Self.declaration(named: "ContentBlock", in: unions))
         #expect(Self.caseNames(in: declaration) == ["text", "image", "audio", "resourceLink", "resource", "unknown"])
     }
@@ -251,7 +272,7 @@ import FoundationModelsACP
         }
         // Three are tagged unions whose fallback keeps the raw object beside
         // the tag it could not name.
-        let unions = try #require(generated["Unions.generated.swift"])
+        let unions = try Self.unionsSource(in: generated)
         for name in ["AuthMethod", "PlanUpdateContent", "ReplayFrom"] {
             let declaration = try #require(Self.declaration(named: name, in: unions), "\(name) is not emitted as a union")
             #expect(declaration.contains("case unknown(String, JSONValue)"), "\(name) truncates its catch-all")
@@ -271,7 +292,7 @@ import FoundationModelsACP
         // definition-name-to-Swift-type table it cannot derive, and probes
         // every tag of every entry; a union added upstream has to be added
         // there too, and failing here is what says so.
-        let unions = try #require(generated["Unions.generated.swift"])
+        let unions = try Self.unionsSource(in: generated)
         #expect(
             Self.declaredTypeNames(in: unions).filter {
                 Self.declaration(named: $0, in: unions)?.contains("case unknown(String, JSONValue)") == true
@@ -487,12 +508,14 @@ import FoundationModelsACP
         // Sharding must keep the global order too. Each shard sorted on its
         // own does not prove it: swapped shards stay per-file sorted. The
         // shards, joined in shard order, must spell out one sorted list.
-        let joinedModelNames = Self.declaredTypeNames(in: try Self.modelsSource(in: generated))
-            .map { schemaNames[$0] ?? $0 }
-        #expect(
-            joinedModelNames == joinedModelNames.sorted(),
-            "the Models shards break the global schema-name order"
-        )
+        for baseName in ["Models", "Unions"] {
+            let joinedNames = Self.declaredTypeNames(in: try Self.shardedSource(baseName: baseName, in: generated))
+                .map { schemaNames[$0] ?? $0 }
+            #expect(
+                joinedNames == joinedNames.sorted(),
+                "the \(baseName) shards break the global schema-name order"
+            )
+        }
         // `[] == [].sorted()` is true, so the ordering assertion alone would go
         // green the moment `declaredTypeName(on:)` stopped recognizing a
         // declaration — an attribute line, an indent, or a non-`nil`
@@ -504,11 +527,18 @@ import FoundationModelsACP
             emitted.mapValues(\.count) == [
                 "Identifiers.generated.swift": 13,
                 "MethodTable.generated.swift": 2,
-                "Models.generated.swift": 39,
-                "Models2.generated.swift": 38,
-                "Models3.generated.swift": 36,
-                "Models4.generated.swift": 7,
-                "Unions.generated.swift": 27,
+                "Models.generated.swift": 15,
+                "Models2.generated.swift": 15,
+                "Models3.generated.swift": 14,
+                "Models4.generated.swift": 15,
+                "Models5.generated.swift": 15,
+                "Models6.generated.swift": 16,
+                "Models7.generated.swift": 13,
+                "Models8.generated.swift": 13,
+                "Models9.generated.swift": 4,
+                "Unions.generated.swift": 14,
+                "Unions2.generated.swift": 12,
+                "Unions3.generated.swift": 1,
                 "Unresolved.generated.swift": 10,
             ]
         )
@@ -516,11 +546,13 @@ import FoundationModelsACP
 
     @Test func noGeneratedFileExceedsTheReviewPromptCap() throws {
         // The review engine inlines each reviewed file into a prompt and caps
-        // the rendered bytes per file at 262144. A render of a fully rewritten
-        // file holds the old content, the new content, and per-line overhead —
-        // about 2.4 times the file's own bytes — so the generator shards its
-        // declaration files at `SchemaGenerator.generatedFileByteBudget`,
-        // which keeps that worst case under the cap. Every emitted file must
+        // the rendered bytes per file at 262144. The cap measures rendered
+        // diff bytes, not disk bytes: a same-name full rewrite renders the old
+        // content, the new content, and per-line overhead — measured up to 6.4
+        // times the file's own disk bytes when the old file was larger. So the
+        // generator shards its declaration files at
+        // `SchemaGenerator.generatedFileByteBudget`, which keeps that worst
+        // case (old + new + overhead) under the cap. Every emitted file must
         // honor the budget; a single file over it re-opens the review gap.
         let generated = try Self.generateFromVendoredArtifacts()
         for (name, contents) in generated.sorted(by: { $0.key < $1.key }) {

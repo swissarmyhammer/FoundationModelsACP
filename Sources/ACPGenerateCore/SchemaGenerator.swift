@@ -28,14 +28,18 @@ public struct GeneratedFile: Equatable, Sendable {
 public struct SchemaGenerator: Sendable {
     /// The byte budget for one generated declaration file.
     ///
-    /// The review engine inlines each reviewed file into a prompt and caps the
-    /// rendered bytes per file at 262144. The render of a fully rewritten file
-    /// holds the old content, the new content, and per-line overhead — about
-    /// 2.4 times the file's own bytes (measured: a 322284-byte file rendered
-    /// as 754599 bytes). 100 KiB keeps that worst case near 240 KB, safely
-    /// under the cap. `generate` closes a declaration shard when the next
-    /// declaration would push the rendered file over this budget.
-    public static let generatedFileByteBudget = 102_400
+    /// The review engine puts each reviewed file into a prompt and caps the
+    /// rendered bytes per file at 262144. The cap measures the rendered diff
+    /// bytes, not the disk bytes. The worst case is a full rewrite of a file
+    /// that keeps its name: the render holds the old content, the new
+    /// content, and per-line overhead. The measured worst case rendered a
+    /// 98454-disk-byte shard as 633400 bytes (a 6.4x ratio, because the old
+    /// content was the 322284-byte pre-shard file). With a 40 KiB budget,
+    /// that worst case renders as approximately old (40 KiB) + new (40 KiB)
+    /// + per-line overhead — safely under the 262144-byte cap. `generate`
+    /// closes a declaration shard when the next declaration would push the
+    /// rendered file over this budget.
+    public static let generatedFileByteBudget = 40_960
 
     /// The configuration for this generator run.
     ///

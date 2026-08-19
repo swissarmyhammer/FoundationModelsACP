@@ -115,6 +115,45 @@ comments:
     - evidence: 7 files — Sources/ACPGenerateCore/SchemaGenerator.swift, Sources/acp-generate/main.swift, Tests/ACPGenerateTests/VendoredSchemaTests.swift, Tests/ACPGenerateTests/StaleGeneratedFileTests.swift (new), Sources/FoundationModelsACP/Generated/Models.generated.swift (98454 B), Models2 (101724 B, new), Models3 (101621 B, new), Models4 (20845 B, new). Full suite `swift test`: 253 + 107 tests, zero failures, zero warnings. `generate-acp` exits 0, second run "up to date", no stale files.
     - next: /review. Not committed, per the dispatch instructions.
   timestamp: 2026-08-19T13:49:30.406572+00:00
+- actor: claude-code
+  id: 01m0d54jx28cy7yjte41wbxrpx
+  text: |-
+    ### review — findings
+    - evidence: 3 findings — Sources/FoundationModelsACP/Generated/Models.generated.swift:1, Sources/FoundationModelsACP/Generated/Models2.generated.swift:1, Sources/FoundationModelsACP/Generated/Models3.generated.swift:1 (all review-engine/prompt-cap). Scope: review sha HEAD~1..HEAD (eb9c626).
+    - fact: The prior finding is correctly checked for the disk size. All generated files are below 262144 disk bytes (the largest file is 101724 bytes). But the cap measures the rendered prompt bytes. A sha-scope review renders the full diff, and the rendered bytes are more than three times the disk bytes. Three shards are again over the cap.
+    - next: Decrease the shard budget in the generator so each rendered file stays below 262144 bytes (approximately 40000 disk bytes for each shard, with margin). Then run the review again.
+  timestamp: 2026-08-19T13:59:56.066755+00:00
+- actor: claude-code
+  id: 01m0d55tg8gzh01t7z0g9jz0gn
+  text: |-
+    ### finish iteration 3 — findings
+    - implement: changed — sharding at 102400 bytes, stale-file removal, new tests
+    - test: green — swift test, 253 + 107 tests, 0 failures
+    - commit: eb9c626
+    - review: findings — 3: Models.generated.swift:1 (633400 rendered bytes), Models2.generated.swift:1 (359626), Models3.generated.swift:1 (348328). The 262144-byte cap measures rendered prompt bytes (old + new + per-line overhead), not disk bytes. Correction: decrease SchemaGenerator.generatedFileByteBudget to approximately 40000 disk bytes.
+    - note: this is round 2 of the prompt-cap finding class. One more round with the same finding hits the stop guardrail.
+  timestamp: 2026-08-19T14:00:36.616591+00:00
+- actor: claude-code
+  id: 01m0d5g8yz27gq60fhewf5jvw2
+  text: |-
+    Correction of the three prompt-cap findings is complete.
+
+    What changed:
+    - Sources/ACPGenerateCore/SchemaGenerator.swift: `generatedFileByteBudget` decreased from 102400 to 40960 (40 KiB). The doc comment now states the rendered-bytes arithmetic: the cap measures rendered diff bytes, not disk bytes; a same-name full rewrite renders old content + new content + per-line overhead; the measured worst case rendered a 98454-disk-byte shard as 633400 bytes (a 6.4x ratio, because the old content was the 322284-byte pre-shard file). With 40 KiB, the worst case renders as approximately 40 KiB + 40 KiB + overhead, safely below 262144.
+    - Regeneration: the stamp file was deleted one time (the hash covers only the artifacts), then `swift package --allow-writing-to-package-directory generate-acp` exited 0 and wrote 16 files. Output now: Models 38608, Models2 36583, Models3 38219, Models4 40057, Models5 39329, Models6 40771, Models7 40200, Models8 35256, Models9 14221, Unions 38907, Unions2 40498, Unions3 3541 bytes (plus the unchanged Identifiers 6059, MethodTable 9191, Unresolved 4153). Every file is at or below 40960 disk bytes. A second run reports "up to date". No stale file remains: `git status` shows only modifications and the seven new shard names, no deletion is necessary because the shard count grew.
+    - Tests/ACPGenerateTests/VendoredSchemaTests.swift: the Unions set now shards too, thus the `modelsSource(in:)` helper became one shared `shardedSource(baseName:in:)` with `modelsSource` and `unionsSource` wrappers. The five tests that read Unions content now read the joined Unions shards. The joined-shard order check in `declarationsAreEmittedInSortedSchemaNameOrder` now covers both Models and Unions. The count pin lists the new shard set: Models 15/15/14/15/15/16/13/13/4 (sum 120, unchanged) and Unions 14/12/1 (sum 27, unchanged). The comment in `noGeneratedFileExceedsTheReviewPromptCap` now states the correct measured ratio (6.4x, not 2.4x); the test compares against the constant and adapted automatically.
+
+    TDD order: the shard-related tests were red first (6 issues in 5 VendoredSchemaTests after regeneration), then the test updates made them green.
+
+    Result: `swift test` (full suite) — 253 + 107 tests, 24 + 14 suites, zero failures, zero warnings.
+  timestamp: 2026-08-19T14:06:19.103307+00:00
+- actor: claude-code
+  id: 01m0d5gfgvf9tdzsjqv67w4qbs
+  text: |-
+    ### implement — changed
+    - evidence: 2 source files — Sources/ACPGenerateCore/SchemaGenerator.swift (`generatedFileByteBudget` 102400 -> 40960, doc comment states the rendered-bytes arithmetic), Tests/ACPGenerateTests/VendoredSchemaTests.swift (shared `shardedSource(baseName:in:)` helper, Unions tests read joined shards, count pins Models 15/15/14/15/15/16/13/13/4 and Unions 14/12/1, order check covers both sets); plus 12 regenerated shard files in Sources/FoundationModelsACP/Generated/ (largest 40771 bytes, all <= 40960; 15 Swift files total, no stale file). `generate-acp` exits 0, second run "up to date". Full suite `swift test`: 253 + 107 tests, zero failures, zero warnings. The three prompt-cap findings on the card are checked.
+    - next: /review. Not committed, per the dispatch instructions.
+  timestamp: 2026-08-19T14:06:25.819448+00:00
 position_column: doing
 position_ordinal: '8280'
 title: 'Generator: support flattened untagged scope union (Elicitation modes)'
@@ -166,3 +205,21 @@ Use synthetic schemas for tests in this task. Do not depend on the full vendored
 - [x] `Sources/FoundationModelsACP/Generated/Models.generated.swift:1` `review-engine/prompt-cap` — This file exceeds the review prompt cap — 754599 rendered bytes against the 262144-byte per-file cap — so these validators could not review it: duplication. Split the file into smaller modules that fit the review prompt cap.
 
 Note: The engine reported one more finding, at `Sources/FoundationModelsACP/Connection/Client.swift:52` (`completeness/inverse-operation-coverage`). That finding points at the Connection wiring. Task ^2g9jejv owns that scope. The review of task ^2g9jejv will record it. Related fact from this review: the generator emits `CreateElicitationResponse` as `public typealias CreateElicitationResponse = JSONValue` in `Sources/FoundationModelsACP/Generated/Unresolved.generated.swift`, and `Tests/ACPGenerateTests/VendoredSchemaTests.swift` asserts that name in the unresolved set.
+
+## Review Findings (2026-08-19 08:50)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 8 file(s) reviewed, 5 not reviewed.
+
+> ⚠️ 3 file(s) not reviewed — the rendered prompt would exceed the agent's prompt cap:
+> - `Sources/FoundationModelsACP/Generated/Models.generated.swift` — 633400 rendered bytes, over the 262144-byte per-file cap; not reviewed by: duplication (split the file)
+> - `Sources/FoundationModelsACP/Generated/Models2.generated.swift` — 359626 rendered bytes, over the 262144-byte per-file cap; not reviewed by: duplication, reuse (split the file)
+> - `Sources/FoundationModelsACP/Generated/Models3.generated.swift` — 348328 rendered bytes, over the 262144-byte per-file cap; not reviewed by: duplication, reuse (split the file)
+
+> 2 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 2 file(s)
+
+- [x] `Sources/FoundationModelsACP/Generated/Models.generated.swift:1` `review-engine/prompt-cap` — This file exceeds the review prompt cap — 633400 rendered bytes against the 262144-byte per-file cap — so these validators could not review it: duplication. Split the file into smaller modules that fit the review prompt cap.
+- [x] `Sources/FoundationModelsACP/Generated/Models2.generated.swift:1` `review-engine/prompt-cap` — This file exceeds the review prompt cap — 359626 rendered bytes against the 262144-byte per-file cap — so these validators could not review it: duplication, reuse. Split the file into smaller modules that fit the review prompt cap.
+- [x] `Sources/FoundationModelsACP/Generated/Models3.generated.swift:1` `review-engine/prompt-cap` — This file exceeds the review prompt cap — 348328 rendered bytes against the 262144-byte per-file cap — so these validators could not review it: duplication, reuse. Split the file into smaller modules that fit the review prompt cap.
+
+Note: The cap applies to the rendered prompt bytes, not to the file size on the disk. The disk sizes are below 262144 bytes (the largest file is 101724 bytes), but a sha-scope review renders the full diff of each file, and the rendered bytes are more than three times the disk bytes. To make each rendered file fit, decrease the shard budget in the generator to a value that keeps the rendered bytes below 262144 (approximately 40000 disk bytes for each shard, with margin).
