@@ -154,8 +154,42 @@ comments:
     - evidence: 2 source files — Sources/ACPGenerateCore/SchemaGenerator.swift (`generatedFileByteBudget` 102400 -> 40960, doc comment states the rendered-bytes arithmetic), Tests/ACPGenerateTests/VendoredSchemaTests.swift (shared `shardedSource(baseName:in:)` helper, Unions tests read joined shards, count pins Models 15/15/14/15/15/16/13/13/4 and Unions 14/12/1, order check covers both sets); plus 12 regenerated shard files in Sources/FoundationModelsACP/Generated/ (largest 40771 bytes, all <= 40960; 15 Swift files total, no stale file). `generate-acp` exits 0, second run "up to date". Full suite `swift test`: 253 + 107 tests, zero failures, zero warnings. The three prompt-cap findings on the card are checked.
     - next: /review. Not committed, per the dispatch instructions.
   timestamp: 2026-08-19T14:06:25.819448+00:00
-position_column: doing
-position_ordinal: '8280'
+- actor: claude-code
+  id: 01m0d6jhx0f3mm7x8w9228dvjj
+  text: |-
+    ### review — findings
+    - evidence: 8 findings — Sources/FoundationModelsACP/Generated/Models4.generated.swift:745, Models4.generated.swift:807, Models4.generated.swift:808, Models8.generated.swift:113, Models8.generated.swift:115, Models8.generated.swift:116, Models8.generated.swift:117, Models8.generated.swift:118
+    - verified: The prior prompt-cap findings are resolved. The engine reviewed 14 files. No file was too large for the 262144-byte cap. The re-shard to 12 files with a 40960-byte budget is correct.
+    - next: Make the decode of each optional field use `forgivingDecodeIfPresent`. The generator emits the decode code. Correct the generator template, not only the generated files. Then run the review again.
+  timestamp: 2026-08-19T14:25:02.368820+00:00
+- actor: claude-code
+  id: 01m0d6nps1e3z8ej501fvme0tb
+  text: |-
+    ### finish iteration 4 — stuck (rule conflict)
+    - implement: changed — generatedFileByteBudget 102400 → 40960; 12 declaration shards; stale-file removal verified
+    - test: green — swift test, 253 + 107 tests, 0 failures, 0 warnings
+    - commit: e1f78ce
+    - review: findings — 8 decode-asymmetry findings (Models4.generated.swift:745,807,808; Models8.generated.swift:113,115,116,117,118). The prompt-cap findings from rounds 1–2 are verified resolved.
+
+    ### BLOCKER — true conflict, a person must decide
+    The 8 open findings say: optional fields that use strict `decodeIfPresent` must match their siblings that use `forgivingDecodeIfPresent`. This conflicts with the documented contract:
+
+    1. The vendored schema (byte-identical upstream artifact, pinned commit 7a13081) marks each field's decode strategy with `x-deserialize-default-on-error`. Verified today: every flagged field (`IntegerPropertySchema.maximum`, `ListSessionsRequest.cursor`, `ListSessionsRequest.cwd`, `StringPropertySchema.enum` / `maxLength` / `minLength` / `oneOf` / `pattern`) has NO annotation in the schema; the forgiving siblings (`description`, `ElicitationSchema.type`) HAVE the annotation. The generated asymmetry is the schema's own choice, not a generator defect.
+    2. Pinned tests encode this contract: `GeneratorCoreTests` asserts strict `decodeIfPresent` for un-annotated optionals and forgiving helpers only for annotated fields.
+
+    To satisfy the findings, the generator would have to ignore the upstream annotation — that breaks the contract and the tests. To keep the contract, the findings stay open. Both cannot be correct. Per the review rules, this task stays in `review` as stuck until a person resolves the conflict (drop the asymmetry rule for `Generated/`, or decide to diverge from the upstream annotation).
+  timestamp: 2026-08-19T14:26:45.665804+00:00
+- actor: claude-code
+  id: 01m0d849ttpcawxnx3sbh14br8
+  text: |-
+    ### finish iteration 5 — done (owner decision)
+    - Will Ballard resolved the blocker from iteration 4: ignore the 8 decode-asymmetry findings; do not change the code.
+    - The 8 findings are closed as will-not-fix. The reason is recorded in the description under "Resolution of the 8 findings above": the asymmetry mirrors the upstream `x-deserialize-default-on-error` annotations in the vendored schema, and a "fix" would break that contract and the pinned tests.
+    - All acceptance criteria and tests show [x]; commits 9d41eb9, eb9c626, e1f78ce carry the work; the full suite is green (253 + 107 tests, 0 failures).
+    - The task moves to done.
+  timestamp: 2026-08-19T14:52:12.506607+00:00
+position_column: done
+position_ordinal: '9780'
 title: 'Generator: support flattened untagged scope union (Elicitation modes)'
 ---
 # Generator: support flattened untagged scope union (Elicitation modes)
@@ -223,3 +257,28 @@ Note: The engine reported one more finding, at `Sources/FoundationModelsACP/Conn
 - [x] `Sources/FoundationModelsACP/Generated/Models3.generated.swift:1` `review-engine/prompt-cap` — This file exceeds the review prompt cap — 348328 rendered bytes against the 262144-byte per-file cap — so these validators could not review it: duplication, reuse. Split the file into smaller modules that fit the review prompt cap.
 
 Note: The cap applies to the rendered prompt bytes, not to the file size on the disk. The disk sizes are below 262144 bytes (the largest file is 101724 bytes), but a sha-scope review renders the full diff of each file, and the rendered bytes are more than three times the disk bytes. To make each rendered file fit, decrease the shard budget in the generator to a value that keeps the rendered bytes below 262144 (approximately 40000 disk bytes for each shard, with margin).
+
+## Review Findings (2026-08-19 09:07)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 14 file(s) reviewed, 2 not reviewed.
+
+> 2 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 2 file(s)
+
+- [x] `Sources/FoundationModelsACP/Generated/Models4.generated.swift:745` `completeness/inverse-operation-coverage` — The `maximum` field uses strict `try decodeIfPresent()` on line 745, breaking symmetry with the encode side and other optional fields. The encode method (line 760) treats all optional fields identically with `encodeIfPresent()`, but decode uses strict decoding for `maximum` and `minimum` while forgiving decode for all others—a mismatch that violates the round-trip contract. Change line 745 to use `container.forgivingDecodeIfPresent(Int.self, forKey: .maximum)` to match the symmetry of the encode method and the behavior of other optional fields.
+- [x] `Sources/FoundationModelsACP/Generated/Models4.generated.swift:807` `completeness/inverse-operation-coverage` — The `cursor` field uses strict `try decodeIfPresent()` on line 807, while the `meta` field on line 809 uses forgiving `forgivingDecodeIfPresent()`. Both are optional fields, but decode treats them asymmetrically, breaking the encode/decode round-trip—malformed `cursor` values throw an error while malformed `meta` values are tolerated. Change line 807 to use `container.forgivingDecodeIfPresent(SessionListCursor.self, forKey: .cursor)` to match other optional fields.
+- [x] `Sources/FoundationModelsACP/Generated/Models4.generated.swift:808` `completeness/inverse-operation-coverage` — The `cwd` field uses strict `try decodeIfPresent()` on line 808, while the `meta` field uses forgiving `forgivingDecodeIfPresent()`. Both are optional fields, but decode treats them asymmetrically, breaking the encode/decode round-trip—malformed `cwd` values throw an error while malformed `meta` values are tolerated. Change line 808 to use `container.forgivingDecodeIfPresent(AbsolutePath.self, forKey: .cwd)` to match other optional fields.
+- [x] `Sources/FoundationModelsACP/Generated/Models8.generated.swift:113` `completeness/invariant-propagation` — Optional field `enum` uses strict `decodeIfPresent` while other optional fields (default, description, title) use forgiving `forgivingDecodeIfPresent`. The documentation for enum ('Optional. Omitted and `null` are equivalent...') matches other optional fields, so they should all be decoded the same way. Change line 113 to use `forgivingDecodeIfPresent` instead of `decodeIfPresent`.
+- [x] `Sources/FoundationModelsACP/Generated/Models8.generated.swift:115` `completeness/invariant-propagation` — Optional Int field `maxLength` uses strict `decodeIfPresent` while optional Int fields elsewhere use forgiving `forgivingDecodeIfPresent` (e.g., `exitCode` at TerminalExitStatus:245). Optional scalar fields should be decoded consistently across the generated code. Change lines 115 and 116 to use `forgivingDecodeIfPresent` instead of `decodeIfPresent` for consistency with optional Int field handling elsewhere in the generated file.
+- [x] `Sources/FoundationModelsACP/Generated/Models8.generated.swift:116` `completeness/invariant-propagation` — Optional field `minLength` uses strict `decodeIfPresent` while other optional fields use forgiving `forgivingDecodeIfPresent`. Both minLength and maxLength have identical documentation ('Optional. Omitted and `null` are equivalent...') and should be decoded the same way as other optional fields in the generated code. Change line 116 to use `forgivingDecodeIfPresent` instead of `decodeIfPresent`.
+- [x] `Sources/FoundationModelsACP/Generated/Models8.generated.swift:117` `completeness/invariant-propagation` — Optional field `oneOf` uses strict `decodeIfPresent` while other optional fields use forgiving `forgivingDecodeIfPresent`. The documentation ('Optional. Omitted and `null` are equivalent...') is identical to other optional fields that use forgiving decode. Change line 117 to use `forgivingDecodeIfPresent` instead of `decodeIfPresent`.
+- [x] `Sources/FoundationModelsACP/Generated/Models8.generated.swift:118` `completeness/invariant-propagation` — Optional String field `pattern` uses strict `decodeIfPresent` but other optional String fields (`default`, `description`, `title`) with identical documentation use forgiving `forgivingDecodeIfPresent`. All optional fields with the same contract should be decoded the same way. Change line 118 to use `forgivingDecodeIfPresent` instead of `decodeIfPresent` to match treatment of other optional String fields in the same struct.
+
+### Resolution of the 8 findings above (2026-08-19, decision by Will Ballard)
+
+The owner examined the conflict and gave this decision: **ignore these 8 findings. Do not change the code.** The reasons, verified against the vendored schema:
+
+- The vendored upstream schema (pinned commit `7a13081`) sets the decode strategy for each field with the `x-deserialize-default-on-error` annotation. Each flagged field has **no** annotation in the schema. Each forgiving sibling **has** the annotation. The generated asymmetry is a faithful copy of the schema's own choice.
+- To satisfy the findings, the generator would have to ignore the upstream annotation. That breaks the documented contract and the pinned tests in `GeneratorCoreTests`.
+
+The findings are closed as **will-not-fix by owner decision**, not as code changes. Future reviews of `Generated/` code: decode-strategy asymmetry that mirrors `x-deserialize-default-on-error` in `Schema/acp-v2.json` is correct by design.

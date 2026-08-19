@@ -34,10 +34,37 @@ comments:
     - evidence: 13 files — Sources/FoundationModelsACP/Connection/Client.swift, ClientSideConnection.swift, AgentSideConnection.swift; Tests/FoundationModelsACPTests/ElicitationLifecycleTests.swift (new), RoutingCoverageTests.swift, ClientProtocolTests.swift, AgentProtocolTests.swift, PermissionRequestTests.swift, SessionLifecycleTests.swift, PromptLifecycleTests.swift, FactoryClosureTests.swift, GoldenSessionEndToEndTests.swift, SessionUpdateStreamTests.swift, TransportProcessSupport.swift; plan.md. swift test: 253 tests in 24 suites passed and 101 tests in 13 suites passed, zero failures, zero warnings.
     - next: /review; the commit step commits the working tree, Generated/ diff included.
   timestamp: 2026-08-19T13:02:07.910202+00:00
+- actor: claude-code
+  id: 01m0d7hjfsh2zk46fdka39b0br
+  text: |-
+    Adjudication of the routed finding `Sources/FoundationModelsACP/Connection/Client.swift:52` `completeness/inverse-operation-coverage`.
+
+    The engine says that the generator does not make CreateElicitationResponse. That claim is not correct. The generator makes the type. The file Sources/FoundationModelsACP/Generated/Unresolved.generated.swift declares `public typealias CreateElicitationResponse = JSONValue`.
+
+    The design defers this type on purpose. Upstream mixes payload-flattening variants and inline variants in one anyOf. The generator cannot make one Swift enum from that shape. The banner in Unresolved.generated.swift records this contract. The test VendoredSchemaTests.onlyTheDeliberatelyFreeFormDefinitionsStayUntyped keeps CreateElicitationResponse in the deliberate untyped list. The generated method table maps `elicitation/create -> createElicitation(CreateElicitationRequest) : CreateElicitationResponse`.
+
+    Verdict: the finding is refuted by the documented deferred-union contract. It is not a defect for this card.
+  timestamp: 2026-08-19T14:41:58.777941+00:00
+- actor: claude-code
+  id: 01m0d7hpah8g1wb8f6te0879xe
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~3..HEAD~2` (commit 9d41eb9), scope of this card only — 0 findings, 5 candidates refuted by the engine. The routed finding Client.swift:52 `completeness/inverse-operation-coverage` is refuted; see the adjudication comment.
+    - next: none. The card moves to done.
+  timestamp: 2026-08-19T14:42:02.705146+00:00
+- actor: claude-code
+  id: 01m0d7jny21b8dmc6yefj0tz6p
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 13 files, wiring + tests + plan.md
+    - test: green — swift test, 253 + 101 tests, 0 failures
+    - commit: 9d41eb9 (shared checkpoint with ^ww8hhfm)
+    - review: clean — 0 confirmed findings over HEAD~3..HEAD~2; routed finding Client.swift:52 refuted (deferred-union contract). Task is done.
+  timestamp: 2026-08-19T14:42:35.074825+00:00
 depends_on:
 - 01M0CZFHF71TFK46JGFWW8HHFM
-position_column: doing
-position_ordinal: '8180'
+position_column: done
+position_ordinal: '9680'
 title: Regenerate from pinned schema and wire stable elicitation client surface
 ---
 # Regenerate from pinned schema and wire stable elicitation client surface
