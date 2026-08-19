@@ -249,8 +249,9 @@ import FoundationModelsACP
             Self.declaredTypeNames(in: unions).filter {
                 Self.declaration(named: $0, in: unions)?.contains("case unknown(String, JSONValue)") == true
             } == [
-                "AuthMethod", "AvailableCommandInput", "ContentBlock", "MCPServer", "PlanUpdateContent",
-                "ReplayFrom", "RequestPermissionOutcome", "RequestPermissionSubject", "SessionUpdate",
+                "AuthMethod", "AvailableCommandInput", "ContentBlock", "ElicitationPropertySchema",
+                "MCPServer", "MultiSelectItems", "PlanUpdateContent", "ReplayFrom",
+                "RequestPermissionOutcome", "RequestPermissionSubject", "SessionUpdate",
                 "StateUpdate", "ToolCallContent",
             ]
         )
@@ -260,41 +261,47 @@ import FoundationModelsACP
             Self.declaredTypeNames(in: unions).filter {
                 Self.declaration(named: $0, in: unions)?.contains("case unknown(String)\n") == true
             } == [
-                "DiffFileType", "DiffPatchFormat", "IconTheme", "PermissionOptionKind", "PlanEntryPriority",
-                "PlanEntryStatus", "Role", "SessionConfigOptionCategory", "StopReason", "ToolCallStatus",
+                "DiffFileType", "DiffPatchFormat", "ElicitationSchemaType", "IconTheme",
+                "PermissionOptionKind", "PlanEntryPriority", "PlanEntryStatus", "Role",
+                "SessionConfigOptionCategory", "StopReason", "StringFormat", "ToolCallStatus",
                 "ToolKind",
             ]
         )
         #expect(unions.contains("case unknown(Int)"))
-        // And the two base objects whose union is nested inside them.
+        // And the base objects whose union is nested inside them.
         let models = try #require(generated["Models.generated.swift"])
-        #expect(Self.declarationsNesting("    public enum Payload: Codable", in: models) == ["DiffChange", "SessionConfigOption"])
+        #expect(Self.declarationsNesting("    public enum Payload: Codable", in: models) == ["CreateElicitationRequest", "DiffChange", "SessionConfigOption"])
         #expect(Self.declarationsNesting("    public enum Value: Codable", in: models) == ["SetSessionConfigOptionRequest"])
+        // The elicitation modes nest the flattened scope union instead: no
+        // discriminator and no fallback, because decode selects the variant
+        // by which scope's required member the wire object carries.
+        #expect(Self.declarationsNesting("    public enum Scope: Codable", in: models) == ["ElicitationFormMode", "ElicitationUrlMode"])
     }
 
     @Test func onlyTheDeliberatelyFreeFormDefinitionsStayUntyped() throws {
         let unresolved = try #require(try Self.generateFromVendoredArtifacts()["Unresolved.generated.swift"])
         // What is left on the placeholder seam, and why each one is there.
-        // Nothing here is a union the generator declined to model: every
-        // `anyOf` in the vendored document now emits a typed declaration.
         //
         // - `ExtRequest`/`ExtResponse`/`ExtNotification` are the extension
         //   escape hatch; the schema states no shape for them at all.
-        // - The other five are untagged unions — no branch pins a
-        //   discriminator, so there is nothing to key a Swift enum on.
-        //   `AgentResponse`/`ClientResponse` separate their two branches by
-        //   which member is present (`result` versus `error`), and the routing
-        //   table supersedes them anyway by naming each method's own result
-        //   type; `EmbeddedResourceResource` and `SessionConfigSelectOptions`
-        //   by payload shape alone; and `RequestId` is JSON-RPC's id, a
+        // - The others are untagged unions — no branch pins a discriminator
+        //   the generator can key a Swift enum on. `AgentResponse`/
+        //   `ClientResponse` separate their two branches by which member is
+        //   present (`result` versus `error`), and the routing table
+        //   supersedes them anyway by naming each method's own result type;
+        //   `EmbeddedResourceResource`, `ElicitationContentValue`, and
+        //   `SessionConfigSelectOptions` by payload shape alone;
+        //   `CreateElicitationResponse` mixes payload-flattening and inline
+        //   variants in one `anyOf`; and `RequestId` is JSON-RPC's id, a
         //   string, an integer, or null.
         //
         // Pinning the whole list, not a count: a definition sliding back onto
         // the seam has to be spelled out here to pass.
         #expect(
             Self.declaredTypeNames(in: unresolved) == [
-                "AgentResponse", "ClientResponse", "EmbeddedResourceResource", "ExtNotification",
-                "ExtRequest", "ExtResponse", "RequestId", "SessionConfigSelectOptions",
+                "AgentResponse", "ClientResponse", "CreateElicitationResponse", "ElicitationContentValue",
+                "EmbeddedResourceResource", "ExtNotification", "ExtRequest", "ExtResponse",
+                "RequestId", "SessionConfigSelectOptions",
             ]
         )
     }
@@ -380,6 +387,8 @@ import FoundationModelsACP
                 "agent request session/prompt -> prompt(PromptRequest) : PromptResponse",
                 "agent request session/resume -> resumeSession(ResumeSessionRequest) : ResumeSessionResponse",
                 "agent request session/set_config_option -> setSessionConfigOption(SetSessionConfigOptionRequest) : SetSessionConfigOptionResponse",
+                "client notification elicitation/complete -> elicitationComplete(CompleteElicitationNotification) : nil",
+                "client request elicitation/create -> createElicitation(CreateElicitationRequest) : CreateElicitationResponse",
                 "client request session/request_permission -> requestPermission(RequestPermissionRequest) : RequestPermissionResponse",
                 "client notification session/update -> sessionUpdate(UpdateSessionNotification) : nil",
                 "protocolLevel notification $/cancel_request -> cancelRequest(CancelRequestNotification) : nil",
@@ -412,8 +421,6 @@ import FoundationModelsACP
                 "agent providers/list -> providersList",
                 "agent providers/set -> providersSet",
                 "agent session/fork -> sessionFork",
-                "client elicitation/complete -> elicitationComplete",
-                "client elicitation/create -> elicitationCreate",
                 "client mcp/connect -> mcpConnect",
                 "client mcp/disconnect -> mcpDisconnect",
                 "client mcp/message -> mcpMessage",
@@ -457,11 +464,11 @@ import FoundationModelsACP
         // reading as success.
         #expect(
             emitted.mapValues(\.count) == [
-                "Identifiers.generated.swift": 12,
+                "Identifiers.generated.swift": 13,
                 "MethodTable.generated.swift": 2,
-                "Models.generated.swift": 101,
-                "Unions.generated.swift": 23,
-                "Unresolved.generated.swift": 8,
+                "Models.generated.swift": 120,
+                "Unions.generated.swift": 27,
+                "Unresolved.generated.swift": 10,
             ]
         )
     }

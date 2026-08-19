@@ -109,6 +109,24 @@ public enum ACPMethodTable {
             deprecationMessage: nil
         ),
         MethodInfo(
+            wireMethod: "elicitation/complete",
+            handlerName: "elicitationComplete",
+            side: .client,
+            kind: .notification,
+            paramsTypeName: "CompleteElicitationNotification",
+            resultTypeName: nil,
+            deprecationMessage: nil
+        ),
+        MethodInfo(
+            wireMethod: "elicitation/create",
+            handlerName: "createElicitation",
+            side: .client,
+            kind: .request,
+            paramsTypeName: "CreateElicitationRequest",
+            resultTypeName: "CreateElicitationResponse",
+            deprecationMessage: nil
+        ),
+        MethodInfo(
             wireMethod: "session/request_permission",
             handlerName: "requestPermission",
             side: .client,
@@ -226,16 +244,6 @@ public enum Unstable {
                 wireMethod: "session/fork",
                 handlerName: "sessionFork",
                 side: .agent
-            ),
-            UnstableMethodInfo(
-                wireMethod: "elicitation/complete",
-                handlerName: "elicitationComplete",
-                side: .client
-            ),
-            UnstableMethodInfo(
-                wireMethod: "elicitation/create",
-                handlerName: "elicitationCreate",
-                side: .client
             ),
             UnstableMethodInfo(
                 wireMethod: "mcp/connect",

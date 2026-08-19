@@ -237,6 +237,14 @@ private struct PassiveClient: Client {
     ) async throws -> RequestPermissionResponse {
         throw RequestError.methodNotFound("requestPermission")
     }
+
+    func createElicitation(
+        _ params: CreateElicitationRequest
+    ) async throws -> CreateElicitationResponse {
+        throw RequestError.methodNotFound("createElicitation")
+    }
+
+    func elicitationComplete(_ notification: CompleteElicitationNotification) async {}
 }
 
 /// A client that answers every `session/request_permission` with one fixed
@@ -252,6 +260,14 @@ private struct PermissionAnsweringClient: Client {
     ) async throws -> RequestPermissionResponse {
         RequestPermissionResponse(outcome: outcome)
     }
+
+    func createElicitation(
+        _ params: CreateElicitationRequest
+    ) async throws -> CreateElicitationResponse {
+        throw RequestError.methodNotFound("createElicitation")
+    }
+
+    func elicitationComplete(_ notification: CompleteElicitationNotification) async {}
 }
 
 // MARK: - A concurrency-safe ordered event log

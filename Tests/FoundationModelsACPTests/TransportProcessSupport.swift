@@ -101,6 +101,22 @@ struct HandshakeClient: Client {
     ) async throws -> RequestPermissionResponse {
         throw RequestError.methodNotFound("requestPermission")
     }
+
+    /// Never called during a handshake; reports method-not-found if it is.
+    ///
+    /// - Parameter params: The elicitation request.
+    /// - Returns: Never returns normally.
+    /// - Throws: `RequestError.methodNotFound` always.
+    func createElicitation(
+        _ params: CreateElicitationRequest
+    ) async throws -> CreateElicitationResponse {
+        throw RequestError.methodNotFound("createElicitation")
+    }
+
+    /// Ignores elicitation-completion notices; a handshake never sends one.
+    ///
+    /// - Parameter notification: The completion notification.
+    func elicitationComplete(_ notification: CompleteElicitationNotification) async {}
 }
 
 /// The `InitializeRequest` a handshake test sends: the minimum a client must

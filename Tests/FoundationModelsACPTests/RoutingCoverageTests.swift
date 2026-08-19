@@ -109,7 +109,7 @@ import Testing
 
     // MARK: - Recording Client
 
-    /// A `Client` where both methods record their own name, mirroring
+    /// A `Client` where every method records its own name, mirroring
     /// `RecordingAgent`'s role on the other side.
     private struct RecordingClient: Client {
         let log: CallLog
@@ -125,6 +125,17 @@ import Testing
             return RequestPermissionResponse(
                 outcome: .selected(SelectedPermissionOutcome(optionId: PermissionOptionId(rawValue: "allow")))
             )
+        }
+
+        func createElicitation(
+            _ params: CreateElicitationRequest
+        ) async throws -> CreateElicitationResponse {
+            await log.record(name: "createElicitation")
+            return .object(["action": .string("cancel")])
+        }
+
+        func elicitationComplete(_ notification: CompleteElicitationNotification) async {
+            await log.record(name: "elicitationComplete")
         }
     }
 
@@ -220,39 +231,51 @@ import Testing
 
     // MARK: - Client-side coverage
 
+    /// The permission request every client-side driver fires — directly for
+    /// the `requestPermission` entry, and as the trailing synchronization
+    /// round trip after each notification entry.
+    private static let permissionProbe = RequestPermissionRequest(
+        options: [
+            PermissionOption(kind: .allowOnce, name: "Allow", optionId: PermissionOptionId(rawValue: "allow"))
+        ],
+        sessionId: sessionId,
+        title: "Permission needed"
+    )
+
     /// The client-side counterpart of `driveAgentHandler`: drives one
     /// client-served handler through the agent's own outbound surface.
-    /// `sessionUpdate` is a notification, so its driver performs a trailing
-    /// `requestPermission` round trip for the same reason `sessionCancel`
-    /// does above.
+    /// `sessionUpdate` and `elicitationComplete` are notifications, so their
+    /// drivers perform a trailing `requestPermission` round trip for the same
+    /// reason `sessionCancel` does above.
     private static func driveClientHandler(
         named handlerName: String,
         agentConnection: AgentSideConnection
     ) async throws {
         switch handlerName {
         case "requestPermission":
-            _ = try await agentConnection.requestPermission(
-                RequestPermissionRequest(
-                    options: [
-                        PermissionOption(kind: .allowOnce, name: "Allow", optionId: PermissionOptionId(rawValue: "allow"))
-                    ],
-                    sessionId: Self.sessionId,
-                    title: "Permission needed"
+            _ = try await agentConnection.requestPermission(Self.permissionProbe)
+        case "createElicitation":
+            _ = try await agentConnection.createElicitation(
+                CreateElicitationRequest(
+                    message: "Name required",
+                    mode: .form(
+                        ElicitationFormMode(
+                            requestedSchema: ElicitationSchema(),
+                            scope: .session(ElicitationSessionScope(sessionId: Self.sessionId))
+                        )
+                    )
                 )
             )
         case "sessionUpdate":
             try await agentConnection.sessionUpdate(
                 UpdateSessionNotification(sessionId: Self.sessionId, update: .stateUpdate(.running(RunningStateUpdate())))
             )
-            _ = try await agentConnection.requestPermission(
-                RequestPermissionRequest(
-                    options: [
-                        PermissionOption(kind: .allowOnce, name: "Allow", optionId: PermissionOptionId(rawValue: "allow"))
-                    ],
-                    sessionId: Self.sessionId,
-                    title: "Permission needed"
-                )
+            _ = try await agentConnection.requestPermission(Self.permissionProbe)
+        case "elicitationComplete":
+            try await agentConnection.elicitationComplete(
+                CompleteElicitationNotification(elicitationId: ElicitationId(rawValue: "elicit-1"))
             )
+            _ = try await agentConnection.requestPermission(Self.permissionProbe)
         default:
             Issue.record("RoutingCoverageTests has no driver wired for client handler \"\(handlerName)\"")
         }
@@ -271,7 +294,13 @@ import Testing
             try await Self.driveClientHandler(named: entry.handlerName, agentConnection: agentConn)
 
             let calls = await log.calls
-            let expected = entry.handlerName == "sessionUpdate" ? ["sessionUpdate", "requestPermission"] : [entry.handlerName]
+            // A notification entry's driver appends a trailing
+            // `requestPermission` round trip purely to synchronize on the
+            // notification having already been dispatched (see
+            // `driveClientHandler`'s doc comment), so it expects two recorded
+            // calls instead of one.
+            let expected =
+                entry.kind == .notification ? [entry.handlerName, "requestPermission"] : [entry.handlerName]
             #expect(
                 calls == expected,
                 "wire method \"\(entry.wireMethod)\" should reach \(expected), reached \(calls) instead"

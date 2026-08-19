@@ -49,6 +49,13 @@ enum DefinitionKind {
     /// struct with a nested tagged-union enum.
     case objectTaggedUnion
 
+    /// A `type: object` definition that also carries a top-level `anyOf` of
+    /// single-`$ref` `allOf` wrappers with no `const` discriminator, selected
+    /// on the wire by which variant's required members are present; emitted
+    /// as a struct with a nested scope enum whose payload flattens beside the
+    /// base properties.
+    case objectScopeUnion
+
     /// An `anyOf`/`enum` definition this generator does not model as a typed
     /// declaration; emitted as a placeholder typealias seam.
     ///
@@ -334,6 +341,48 @@ struct ObjectValueUnionModel {
     /// Cases in schema order; exactly one is a default — that is, carries a
     /// selector other than `.tag`.
     let cases: [ValueUnionCaseModel]
+}
+
+/// The emission model for one variant of an object's flattened scope union.
+struct ScopeUnionCaseModel {
+    /// The camelCase Swift case name derived from the variant's `title`
+    /// (e.g. `session`).
+    let swiftName: String
+
+    /// The emitted payload type whose members sit flattened beside the base
+    /// properties on the wire (e.g. `ElicitationSessionScope`).
+    let payloadType: String
+
+    /// The wire names of the members the referenced definition requires, in
+    /// schema order. Decode probes them to select the variant, so across the
+    /// union's cases these sets are disjoint and never empty.
+    let requiredKeys: [String]
+
+    /// The schema `description`, emitted as a doc comment.
+    let documentation: String?
+}
+
+/// The emission model for an object definition that carries a flattened
+/// untagged scope union.
+///
+/// The base object properties are modeled as an ordinary struct; the top-level
+/// `anyOf` becomes a nested enum with one case per `$ref` variant. No
+/// discriminator exists on the wire: decode selects the case by probing each
+/// variant's required members in schema order, and encode flattens the
+/// selected payload's members beside the base properties.
+struct ObjectScopeUnionModel {
+    /// The base struct model built from the object's `properties`/`required`.
+    let base: StructModel
+
+    /// The struct's stored property name for the union (`scope`). Purely a
+    /// Swift-side name: the wire object carries no member under it.
+    let scopePropertyName: String
+
+    /// The emitted name of the nested scope enum (`Scope`).
+    let scopeEnumName: String
+
+    /// Cases in schema order.
+    let cases: [ScopeUnionCaseModel]
 }
 
 /// The emission model for one object-struct definition.

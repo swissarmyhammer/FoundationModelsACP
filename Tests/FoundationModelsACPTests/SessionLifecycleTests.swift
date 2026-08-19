@@ -338,6 +338,14 @@ private struct PassiveClient: Client {
     ) async throws -> RequestPermissionResponse {
         throw RequestError.methodNotFound("requestPermission")
     }
+
+    func createElicitation(
+        _ params: CreateElicitationRequest
+    ) async throws -> CreateElicitationResponse {
+        throw RequestError.methodNotFound("createElicitation")
+    }
+
+    func elicitationComplete(_ notification: CompleteElicitationNotification) async {}
 }
 
 // MARK: - Fixtures

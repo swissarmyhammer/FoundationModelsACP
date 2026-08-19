@@ -5,9 +5,10 @@ import Foundation
 /// Delegates its transport wiring to a shared `RoleConnectionCore`: inbound
 /// Client→Agent calls dispatch to the `Agent` the factory builds, and the
 /// connection itself exposes the outbound Agent→Client calls
-/// (`sessionUpdate`, `requestPermission`) so the agent can drive the client
-/// mid-turn — most importantly to request permission without ever blocking
-/// the read loop that keeps `session/cancel` and other traffic flowing.
+/// (`sessionUpdate`, `requestPermission`, `createElicitation`,
+/// `elicitationComplete`) so the agent can drive the client mid-turn — most
+/// importantly to request permission or user input without ever blocking the
+/// read loop that keeps `session/cancel` and other traffic flowing.
 public final class AgentSideConnection: Sendable {
     /// The shared engine owning the connection and the served agent.
     private let core: RoleConnectionCore<any Agent>
@@ -22,7 +23,8 @@ public final class AgentSideConnection: Sendable {
     ///   - stream: The bidirectional transport to run over.
     ///   - logger: Diagnostic sink; never stdout.
     ///   - requestTimeout: Default outbound request timeout; `nil` waits
-    ///     forever (`requestPermission` relies on this).
+    ///     forever (`requestPermission` and `createElicitation` rely on
+    ///     this).
     ///   - factory: Builds the agent from this connection.
     public init(
         stream: any ACPTransport,
@@ -130,7 +132,7 @@ public final class AgentSideConnection: Sendable {
 
     /// Requests permission from the client mid-turn.
     ///
-    /// The one long-lived request on the stable surface: it genuinely waits on
+    /// A long-lived request on the stable surface: it genuinely waits on
     /// a human, and never blocks the read loop — each inbound request the
     /// underlying connection serves runs in its own `Task`, so this call
     /// suspends only the caller, not the connection.
@@ -143,6 +145,32 @@ public final class AgentSideConnection: Sendable {
         _ params: RequestPermissionRequest
     ) async throws -> RequestPermissionResponse {
         try await core.call("requestPermission", params, returning: RequestPermissionResponse.self)
+    }
+
+    /// Requests structured user input from the client.
+    ///
+    /// Long-lived like `requestPermission`: it genuinely waits on a human —
+    /// filling a form or finishing a flow behind a URL — and never blocks the
+    /// read loop, because each inbound request the underlying connection
+    /// serves runs in its own `Task`, so this call suspends only the caller.
+    ///
+    /// - Parameter params: The elicitation request.
+    /// - Returns: The user's response — accept with content, decline, or
+    ///   cancel — as raw JSON (`CreateElicitationResponse`).
+    /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
+    ///   disconnect.
+    public func createElicitation(
+        _ params: CreateElicitationRequest
+    ) async throws -> CreateElicitationResponse {
+        try await core.call("createElicitation", params, returning: CreateElicitationResponse.self)
+    }
+
+    /// Notifies the client that a URL-based elicitation finished.
+    ///
+    /// - Parameter notification: The completion notification.
+    /// - Throws: `ConnectionError.closed` after disconnect.
+    public func elicitationComplete(_ notification: CompleteElicitationNotification) async throws {
+        try await core.notify("elicitationComplete", notification)
     }
 
     /// Shuts the connection down, rejecting every pending request.

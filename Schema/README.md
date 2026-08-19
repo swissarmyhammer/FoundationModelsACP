@@ -5,14 +5,26 @@ vendored byte-identical from upstream.
 
 ## Vendored version
 
-- **Tag:** `schema-v2.0.0-alpha.2` (a pre-release; ACP v2 is draft)
-- **Release:** <https://github.com/agentclientprotocol/agent-client-protocol/releases/tag/schema-v2.0.0-alpha.2>
+- **Source:** upstream `main`, pinned to commit
+  `7a13081ae8cb2b93d02ea0c8b538c4f3a086768c` (2026-08-19). The newest tag,
+  `schema-v2.0.0-alpha.2`, does not contain the promotion of elicitation to
+  the stable client surface. This package needs that promotion. A pinned
+  commit is immutable: you can get the same bytes again from
+  `https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/<commit>/schema/v2/<file>`.
+  When upstream publishes the next `schema-v*` tag, move back to that tag.
 
-| Vendored file | Upstream release asset | SHA-256 |
+| Vendored file | Upstream file at pinned commit | SHA-256 |
 |---|---|---|
-| `acp-v2.json` | `schema.json` | `bfc3e499aadf5f8b88d1b11dfd3b4ea446f1fa8751f1c3c9fcdbc372265348cd` |
-| `acp-v2.meta.json` | `meta.json` | `2e642a11c41d99c0a19b1c8c596ea0e02dbeaa14a303bee345c5e1465b072d8c` |
-| `acp-v2.meta.unstable.json` | `meta.unstable.json` | `2c274308d2a773628bf6316b7f6c535cf87d2c1ceb495d02be9ee899dce0f0bc` |
+| `acp-v2.json` | `schema/v2/schema.json` | `9480f7224002f60725e2bd509725c40cd76bd391627a95d62d08d1b2e948e43c` |
+| `acp-v2.meta.json` | `schema/v2/meta.json` | `ad94c01f2736416776fd53d66e3aaf89242ab72d99832664f39d6ab41e049736` |
+| `acp-v2.meta.unstable.json` | `schema/v2/meta.unstable.json` | `2c274308d2a773628bf6316b7f6c535cf87d2c1ceb495d02be9ee899dce0f0bc` |
+
+Differences from `schema-v2.0.0-alpha.2`: the pinned commit promotes
+elicitation (`elicitation/create`, `elicitation/complete`, the
+`ClientCapabilities.elicitation` field, and 26 `Elicitation*` /
+`*PropertySchema` definitions) from unstable to stable. All other changes
+are documentation strings only. `meta.unstable.json` is byte-identical to
+the tagged release.
 
 `acp-v2.json` is the JSON Schema (draft 2020-12) with all protocol types under
 `$defs`. The meta manifests map method identifiers to wire method names in
@@ -20,21 +32,19 @@ vendored byte-identical from upstream.
 `acp-v2.meta.unstable.json` additionally includes unstable methods, which the
 generator emits into the `Unstable` namespace as names and sides only.
 
-### Two upstream files deliberately not vendored
+### One upstream file deliberately not vendored
 
-- **`schema.unstable.json`** — the release also publishes a full schema document
-  for the unstable surface (`e1ef10a309878485fc3be76e64334ba638c6da4517ed585987368f7f8012bc03`).
-  The generator has no input slot for a second schema document, and this package
-  serves the stable v2 surface only, so vendoring it would add 400 KB of bytes
-  nothing reads. The unstable *manifest* is vendored because the routing table
-  consumes it.
-- Anything from upstream `main`. The docs site renders `schema/v2/schema.json`
-  on `main`, which is **already ahead of `schema-v2.0.0-alpha.2`**: it promotes
-  elicitation (`elicitation/create`, `elicitation/complete`, and roughly twenty
-  `Elicitation*` / `*PropertySchema` definitions) from unstable to stable. We
-  track tagged releases, which carry a digest and can be re-fetched byte for
-  byte; `main` is a moving target. Expect elicitation to arrive on the next
-  re-vendor.
+- **`schema.unstable.json`** — upstream also publishes a full schema document
+  for the unstable surface. The generator has no input slot for a second schema
+  document, and this package serves the stable v2 surface only, so vendoring it
+  would add 400 KB of bytes nothing reads. The unstable *manifest* is vendored
+  because the routing table consumes it.
+
+### Vendoring rule
+
+Prefer a `schema-v*` tag. Vendor from `main` only when the newest tag does not
+contain a stable feature that this package needs, and then always pin the exact
+commit SHA and record it above — never a branch head, which moves.
 
 ## Bumping the ACP version
 

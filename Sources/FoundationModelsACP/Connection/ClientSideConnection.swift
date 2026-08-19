@@ -98,6 +98,10 @@ public final class ClientSideConnection: Sendable {
             return try await RoleDispatch.serveResult(
                 params, as: RequestPermissionRequest.self, client.requestPermission
             )
+        case "createElicitation":
+            return try await RoleDispatch.serveResult(
+                params, as: CreateElicitationRequest.self, client.createElicitation
+            )
         default:
             throw RequestError.methodNotFound(handler)
         }
@@ -130,6 +134,13 @@ public final class ClientSideConnection: Sendable {
             }
             router.deliver(notification)
             await client.sessionUpdate(notification)
+        case "elicitationComplete":
+            guard
+                let notification = try? JSONValue.decodeParams(CompleteElicitationNotification.self, from: params)
+            else {
+                return
+            }
+            await client.elicitationComplete(notification)
         default:
             break
         }

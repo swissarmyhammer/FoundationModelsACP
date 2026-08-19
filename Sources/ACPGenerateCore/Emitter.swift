@@ -941,6 +941,111 @@ enum Emitter {
         )
     }
 
+    /// Renders an object definition that carries a flattened untagged scope
+    /// union.
+    ///
+    /// - Parameter model: The object-scope-union emission model.
+    /// - Returns: The rendered struct declaration.
+    static func objectScopeUnionDeclaration(model: ObjectScopeUnionModel) -> String {
+        objectCarryingAUnion(
+            base: model.base,
+            union: FlattenedUnion(
+                wireName: model.scopePropertyName,
+                typeName: model.scopeEnumName,
+                documentation: "The scope, whose members sit flattened beside this object's; the wire object carries no `\(model.scopePropertyName)` key.",
+                declaration: scopeUnionEnum(model: model)
+            )
+        )
+    }
+
+    /// Renders the nested scope-union enum with hand-rolled `Codable`.
+    ///
+    /// - Parameter model: The object-scope-union emission model.
+    /// - Returns: The enum lines, indented one level.
+    private static func scopeUnionEnum(model: ObjectScopeUnionModel) -> [String] {
+        var lines = [
+            indentUnit + "/// The scope variant, selected by which of its required members the",
+            indentUnit + "/// wire object carries.",
+            indentUnit + "public enum \(model.scopeEnumName): \(standardPublicProtocols) {",
+        ]
+        for unionCase in model.cases {
+            lines.append(contentsOf: docLines(text: unionCase.documentation, indent: indent2))
+            lines.append(indent2 + "case \(unionCase.swiftName)(\(unionCase.payloadType))")
+        }
+        lines.append("")
+        lines.append(contentsOf: unionCodingKeysDeclaration(cases: model.cases.flatMap(\.requiredKeys), baseIndent: indent2))
+        lines.append("")
+        lines.append(contentsOf: scopeUnionDecoder(model: model))
+        lines.append("")
+        lines.append(contentsOf: scopeUnionEncoder(model: model))
+        lines.append(indentUnit + "}")
+        return lines
+    }
+
+    /// Renders `init(from:)` for a nested scope-union enum.
+    ///
+    /// There is no discriminator to read: each variant is selected by the
+    /// members its payload requires, probed in schema order. The generator
+    /// guarantees the probed key sets are disjoint and non-empty, so at most
+    /// one variant matches a well-formed wire object.
+    ///
+    /// - Parameter model: The object-scope-union emission model.
+    /// - Returns: The initializer lines, indented two levels.
+    private static func scopeUnionDecoder(model: ObjectScopeUnionModel) -> [String] {
+        var lines = [
+            indent2 + "/// Decodes the scope by probing each variant's required members in",
+            indent2 + "/// schema order.",
+            indent2 + "///",
+            indent2 + decoderParameterDoc,
+            indent2 + "/// - Throws: `DecodingError` when no variant's required member is",
+            indent2 + "///   present, or the selected payload is malformed.",
+        ] + decoderInitSequence(baseIndent: indent2)
+        for (index, unionCase) in model.cases.enumerated() {
+            let keyword = index == 0 ? "if" : "} else if"
+            let probes = unionCase.requiredKeys.map { "container.contains(.\($0))" }.joined(separator: " || ")
+            lines.append(indent3 + "\(keyword) \(probes) {")
+            lines.append(indent4 + "self = .\(unionCase.swiftName)(try \(unionCase.payloadType)(from: decoder))")
+        }
+        let probedKeys = model.cases.flatMap(\.requiredKeys).joined(separator: ", ")
+        lines.append(contentsOf: [
+            indent3 + "} else {",
+            indent4 + "throw DecodingError.dataCorrupted(",
+            indent4 + indentUnit + "DecodingError.Context(",
+            indent4 + indent2 + "codingPath: decoder.codingPath,",
+            indent4 + indent2 + "debugDescription: \"no scope variant's required member is present; expected one of \(probedKeys)\"",
+            indent4 + indentUnit + ")",
+            indent4 + ")",
+            indent3 + "}",
+            indent2 + "}",
+        ])
+        return lines
+    }
+
+    /// Renders `encode(to:)` for a nested scope-union enum.
+    ///
+    /// The selected payload's members flatten into the enclosing object, so
+    /// there is no discriminator and no nested key to write.
+    ///
+    /// - Parameter model: The object-scope-union emission model.
+    /// - Returns: The method lines, indented two levels.
+    private static func scopeUnionEncoder(model: ObjectScopeUnionModel) -> [String] {
+        var lines = [
+            indent2 + "/// Encodes the selected variant's members flattened into the",
+            indent2 + "/// enclosing object, writing no nested key of its own.",
+            indent2 + "///",
+            indent2 + encoderParameterDoc,
+            indent2 + encoderThrowsDoc,
+            indent2 + encodeMethodOpening,
+            indent3 + "switch self {",
+        ]
+        for unionCase in model.cases {
+            lines.append(indent3 + "case .\(unionCase.swiftName)(let payload):")
+            lines.append(indent4 + payloadEncodeCall)
+        }
+        lines.append(contentsOf: [indent3 + "}", indent2 + "}"])
+        return lines
+    }
+
     /// Renders the struct wrapping an object's flattened union.
     ///
     /// The base object properties become ordinary struct members; the union

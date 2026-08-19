@@ -139,6 +139,71 @@ import Testing
         return try #require(file, "expected generated file \(name)").contents
     }
 
+    @Test func keywordPropertyNamesAreBacktickedInEmittedSource() throws {
+        // The vendored snapshot's elicitation schemas declare `default` and
+        // `enum` members. A Swift keyword cannot appear bare as a property
+        // name, so the emitted identifier is backticked everywhere it is
+        // declared or read, while the CodingKeys raw value keeps the bare
+        // wire spelling.
+        let schema = Data(
+            """
+            {
+              "$defs": {
+                "Constraint": {
+                  "type": "object",
+                  "properties": {
+                    "default": { "type": "string" },
+                    "enum": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              }
+            }
+            """.utf8)
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
+        let models = try #require(files.first { $0.name == "Models.generated.swift" }).contents
+        #expect(models.contains("public var `default`: String?"))
+        #expect(models.contains("public var `enum`: [String]?"))
+        #expect(models.contains("case `default` = \"default\""))
+        #expect(models.contains("case `enum` = \"enum\""))
+        #expect(models.contains("self.`default` = try container.decodeIfPresent(String.self, forKey: .`default`)"))
+        #expect(models.contains("try container.encodeIfPresent(`enum`, forKey: .`enum`)"))
+    }
+
+    @Test func stringDefaultOnAnEnumTypedFieldRendersThroughWireValueInit() throws {
+        // The vendored snapshot's `ElicitationSchema.type` is an
+        // `ElicitationSchemaType` scalar enum whose schema default is the
+        // string `"object"`. A bare string literal does not type-check as the
+        // enum, so the default renders through the enum's own
+        // `init(wireValue:)`, which maps the wire string to its case.
+        let schema = Data(
+            """
+            {
+              "$defs": {
+                "SchemaType": {
+                  "anyOf": [
+                    { "type": "string", "const": "object" },
+                    { "title": "other", "type": "string" }
+                  ]
+                },
+                "Node": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "default": "object",
+                      "x-deserialize-default-on-error": true,
+                      "allOf": [{ "$ref": "#/$defs/SchemaType" }]
+                    }
+                  }
+                }
+              }
+            }
+            """.utf8)
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
+        let models = try #require(files.first { $0.name == "Models.generated.swift" }).contents
+        #expect(models.contains("type: SchemaType = SchemaType(wireValue: \"object\")"))
+        #expect(models.contains("container.forgivingDecode(SchemaType.self, forKey: .type, default: SchemaType(wireValue: \"object\"))"))
+    }
+
     @Test func identifierNewtypeIsDistinctWireRawValueStruct() throws {
         let source = try miniatureOutput(named: "Identifiers.generated.swift")
         #expect(source.contains("public struct SessionId: WireRawValueCodable, Hashable, Sendable"))

@@ -198,11 +198,12 @@ private struct FullAgent: Agent {
     }
 
     @Test func agentCarriesNoUnstableOnlyMethod() throws {
-        // Elicitation in particular: unstable-only in the vendored schema, and
-        // must not appear as a method on the stable `Agent` surface. Checked
-        // against the generated unstable handler names rather than the bare
-        // word "elicitation", since prose explaining a deferral is legitimate
-        // even though a method with that name is not.
+        // Elicitation graduated to the stable surface in the pinned schema
+        // revision — but it routes to the *client* side, so no elicitation
+        // method belongs on `Agent` either way. What must never appear here
+        // is any method the unstable manifest alone routes (`session/fork`,
+        // `nes/*`, `providers/*`, `document/did*`, `mcp/*`). Checked against
+        // the generated unstable handler names rather than prose keywords.
         let source = try sourceOfAgentProtocolFile()
         for handlerName in Unstable.MethodTable.methods.map(\.handlerName) {
             #expect(!source.contains("func \(handlerName)("), "\(handlerName) is unstable-only; it must not appear on Agent")

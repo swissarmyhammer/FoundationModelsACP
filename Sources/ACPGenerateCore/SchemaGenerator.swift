@@ -114,6 +114,10 @@ public struct SchemaGenerator: Sendable {
                 let model = try objectTaggedUnionModel(name: name, fragment: fragment)
                 structModels.append(model.base)
                 modelDeclarations.append(Emitter.objectTaggedUnionDeclaration(model: model))
+            case .objectScopeUnion:
+                let model = try objectScopeUnionModel(name: name, fragment: fragment, definitions: definitions)
+                structModels.append(model.base)
+                modelDeclarations.append(Emitter.objectScopeUnionDeclaration(model: model))
             case .deferredUnion(let keyword):
                 placeholders.append(
                     Emitter.placeholder(
@@ -648,9 +652,13 @@ public struct SchemaGenerator: Sendable {
     ///   - name: The definition's schema name.
     ///   - modeled: `variants` with `not`-guarded catch-alls filtered out.
     /// - Returns: `.objectTaggedUnion` when every modeled variant flattens an
-    ///   `allOf` `$ref` payload, `.objectValueUnion` when none do, or
-    ///   `.deferredUnion` when the two are mixed (no emission model covers
-    ///   that combination).
+    ///   `allOf` `$ref` payload and some variant pins a `const` discriminator,
+    ///   `.objectScopeUnion` when every variant flattens a payload and none
+    ///   pins one (the serde flattened-untagged-union shape, selected by each
+    ///   payload's required members), `.objectValueUnion` when no variant
+    ///   flattens a payload, or `.deferredUnion` when payload-flattening and
+    ///   inline variants are mixed (no emission model covers that
+    ///   combination).
     /// - Throws: `GeneratorError.unsupportedShape` when every variant is a
     ///   `not`-guarded catch-all: `modeled` is then empty, and without this
     ///   check `modeled.allSatisfy` would succeed vacuously and misclassify
@@ -663,6 +671,9 @@ public struct SchemaGenerator: Sendable {
     private func classifyObjectTypedAnyOf(name: String, modeled: [JSONValue]) throws -> DefinitionKind {
         try validateNonEmptyUnion(modeled, name: name)
         if modeled.allSatisfy({ $0[Self.allOfKey] != nil }) {
+            guard modeled.contains(where: hasConstDiscriminator) else {
+                return .objectScopeUnion
+            }
             return .objectTaggedUnion
         }
         guard !modeled.contains(where: { $0[Self.allOfKey] != nil }) else {
@@ -883,7 +894,7 @@ public struct SchemaGenerator: Sendable {
         try validateCaseNames(names: cases.map(\.swiftName), context: name)
         // The discriminator becomes the CodingKeys case, so it must itself
         // be a valid Swift identifier.
-        _ = try swiftCaseName(fromWire: discriminator, context: "\(name) discriminator")
+        _ = try swiftMemberName(fromWire: discriminator, context: "\(name) discriminator")
         return TaggedUnionModel(
             name: emittedName(name: name),
             documentation: description(of: fragment),
@@ -899,6 +910,16 @@ public struct SchemaGenerator: Sendable {
     /// v2's `SessionConfigOption` union `Type` — a nested type whose qualified
     /// reference `SessionConfigOption.Type` is metatype syntax.
     private static let nestedPayloadEnumName = "Payload"
+
+    /// The struct's stored property name for a flattened scope union.
+    ///
+    /// Fixed, because the union occupies no wire member of its own — the
+    /// selected payload's members flatten beside the base properties — so
+    /// there is no schema name to derive it from.
+    private static let scopePropertyName = "scope"
+
+    /// The emitted name of the nested enum a flattened scope union becomes.
+    private static let nestedScopeEnumName = "Scope"
 
     /// Builds the emission model for an object definition carrying a tagged
     /// union whose variants flatten `$ref` payloads.
@@ -927,6 +948,110 @@ public struct SchemaGenerator: Sendable {
                 cases: union.cases
             )
         )
+    }
+
+    /// Builds the emission model for an object definition carrying a flattened
+    /// untagged scope union.
+    ///
+    /// Each variant is a single-`$ref` `allOf` wrapper with no discriminator,
+    /// named by its `title`. Decode selects the variant by the members its
+    /// referenced definition requires, so those keys are read here from the
+    /// schema's own definitions and must be non-empty and disjoint across the
+    /// variants — anything else would decode ambiguously and fails loudly
+    /// instead.
+    ///
+    /// - Parameters:
+    ///   - name: The definition's schema name.
+    ///   - fragment: The definition's schema fragment.
+    ///   - definitions: The schema's top-level definitions, resolving each
+    ///     variant's `$ref` to the required keys decode probes.
+    /// - Returns: The object-scope-union model.
+    /// - Throws: `GeneratorError.unsupportedShape` when a variant deviates
+    ///   from the single-`$ref` wrapper shape, its payload's required keys are
+    ///   empty or not disjoint from another variant's, or a name collides.
+    private func objectScopeUnionModel(
+        name: String,
+        fragment: JSONValue,
+        definitions: [String: JSONValue]
+    ) throws -> ObjectScopeUnionModel {
+        let base = try structModel(name: name, fragment: fragment)
+        let variants = unionVariants(of: fragment)
+        try validateNonEmptyUnion(variants, name: name)
+        var claimedKeys: Set<String> = []
+        let cases = try variants.enumerated().map { index, variant -> ScopeUnionCaseModel in
+            let context = "\(name) scope variant \(index)"
+            let payload = try scopePayload(of: variant, definitions: definitions, context: context)
+            for key in payload.requiredKeys {
+                // The key becomes a CodingKeys case, so it must itself be a
+                // valid Swift identifier.
+                _ = try swiftMemberName(fromWire: key, context: context)
+                guard claimedKeys.insert(key).inserted else {
+                    throw GeneratorError.unsupportedShape(
+                        context: context,
+                        detail: "scope variants' required members are not disjoint: \(key)"
+                    )
+                }
+            }
+            return ScopeUnionCaseModel(
+                swiftName: try defaultVariantCaseName(of: variant, context: context),
+                payloadType: payload.typeName,
+                requiredKeys: payload.requiredKeys,
+                documentation: description(of: variant)
+            )
+        }
+        try validateCaseNames(names: cases.map(\.swiftName), context: name)
+        try validateUnclaimed(names: [Self.scopePropertyName] + cases.flatMap(\.requiredKeys), by: base, context: name)
+        return ObjectScopeUnionModel(
+            base: base,
+            scopePropertyName: Self.scopePropertyName,
+            scopeEnumName: Self.nestedScopeEnumName,
+            cases: cases
+        )
+    }
+
+    /// Resolves a scope variant's single `$ref` payload to its emitted type
+    /// name and the required keys decode probes to select it.
+    ///
+    /// - Parameters:
+    ///   - of: The scope union variant fragment.
+    ///   - definitions: The schema's top-level definitions.
+    ///   - context: The variant's error context.
+    /// - Returns: The emitted payload type name and its required wire keys in
+    ///   schema order.
+    /// - Throws: `GeneratorError.unsupportedShape` when the variant declares
+    ///   inline properties or no single payload `$ref`, the reference names no
+    ///   definition, or the referenced definition requires no member.
+    private func scopePayload(
+        of variant: JSONValue,
+        definitions: [String: JSONValue],
+        context: String
+    ) throws -> (typeName: String, requiredKeys: [String]) {
+        // A scope variant is a bare wrapper; an inline property here would be
+        // silently dropped by the model, so the shape fails loudly instead.
+        guard (variant[Self.propertiesKey]?.objectValue ?? [:]).isEmpty else {
+            throw GeneratorError.unsupportedShape(
+                context: context,
+                detail: "scope variant must not declare inline properties"
+            )
+        }
+        guard let reference = try flattenedPayloadReference(of: variant, context: context) else {
+            throw GeneratorError.unsupportedShape(context: context, detail: "expected an \(Self.allOfKey) payload \(Self.refKey)")
+        }
+        let definitionName = try referencedDefinitionName(reference: reference, context: context)
+        guard let definition = definitions[definitionName] else {
+            throw GeneratorError.unsupportedShape(
+                context: context,
+                detail: "\(Self.refKey) names \(definitionName), which the schema does not define"
+            )
+        }
+        let requiredKeys = (definition[Self.requiredKey]?.arrayValue ?? []).compactMap(\.stringValue)
+        guard !requiredKeys.isEmpty else {
+            throw GeneratorError.unsupportedShape(
+                context: context,
+                detail: "scope payload \(definitionName) declares no required member to select the variant by"
+            )
+        }
+        return (emittedName(name: definitionName), requiredKeys)
     }
 
     /// Reads the internally-tagged discriminator member of a union variant.
@@ -1004,13 +1129,31 @@ public struct SchemaGenerator: Sendable {
     /// - Throws: `GeneratorError.unsupportedShape` when `allOf` is present but
     ///   is not exactly one payload `$ref`.
     private func flattenedPayloadType(of variant: JSONValue, context: String) throws -> String? {
+        guard let reference = try flattenedPayloadReference(of: variant, context: context) else { return nil }
+        return try referencedTypeName(reference: reference, context: context)
+    }
+
+    /// Reads the single payload `$ref` a union variant flattens via `allOf`.
+    ///
+    /// The reference-reading half of `flattenedPayloadType`, shared with the
+    /// scope-union stage, which needs the raw reference to look the payload's
+    /// required keys up in the schema's own definitions.
+    ///
+    /// - Parameters:
+    ///   - of: The union variant fragment.
+    ///   - context: The variant's error context.
+    /// - Returns: The payload's `$ref` string, or `nil` when the variant
+    ///   declares no `allOf`.
+    /// - Throws: `GeneratorError.unsupportedShape` when `allOf` is present but
+    ///   is not exactly one payload `$ref`.
+    private func flattenedPayloadReference(of variant: JSONValue, context: String) throws -> String? {
         guard let allOf = variant[Self.allOfKey] else { return nil }
         guard let entries = allOf.arrayValue, entries.count == 1,
             let reference = entries[0][Self.refKey]?.stringValue
         else {
             throw GeneratorError.unsupportedShape(context: context, detail: "expected \(Self.allOfKey) to be a single payload \(Self.refKey)")
         }
-        return try referencedTypeName(reference: reference, context: context)
+        return reference
     }
 
     /// Resolves the single `$ref` payload a discriminated variant flattens.
@@ -1276,23 +1419,53 @@ public struct SchemaGenerator: Sendable {
         "try", "typealias", "var", "where", "while",
     ]
 
-    /// Maps a snake_case wire value to a camelCase Swift case name.
+    /// Maps a snake_case or kebab-case wire value to a camelCase Swift case
+    /// name.
     ///
     /// The first word keeps its spelling: a wire value is already an
-    /// identifier, and its exact casing is part of what the case means.
+    /// identifier, and its exact casing is part of what the case means. A
+    /// hyphen separates words the same way an underscore does — v2's
+    /// `StringFormat` pins `date-time` — and the wire spelling itself is
+    /// untouched: it survives as the emitted `Tag` raw value.
     ///
     /// - Parameters:
-    ///   - fromWire: The wire string (e.g. `switch_mode`).
+    ///   - fromWire: The wire string (e.g. `switch_mode`, `date-time`).
     ///   - context: `Definition variant` for error messages.
-    /// - Returns: The camelCase Swift identifier (e.g. `switchMode`).
+    /// - Returns: The camelCase Swift identifier (e.g. `switchMode`,
+    ///   `dateTime`).
     /// - Throws: `GeneratorError.unsupportedShape` when the wire value does
     ///   not map to a plain, non-keyword Swift identifier.
     private func swiftCaseName(fromWire wireValue: String, context: String) throws -> String {
         try swiftCaseName(
-            words: wireValue.split(separator: "_"),
+            words: wireValue.split(whereSeparator: { $0 == "_" || $0 == "-" }),
             lowercasingFirstWord: false,
             source: "wire value",
             spelling: wireValue,
+            context: context
+        )
+    }
+
+    /// Maps a snake_case wire member name to a camelCase Swift identifier.
+    ///
+    /// Like `swiftCaseName(fromWire:)` but without the hyphen separator. A
+    /// member name validated here — a union discriminator, a value member, a
+    /// scope union's probe key — is also written *verbatim* as a union
+    /// `CodingKeys` case, where an underscore is legal in the emitted
+    /// identifier and a hyphen is not, so a hyphenated member name must keep
+    /// failing generation rather than `swiftc`.
+    ///
+    /// - Parameters:
+    ///   - fromWire: The JSON member name (e.g. `sessionUpdate`).
+    ///   - context: `Definition variant` for error messages.
+    /// - Returns: The camelCase Swift identifier.
+    /// - Throws: `GeneratorError.unsupportedShape` when the member name does
+    ///   not map to a plain, non-keyword Swift identifier.
+    private func swiftMemberName(fromWire wireName: String, context: String) throws -> String {
+        try swiftCaseName(
+            words: wireName.split(separator: "_"),
+            lowercasingFirstWord: false,
+            source: "wire value",
+            spelling: wireName,
             context: context
         )
     }
@@ -1311,7 +1484,7 @@ public struct SchemaGenerator: Sendable {
     /// - Throws: `GeneratorError.unsupportedShape` when the wire name does not
     ///   map to a plain, non-keyword Swift identifier.
     private func swiftTypeName(fromWireName wireName: String, context: String) throws -> String {
-        let name = try swiftCaseName(fromWire: wireName, context: context)
+        let name = try swiftMemberName(fromWire: wireName, context: context)
         return name.prefix(1).uppercased() + name.dropFirst()
     }
 
@@ -1637,12 +1810,17 @@ public struct SchemaGenerator: Sendable {
     /// Derives the Swift property name from the wire name.
     ///
     /// Wire names are already camelCase; ACP's reserved `_meta` drops its
-    /// leading underscore (mapped back through CodingKeys).
+    /// leading underscore (mapped back through CodingKeys). A name that is a
+    /// Swift keyword — v2's elicitation schemas declare `default` and `enum`
+    /// members — is backticked, which is legal everywhere the emitter writes a
+    /// property name, while the CodingKeys raw value keeps the bare wire
+    /// spelling.
     ///
     /// - Parameter forWireName: The JSON member name.
     /// - Returns: The Swift property name.
     private func swiftName(forWireName wireName: String) -> String {
-        String(wireName.drop(while: { $0 == "_" }))
+        let name = String(wireName.drop(while: { $0 == "_" }))
+        return Self.swiftKeywords.contains(name) ? "`\(name)`" : name
     }
 
     // MARK: - Type resolution
@@ -1823,11 +2001,26 @@ public struct SchemaGenerator: Sendable {
     /// - Returns: The referenced type's emitted name.
     /// - Throws: `GeneratorError.unsupportedShape` for external references.
     private func referencedTypeName(reference: String, context: String) throws -> String {
+        emittedName(name: try referencedDefinitionName(reference: reference, context: context))
+    }
+
+    /// Resolves a `$ref` to the schema definition name it points at.
+    ///
+    /// The name-reading half of `referencedTypeName`, shared with the
+    /// scope-union stage, which looks the un-renamed name up in the schema's
+    /// own definitions before any Swift-side rename applies.
+    ///
+    /// - Parameters:
+    ///   - reference: The JSON pointer (e.g. `#/$defs/SessionId`).
+    ///   - context: `Definition.field` for error messages.
+    /// - Returns: The referenced definition's schema name.
+    /// - Throws: `GeneratorError.unsupportedShape` for external references.
+    private func referencedDefinitionName(reference: String, context: String) throws -> String {
         let prefix = "#/\(Self.defsKey)/"
         guard reference.hasPrefix(prefix) else {
             throw GeneratorError.unsupportedShape(context: context, detail: "unsupported \(Self.refKey) \"\(reference)\"")
         }
-        return emittedName(name: String(reference.dropFirst(prefix.count)))
+        return String(reference.dropFirst(prefix.count))
     }
 
     // MARK: - Defaults
@@ -1859,7 +2052,15 @@ public struct SchemaGenerator: Sendable {
             }
             return (String(number), false)
         case .string(let string):
-            return (Emitter.stringLiteral(text: string), false)
+            let literal = Emitter.stringLiteral(text: string)
+            if type.base == "String" {
+                return (literal, false)
+            }
+            // A non-`String` field with a string default is an enum-typed
+            // member — v2's `ElicitationSchema.type` defaults to `"object"` —
+            // so the default routes through the scalar enum's own
+            // `init(wireValue:)`, which maps the wire string to its case.
+            return ("\(type.base)(wireValue: \(literal))", false)
         case .array(let elements):
             guard elements.isEmpty else {
                 throw GeneratorError.unsupportedShape(context: context, detail: "non-empty array default")

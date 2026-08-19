@@ -11,8 +11,8 @@ private let sessionOne = SessionId(rawValue: "session-stream-1")
 /// A second interleaved session id.
 private let sessionTwo = SessionId(rawValue: "session-stream-2")
 
-/// A client implementing only the two stable entry points, ignoring both —
-/// tests observe delivery through `ClientSideConnection.updates(for:)` instead.
+/// A client whose handlers all ignore or refuse what they serve — tests
+/// observe delivery through `ClientSideConnection.updates(for:)` instead.
 private struct MinimalClient: Client {
     func sessionUpdate(_ notification: UpdateSessionNotification) async {}
 
@@ -21,6 +21,14 @@ private struct MinimalClient: Client {
     ) async throws -> RequestPermissionResponse {
         throw RequestError.methodNotFound("requestPermission")
     }
+
+    func createElicitation(
+        _ params: CreateElicitationRequest
+    ) async throws -> CreateElicitationResponse {
+        throw RequestError.methodNotFound("createElicitation")
+    }
+
+    func elicitationComplete(_ notification: CompleteElicitationNotification) async {}
 }
 
 /// Builds a `session/update` notification model for one session.

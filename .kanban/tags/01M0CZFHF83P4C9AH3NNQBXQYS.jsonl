@@ -1,0 +1,1 @@
+{"id":"01M0CZFHF9QB7QRNW8MEQHSJTE","timestamp":"2026-08-19T12:21:03.593240Z","op":"create","item_id":"01M0CZFHF83P4C9AH3NNQBXQYS","forward_patch":"--- original\n+++ modified\n@@ -0,0 +1,2 @@\n+color: 7057ff\n+tag_name: elicitation\n","reverse_patch":"--- original\n+++ modified\n@@ -1,2 +0,0 @@\n-color: 7057ff\n-tag_name: elicitation\n","transaction_id":null}

@@ -176,6 +176,14 @@ private let standardTestTimeout = 1  // minute
         ) async throws -> RequestPermissionResponse {
             RequestPermissionResponse(outcome: .selected(SelectedPermissionOutcome(optionId: GoldenSessionEndToEndTests.permissionOptionId)))
         }
+
+        func createElicitation(
+            _ params: CreateElicitationRequest
+        ) async throws -> CreateElicitationResponse {
+            throw RequestError.methodNotFound("createElicitation")
+        }
+
+        func elicitationComplete(_ notification: CompleteElicitationNotification) async {}
     }
 
     // MARK: - Byte capture

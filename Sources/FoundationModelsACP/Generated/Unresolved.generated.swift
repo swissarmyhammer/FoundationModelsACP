@@ -11,6 +11,16 @@ public typealias AgentResponse = JSONValue
 /// Permanently deferred: no variant of this `anyOf` union pins a discriminator, so there is nothing to key a Swift enum on; raw JSON is its representation.
 public typealias ClientResponse = JSONValue
 
+/// Response from the client to an elicitation request.
+///
+/// Deferred: this `anyOf` union's variants pin discriminators the generator cannot reconcile into one Swift enum; raw JSON is its representation.
+public typealias CreateElicitationResponse = JSONValue
+
+/// Allowed wire representations for [`ElicitationContentValue`].
+///
+/// Permanently deferred: no variant of this `anyOf` union pins a discriminator, so there is nothing to key a Swift enum on; raw JSON is its representation.
+public typealias ElicitationContentValue = JSONValue
+
 /// Resource content that can be embedded in a message.
 ///
 /// Permanently deferred: no variant of this `anyOf` union pins a discriminator, so there is nothing to key a Swift enum on; raw JSON is its representation.

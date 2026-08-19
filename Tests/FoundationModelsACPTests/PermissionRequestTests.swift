@@ -3,9 +3,10 @@ import Testing
 
 @testable import FoundationModelsACP
 
-/// `session/request_permission` (plan.md M8): the one stable Client request
-/// that waits on a human, restructured in v2 to separate prompt copy
-/// (`title`/`description`) from structured context (the tagged `subject`).
+/// `session/request_permission` (plan.md M8): a stable Client request that
+/// waits on a human — `elicitation/create` is the other — restructured in v2
+/// to separate prompt copy (`title`/`description`) from structured context
+/// (the tagged `subject`).
 ///
 /// Two halves. The first is pure wire round-tripping of `RequestPermissionRequest`
 /// and `RequestPermissionSubject`, complementing the generic tag-exhaustiveness
@@ -94,14 +95,14 @@ import Testing
         #expect(context.debugDescription == #"ACP paths must be absolute; got "project""#)
     }
 
-    // MARK: - Nothing elicitation-related on the stable surface
+    // MARK: - Elicitation is a stable sibling, not this suite's subject
     //
-    // `ClientProtocolTests.clientCarriesNoUnstableOnlyMethod` already asserts
-    // this generically against every unstable-only handler name, `Unstable
-    // .MethodTable.methods` included. Re-verified by direct grep while working
-    // this card: `elicitation` appears only in `MethodTable.generated.swift`
-    // (the unstable routing table, expected) and in `Client.swift`'s doc
-    // comment explaining the deferral — nowhere else in `Sources/`.
+    // The pinned schema revision promotes elicitation to the stable client
+    // surface: `elicitation/create` routes beside `session/request_permission`
+    // as the other long-lived, human-gated request, and
+    // `ElicitationLifecycleTests` covers its lifecycle the way this suite
+    // covers permissions. `ClientProtocolTests.clientCarriesNoUnstableOnlyMethod`
+    // still asserts that no unstable-only handler name leaks onto `Client`.
 
     // MARK: - A pending permission request must not block the read loop
 
@@ -163,6 +164,14 @@ import Testing
             _ = await release.next()
             return RequestPermissionResponse(outcome: .cancelled)
         }
+
+        func createElicitation(
+            _ params: CreateElicitationRequest
+        ) async throws -> CreateElicitationResponse {
+            throw RequestError.methodNotFound("createElicitation")
+        }
+
+        func elicitationComplete(_ notification: CompleteElicitationNotification) async {}
     }
 
     @Test(.timeLimit(.minutes(1)))

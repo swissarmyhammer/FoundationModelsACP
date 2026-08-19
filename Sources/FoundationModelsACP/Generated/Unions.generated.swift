@@ -5,7 +5,7 @@
 ///
 /// The `type` field acts as the discriminator in the serialized JSON form.
 public enum AuthMethod: Codable, Hashable, Sendable {
-    /// Agent handles authentication itself.
+    /// Agent handles authentication itself through `auth/login`.
     ///
     /// The `type` discriminator value is `agent`.
     case agent(AuthMethodAgent)
@@ -369,6 +369,156 @@ public enum DiffPatchFormat: Codable, Hashable, Sendable {
     }
 }
 
+/// Property schema for elicitation form fields.
+///
+/// Each variant corresponds to a JSON Schema `"type"` value.
+/// Single-select enums use the `String` variant with `enum` or `oneOf` set.
+/// Multi-select enums use the `Array` variant.
+public enum ElicitationPropertySchema: Codable, Hashable, Sendable {
+    /// String property (or single-select enum when `enum`/`oneOf` is set).
+    case string(StringPropertySchema)
+
+    /// Number (floating-point) property.
+    case number(NumberPropertySchema)
+
+    /// Integer property.
+    case integer(IntegerPropertySchema)
+
+    /// Boolean property.
+    case boolean(BooleanPropertySchema)
+
+    /// Multi-select array property.
+    case array(MultiSelectPropertySchema)
+
+    /// An unrecognized `type` value, captured alongside the members
+    /// of the object that no other property owns, so a variant this revision
+    /// does not list decodes without error and re-encodes unchanged.
+    ///
+    /// The payload holds neither `type` nor any member declared
+    /// beside this union: those have their own storage, and a second copy
+    /// here would win on re-encode. Encoding a payload that declares one is
+    /// an `EncodingError`.
+    case unknown(String, JSONValue)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+    }
+
+    private enum Tag: String {
+        case string = "string"
+        case number = "number"
+        case integer = "integer"
+        case boolean = "boolean"
+        case array = "array"
+    }
+
+    private static let excludedMembers = ["type"]
+
+    /// Decodes by the `type` discriminator, routing
+    /// unrecognized values to `.unknown`.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when the discriminator is missing or a
+    ///   known variant's payload is malformed.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let discriminator = try container.decode(String.self, forKey: .type)
+        switch Tag(rawValue: discriminator) {
+        case .string:
+            self = .string(try StringPropertySchema(from: decoder))
+        case .number:
+            self = .number(try NumberPropertySchema(from: decoder))
+        case .integer:
+            self = .integer(try IntegerPropertySchema(from: decoder))
+        case .boolean:
+            self = .boolean(try BooleanPropertySchema(from: decoder))
+        case .array:
+            self = .array(try MultiSelectPropertySchema(from: decoder))
+        case nil:
+            self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
+        }
+    }
+
+    /// Encodes the `type` discriminator, flattening the
+    /// payload's fields into the same object.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .string(let payload):
+            try container.encode(Tag.string.rawValue, forKey: .type)
+            try payload.encode(to: encoder)
+        case .number(let payload):
+            try container.encode(Tag.number.rawValue, forKey: .type)
+            try payload.encode(to: encoder)
+        case .integer(let payload):
+            try container.encode(Tag.integer.rawValue, forKey: .type)
+            try payload.encode(to: encoder)
+        case .boolean(let payload):
+            try container.encode(Tag.boolean.rawValue, forKey: .type)
+            try payload.encode(to: encoder)
+        case .array(let payload):
+            try container.encode(Tag.array.rawValue, forKey: .type)
+            try payload.encode(to: encoder)
+        case .unknown(let discriminator, let payload):
+            try container.encode(discriminator, forKey: .type)
+            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
+        }
+    }
+}
+
+/// Type discriminator for elicitation schemas.
+public enum ElicitationSchemaType: Codable, Hashable, Sendable {
+    /// Object schema type.
+    case object
+
+    /// An unrecognized wire value, captured verbatim so a newer peer's
+    /// value decodes without error and re-encodes unchanged.
+    case unknown(String)
+
+    private enum Tag: String {
+        case object = "object"
+    }
+
+    /// The value as it crosses the wire.
+    public var wireValue: String {
+        switch self {
+        case .object: Tag.object.rawValue
+        case .unknown(let value): value
+        }
+    }
+
+    /// Creates the case matching a wire value, routing unrecognized
+    /// values to `.unknown`.
+    ///
+    /// - Parameter wireValue: The value as it crosses the wire.
+    public init(wireValue: String) {
+        switch wireValue {
+        case Tag.object.rawValue: self = .object
+        default: self = .unknown(wireValue)
+        }
+    }
+
+    /// Decodes the wire value, never failing on unrecognized values.
+    ///
+    /// - Parameter decoder: The decoder positioned at the value.
+    /// - Throws: `DecodingError` when the wire value is not a String.
+    public init(from decoder: any Decoder) throws {
+        self.init(wireValue: try decoder.singleValueContainer().decode(String.self))
+    }
+
+    /// Encodes the wire value; `.unknown` re-emits the value it captured.
+    ///
+    /// - Parameter encoder: The encoder to write the value into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(wireValue)
+    }
+}
+
 /// Predefined error codes for common JSON-RPC and ACP-specific errors.
 ///
 /// These codes follow the JSON-RPC 2.0 specification for standard errors
@@ -593,6 +743,73 @@ public enum MCPServer: Codable, Hashable, Sendable {
             try payload.encode(to: encoder)
         case .stdio(let payload):
             try container.encode(Tag.stdio.rawValue, forKey: .type)
+            try payload.encode(to: encoder)
+        case .unknown(let discriminator, let payload):
+            try container.encode(discriminator, forKey: .type)
+            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
+        }
+    }
+}
+
+/// Items for a multi-select (array) property schema.
+public enum MultiSelectItems: Codable, Hashable, Sendable {
+    /// Multi-select string items with plain string values.
+    case string(StringMultiSelectItems)
+
+    /// Titled multi-select items with human-readable labels.
+    case titled(TitledMultiSelectItems)
+
+    /// An unrecognized `type` value, captured alongside the members
+    /// of the object that no other property owns, so a variant this revision
+    /// does not list decodes without error and re-encodes unchanged.
+    ///
+    /// The payload holds neither `type` nor any member declared
+    /// beside this union: those have their own storage, and a second copy
+    /// here would win on re-encode. Encoding a payload that declares one is
+    /// an `EncodingError`.
+    case unknown(String, JSONValue)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+    }
+
+    private enum Tag: String {
+        case string = "string"
+    }
+
+    private static let excludedMembers = ["type"]
+
+    /// Decodes by the `type` discriminator; an absent
+    /// discriminator selects the default variant and an unrecognized one
+    /// routes to `.unknown`.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a known variant's payload is malformed.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decodeIfPresent(String.self, forKey: .type) {
+        case Tag.string.rawValue?:
+            self = .string(try StringMultiSelectItems(from: decoder))
+        case nil:
+            self = .titled(try TitledMultiSelectItems(from: decoder))
+        case let other?:
+            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
+        }
+    }
+
+    /// Encodes the `type` discriminator, flattening the
+    /// payload's fields into the same object; the default variant omits
+    /// the discriminator.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .string(let payload):
+            try container.encode(Tag.string.rawValue, forKey: .type)
+            try payload.encode(to: encoder)
+        case .titled(let payload):
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)
@@ -1559,6 +1776,74 @@ public enum StopReason: Codable, Hashable, Sendable {
         case Tag.maxTurnRequests.rawValue: self = .maxTurnRequests
         case Tag.refusal.rawValue: self = .refusal
         case Tag.cancelled.rawValue: self = .cancelled
+        default: self = .unknown(wireValue)
+        }
+    }
+
+    /// Decodes the wire value, never failing on unrecognized values.
+    ///
+    /// - Parameter decoder: The decoder positioned at the value.
+    /// - Throws: `DecodingError` when the wire value is not a String.
+    public init(from decoder: any Decoder) throws {
+        self.init(wireValue: try decoder.singleValueContainer().decode(String.self))
+    }
+
+    /// Encodes the wire value; `.unknown` re-emits the value it captured.
+    ///
+    /// - Parameter encoder: The encoder to write the value into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(wireValue)
+    }
+}
+
+/// String format types for string properties in elicitation schemas.
+public enum StringFormat: Codable, Hashable, Sendable {
+    /// Email address format.
+    case email
+
+    /// URI format.
+    case uri
+
+    /// Date format (YYYY-MM-DD).
+    case date
+
+    /// Date-time format (RFC 3339).
+    case dateTime
+
+    /// An unrecognized wire value, captured verbatim so a newer peer's
+    /// value decodes without error and re-encodes unchanged.
+    case unknown(String)
+
+    private enum Tag: String {
+        case email = "email"
+        case uri = "uri"
+        case date = "date"
+        case dateTime = "date-time"
+    }
+
+    /// The value as it crosses the wire.
+    public var wireValue: String {
+        switch self {
+        case .email: Tag.email.rawValue
+        case .uri: Tag.uri.rawValue
+        case .date: Tag.date.rawValue
+        case .dateTime: Tag.dateTime.rawValue
+        case .unknown(let value): value
+        }
+    }
+
+    /// Creates the case matching a wire value, routing unrecognized
+    /// values to `.unknown`.
+    ///
+    /// - Parameter wireValue: The value as it crosses the wire.
+    public init(wireValue: String) {
+        switch wireValue {
+        case Tag.email.rawValue: self = .email
+        case Tag.uri.rawValue: self = .uri
+        case Tag.date.rawValue: self = .date
+        case Tag.dateTime.rawValue: self = .dateTime
         default: self = .unknown(wireValue)
         }
     }

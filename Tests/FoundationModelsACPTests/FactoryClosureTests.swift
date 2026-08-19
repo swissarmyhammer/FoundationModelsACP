@@ -167,6 +167,14 @@ private final class PermittingClient: Client {
             outcome: .selected(SelectedPermissionOutcome(optionId: Self.grantedOption))
         )
     }
+
+    func createElicitation(
+        _ params: CreateElicitationRequest
+    ) async throws -> CreateElicitationResponse {
+        throw RequestError.methodNotFound("createElicitation")
+    }
+
+    func elicitationComplete(_ notification: CompleteElicitationNotification) async {}
 }
 
 // MARK: - Roles that exercise the reverse direction (Client → Agent)
@@ -202,6 +210,14 @@ private final class ReactiveClient: Client {
     ) async throws -> RequestPermissionResponse {
         throw RequestError.methodNotFound("requestPermission")
     }
+
+    func createElicitation(
+        _ params: CreateElicitationRequest
+    ) async throws -> CreateElicitationResponse {
+        throw RequestError.methodNotFound("createElicitation")
+    }
+
+    func elicitationComplete(_ notification: CompleteElicitationNotification) async {}
 }
 
 /// An agent that records the notifications it serves, for the reactive-client

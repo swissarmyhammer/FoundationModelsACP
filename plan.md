@@ -180,28 +180,29 @@ docs pages — M0 reconciled the two and the schema wins.*
 `session/delete`, `session/prompt`, `session/set_config_option`.
 **Agent notifications** (Client → Agent): `session/cancel`.
 
-**Client methods** (Agent → Client): `session/request_permission`.
-**Client notifications** (Agent → Client): `session/update`.
+**Client methods** (Agent → Client): `session/request_permission`,
+`elicitation/create`.
+**Client notifications** (Agent → Client): `session/update`,
+`elicitation/complete`.
 
 **Protocol-level**: `$/cancel_request`.
 
-That is the whole stable surface — and the Client half is *two entry points*.
+That is the whole stable surface — and the Client half is *four entry points*.
 When `capabilities.session` is advertised, an agent must implement the baseline:
 `session/new`, `session/list`, `session/resume`, `session/close`,
 `session/prompt`, `session/cancel`, `session/update`. Capability sub-objects are
 `session.prompt` (`audio` / `image` / `embeddedContext`), `session.mcp`
 (`stdio` / `http`), `session.additionalDirectories`, and `session.delete`;
-`AgentCapabilities` adds `auth`. `ClientCapabilities` carries `_meta` and
-nothing else — *"stable v2 defines no standard client capability fields"* is
-literally true.
+`AgentCapabilities` adds `auth`. `ClientCapabilities` carries `elicitation`
+and `_meta`. The `elicitation` field gates the elicitation methods; an omitted
+field and `null` both mean the client gives no elicitation support.
 
 **Unstable-only, and nothing may be built on it** (`acp-v2.meta.unstable.json`,
-routed by name and side only): `elicitation/create`, `elicitation/complete`,
-`mcp/connect`, `mcp/message`, `mcp/disconnect`, `session/fork`,
-`providers/list` / `providers/set` / `providers/disable`, `nes/*`, and
-`document/did*`. Elicitation in particular is **not** in the stable surface of
-the vendored `schema-v2.0.0-alpha.2`, though upstream `main` has already
-promoted it — expect it stable on the next re-vendor.
+routed by name and side only): `mcp/connect`, `mcp/message`, `mcp/disconnect`,
+`session/fork`, `providers/list` / `providers/set` / `providers/disable`,
+`nes/*`, and `document/did*`. Elicitation is **stable** in the pinned upstream
+commit `7a13081`: `elicitation/create` and `elicitation/complete` route on the
+stable client surface, and this package implements them.
 
 **`session/update` carries everything that happens** — the sixteen variants the
 schema lists, in order: `user_message_chunk`, `user_message`,
@@ -320,10 +321,9 @@ reverse request.
 
 v2 makes this materially simpler than v1 would have: with `session/prompt`
 acknowledging immediately, no request is held open for the duration of a turn.
-The one remaining long-lived request in the stable surface is the one that
-genuinely waits on a human — `session/request_permission` — and it must never
-block the read loop. (`elicitation/create` would join it if and when elicitation
-becomes stable.)
+Two long-lived requests in the stable surface genuinely wait on a human —
+`session/request_permission` and `elicitation/create` — and they must never
+block the read loop.
 
 **Fail loud on disconnect** (a real TS-SDK gap): on EOF or error, reject every
 pending continuation and finish every stream; per-request timeouts; honor `Task`
@@ -429,10 +429,13 @@ replayable script.
   state is this milestone's.
 - [x] **M8 — Permissions.** `session/request_permission` with `title` /
   `description` / tagged `subject` (`tool_call` or `command`, the latter
-  optionally naming a `terminalId`). **Elicitation is out of scope until it is
-  stable** — `elicitation/create` and `elicitation/complete` are unstable-only
-  in the vendored `schema-v2.0.0-alpha.2`, with no request/response types in the
-  stable schema to generate from. Pick this up when a re-vendor promotes them.
+  optionally naming a `terminalId`). **Elicitation is now stable and
+  implemented** — the pinned upstream commit `7a13081` promotes
+  `elicitation/create` and `elicitation/complete` to the stable client
+  surface. `Client` carries `createElicitation` and `elicitationComplete`,
+  both connections route them, and `ElicitationLifecycleTests` covers the
+  lifecycle. (At M8 time the vendored `schema-v2.0.0-alpha.2` held them
+  unstable-only, so M8 deferred them; the re-vendor picked them up.)
 - [x] **M9 — Replay and interop.** `ReplayTransport` recovered from git history
   (protocol-version-agnostic, as M3's connection layer was) and re-tested on
   its own mechanics, plus a session-level fixture proving unrecognized enum
@@ -461,8 +464,8 @@ replayable script.
   `ACPMethodTable`'s own internal consistency but never calls
   `AgentSideConnection`/`ClientSideConnection`'s hand-written dispatch
   switches — precisely where the real TS-SDK `setSessionModel` /
-  `session/set_mode` bug class lives. `RoutingCoverageTests` drives every one
-  of the 11 agent-side and 2 client-side stable handlers through a live
+  `session/set_mode` bug class lives. `RoutingCoverageTests` drives every
+  stable agent-side and client-side handler through a live
   connection with recording stand-ins, confirmed sensitive by two separate
   mutations (a swapped case-label pair, and a shadowed case) during
   development, both reverted afterward.

@@ -83,6 +83,31 @@ import Testing
         #expect(!unresolved.contains("typealias ErrorCode"))
     }
 
+    @Test func kebabCaseWireValueMapsToACamelCaseCase() throws {
+        // The vendored snapshot's `StringFormat` pins `date-time`: a hyphen
+        // separates wire-value words the same way an underscore does, and the
+        // `Tag` raw value keeps the wire spelling.
+        let schema = Data(
+            """
+            {
+              "$defs": {
+                "Format": {
+                  "anyOf": [
+                    { "type": "string", "const": "email" },
+                    { "type": "string", "const": "date-time" },
+                    { "title": "other", "type": "string" }
+                  ]
+                }
+              }
+            }
+            """.utf8)
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
+        let unions = try #require(files.first { $0.name == "Unions.generated.swift" }).contents
+        #expect(unions.contains("public enum Format: Codable, Hashable, Sendable"))
+        #expect(unions.contains("case dateTime = \"date-time\""))
+        #expect(unions.contains("case .dateTime: Tag.dateTime.rawValue"))
+    }
+
     @Test func integerEnumVariantWithoutATitleFailsLoudly() throws {
         // Nothing else can name the case, and silently numbering them would
         // bake positional names into public API.

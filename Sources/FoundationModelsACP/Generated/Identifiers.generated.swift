@@ -14,6 +14,19 @@ public struct AuthMethodId: WireRawValueCodable, Hashable, Sendable {
     }
 }
 
+/// Unique identifier for an elicitation.
+public struct ElicitationId: WireRawValueCodable, Hashable, Sendable {
+    /// The opaque identifier string as it crosses the wire.
+    public let rawValue: String
+
+    /// Creates a `ElicitationId` wrapping the given wire string.
+    ///
+    /// - Parameter rawValue: The opaque identifier string.
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+}
+
 /// An Internet media type identifying the format of protocol content.
 public struct MediaType: WireRawValueCodable, Hashable, Sendable {
     /// The opaque identifier string as it crosses the wire.
