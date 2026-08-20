@@ -18,6 +18,11 @@ jobs:
     uses: swissarmyhammer/workflows/.github/workflows/swift-ci.yaml@main
     with:
       docc-target: FoundationModelsACP
+      # IntegrationTests/ is a nested package the root manifest never names,
+      # so a bare `swift test` here only ever runs the unit suite. The shared
+      # workflow builds this package on every run and runs
+      # `swift test --package-path IntegrationTests` after the unit job.
+      integration-package-path: IntegrationTests
 
   # Repo-specific: regenerate the ACP types from the vendored schema and fail if
   # the checked-in output drifts. Needs the Swift 6.4 toolchain to build the

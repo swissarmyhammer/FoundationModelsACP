@@ -10,7 +10,15 @@ let package = Package(
         .library(
             name: "FoundationModelsACP",
             targets: ["FoundationModelsACP"]
-        )
+        ),
+        // Consumed by `IntegrationTests/Package.swift`, which cannot depend on
+        // this package's `acp-test-agent` *target* from outside this
+        // manifest — only a declared product lets a sibling package build it
+        // and locate the resulting binary.
+        .executable(
+            name: "acp-test-agent",
+            targets: ["acp-test-agent"]
+        ),
     ],
     dependencies: [
         // Plugin-only dependency: powers `swift package generate-documentation`
