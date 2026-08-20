@@ -1,14 +1,12 @@
 # FoundationModelsACP
 
 [![CI](https://github.com/swissarmyhammer/FoundationModelsACP/actions/workflows/ci.yml/badge.svg)](https://github.com/swissarmyhammer/FoundationModelsACP/actions/workflows/ci.yml)
-![Swift 6.4](https://img.shields.io/badge/Swift-6.4-orange)
-![macOS 27](https://img.shields.io/badge/macOS-27-blue)
 [![License](https://img.shields.io/github/license/swissarmyhammer/FoundationModelsACP)](LICENSE)
 
 The [Agent Client Protocol](https://agentclientprotocol.com) **v2** wire layer
-for Swift: generated schema types, `Agent`/`Client` role protocols, full-duplex
-JSON-RPC connections, ndJSON framing, and transports — with zero library
-dependencies.
+for Swift. It supplies generated schema types, `Agent` and `Client` role
+protocols, full-duplex JSON-RPC connections, ndJSON framing, and transports.
+It has zero library dependencies and it requires macOS 27.
 
 ```swift
 import FoundationModelsACP
@@ -48,17 +46,6 @@ struct MyAgent: Agent {
 let connection = await AgentSideConnection(stream: .stdio) { _ in MyAgent() }
 ```
 
-## Two things to know before you depend on this
-
-**ACP v2 is a draft.** Its shape can still move. This package tracks drafts by
-re-vendoring the schema and regenerating, so a version bump can change
-generated types.
-
-**v1 is not served.** This package implements v2 only — no v1 surface, no
-version branching, no dual namespaces. A client that speaks only v1 cannot
-talk to an agent built on this package. See *Decision: v2 only* in
-[`plan.md`](plan.md) for the full reasoning.
-
 ## Install
 
 ```swift
@@ -67,10 +54,20 @@ dependencies: [
 ]
 ```
 
+## Cautions
+
+**ACP v2 is a draft.** The protocol shape can change. This package tracks each
+draft: it vendors the new schema and regenerates the types. Thus an update can
+change the generated types.
+
+**This package does not serve v1.** It implements only v2. A client that
+speaks only v1 cannot talk to an agent that you build with this package. See
+*Decision: v2 only* in [`plan.md`](plan.md) for the full analysis.
+
 ## Documentation
 
-- [Plan](plan.md) — the v2 design, decisions, and milestones.
-- [Contributing](CONTRIBUTING.md) — regenerating the ACP types from the vendored schema.
+- [Plan](plan.md) — the v2 design, the decisions, and the milestones.
+- [Contributing](CONTRIBUTING.md) — how to regenerate the ACP types from the vendored schema.
 
 ## License
 
