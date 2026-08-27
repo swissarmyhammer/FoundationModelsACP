@@ -191,11 +191,13 @@ private struct FullAgent: Agent {
         #expect(logoutResponse == LogoutAuthResponse())
     }
 
-    @Test func terminalOnlyAuthMethodsKeepTheThrowingLoginDefault() async throws {
+    @Test func terminalOnlyAuthMethodsKeepTheThrowingAuthDefaults() async throws {
         // `AuthMethodTerminal` in the vendored schema says the client must
-        // not pass a terminal method to `auth/login`. Thus an agent that
+        // not send a terminal method to `auth/login`. Thus an agent that
         // advertises terminal auth alone has no `auth/login` obligation, and
-        // the throwing default stays correct for it.
+        // a terminal entry opens no authenticated session for `auth/logout`
+        // to end. The throwing default stays correct for both methods, which
+        // is what the doc comment on each of them now says.
         let terminal = AuthMethodTerminal(
             methodId: AuthMethodId(rawValue: "terminal"),
             name: "Terminal login"
@@ -209,6 +211,9 @@ private struct FullAgent: Agent {
 
         await #expect(throws: RequestError.self) {
             _ = try await agent.loginAuth(LoginAuthRequest(methodId: terminal.methodId))
+        }
+        await #expect(throws: RequestError.self) {
+            _ = try await agent.logoutAuth(LogoutAuthRequest())
         }
     }
 

@@ -76,6 +76,82 @@ comments:
     - `git status` confirms `Sources/FoundationModelsACP/Generated/` and `Schema/` have no changes.
     - next: none — all three gates are clean.
   timestamp: 2026-08-27T08:38:07.866820+00:00
+- actor: claude-code
+  id: 01m1166f21d50qrzvc8v15vycz
+  text: |-
+    ### review — findings
+    - evidence: 1 finding (1 confirmed, 0 refuted) — Tests/FoundationModelsACPTests/AgentProtocolTests.swift:194
+    - scope: review sha HEAD~1..HEAD
+    - next: add the logoutAuth guard test for the terminal-only agent, then run review again.
+  timestamp: 2026-08-27T08:43:14.881904+00:00
+- actor: claude-code
+  id: 01m116708k0vxh0dwm6snbjb2y
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 7 files (Connection/Agent.swift, Connection/Client.swift, AgentProtocolTests.swift, ProtocolSourceTestSupport.swift, PermissionRequestTests.swift, ThirdPartyInterop.swift, plan.md)
+    - test: green — swift test 107 tests passed; IntegrationTests 6 tests passed; DocC --warnings-as-errors exit 0
+    - commit: 2a30cc1
+    - review: findings — Tests/FoundationModelsACPTests/AgentProtocolTests.swift:194 (completeness/invariant-propagation: logoutAuth needs the same terminal-only guard test as loginAuth)
+    - next: implement the finding
+  timestamp: 2026-08-27T08:43:32.499690+00:00
+- actor: claude-code
+  id: 01m116fyjerb9rmr7qv73y1krm
+  text: |-
+    ### Implementation — review round 2
+
+    The finding, word for word: "The new test verifies terminal-only agents throw on `loginAuth`, but the same documentation change applies to `logoutAuth` with the identical terminal-method exception. Both methods now carry the same documented requirement but only one is tested for the terminal case. Add a test verifying that terminal-only agents also throw on `logoutAuth`."
+
+    The cause, and where it stands in the whole file:
+
+    The change rewrote the doc comment on `loginAuth` AND on `logoutAuth`. Two tests guard that change. `loginAndLogoutDocsExcludeTerminalMethodsFromTheLoginObligation` already reads both doc blocks, so it holds both halves. `terminalOnlyAuthMethodsKeepTheThrowingLoginDefault` held only the `loginAuth` half. That is the one site of the cause in this file, and it is now closed.
+
+    Two other tests were read and left alone, and each for a stated reason:
+
+    - `unimplementedCapabilityGatedMethodsYieldMethodNotFoundNotACrash` already calls all four gated methods — `loginAuth`, `logoutAuth`, `deleteSession`, `setSessionConfigOption`. No gap.
+    - `defaultMethodNotFoundErrorsNameTheWireMethodFromTheRoutingTable` samples `loginAuth` and `deleteSession` alone. It guards a DIFFERENT invariant — that the wire-method string each default reports agrees with the generated table — not the terminal-method documentation contract this change made. It also predates this change. Widening it is an unrelated refactor of a test that already existed, so it stays as written.
+
+    The test was EXTENDED rather than copied. A second test would have repeated the terminal setup — the `AuthMethodTerminal` value, the `BaselineAgent(advertisedAuthMethods:)`, and the `initialize` call — which the `duplication` validator treats as a blocker, and none of its Swift carve-outs covers a test body. The prevailing pattern of this file is the one the sibling test `authMethodsAreAbsentByDefaultAndPresentWhenOverridden` already takes: it holds `loginAuth` and `logoutAuth` in one test. The finding's own example asks for the extension as well.
+
+    The test was renamed `terminalOnlyAuthMethodsKeepTheThrowingLoginDefault` -> `terminalOnlyAuthMethodsKeepTheThrowingAuthDefaults`, because the old name says "Login" and the body now holds both defaults.
+
+    ### The RED, which was made real
+
+    The last round recorded honestly that `terminalOnlyAuthMethodsKeepTheThrowingLoginDefault` passed the moment it compiled. The same is true of a `logoutAuth` guard written beside it, so a plain run proves nothing. The failure was therefore made to happen: the default `logoutAuth` in `Sources/FoundationModelsACP/Connection/Agent.swift` was changed to return `LogoutAuthResponse()` in place of `try throwMethodNotFound("auth/logout")`, and the suite was run.
+
+    `swift test --filter AgentProtocolTests` then reported:
+
+        ✘ terminalOnlyAuthMethodsKeepTheThrowingAuthDefaults() recorded an issue at
+          AgentProtocolTests.swift:215:15: Expectation failed: an error was expected
+          but none was thrown
+
+    Line 215 is the NEW expectation. The test failed on the assertion the finding asked for, and for the right reason. Two sibling tests failed beside it — `authMethodsAreAbsentByDefaultAndPresentWhenOverridden` and `unimplementedCapabilityGatedMethodsYieldMethodNotFoundNotACrash` — which is the correct blast radius for that mutation, and the other five tests of the suite stayed green.
+
+    The mutation was then reverted. `git diff -- Sources/FoundationModelsACP/Connection/Agent.swift` is empty, so no production file carries a change from this round. The named production change that makes the new assertion fail is now on record: a default `logoutAuth` that answers instead of throwing.
+
+    ### Gates
+
+    - `swift build` — clean.
+    - `swift test` — 107 tests in 14 suites, 0 failed, 0 skipped, 0 warnings.
+    - `swift test --package-path IntegrationTests` — 6 tests in 2 suites, 0 failed.
+    - `swift package generate-documentation --target FoundationModelsACP --warnings-as-errors` — exit 0, no warnings.
+
+    Nothing under `Sources/FoundationModelsACP/Generated/` or `Schema/` was touched. `git status` shows one source file changed: `Tests/FoundationModelsACPTests/AgentProtocolTests.swift`.
+  timestamp: 2026-08-27T08:48:25.678893+00:00
+- actor: claude-code
+  id: 01m116g4q4pdt7ksnd2e5e6cd8
+  text: |-
+    ### implement — changed
+    - evidence: 1 file — Tests/FoundationModelsACPTests/AgentProtocolTests.swift (+9/-2). `terminalOnlyAuthMethodsKeepTheThrowingLoginDefault` renamed to `terminalOnlyAuthMethodsKeepTheThrowingAuthDefaults` and given the `logoutAuth` expectation the finding asks for. RED proved by a temporary mutation of the default `logoutAuth` — the new expectation failed at AgentProtocolTests.swift:215 with "an error was expected but none was thrown"; the mutation is reverted and `git diff` on Sources/ is empty. `swift build` clean. `swift test` 107 tests / 14 suites, 0 failed, 0 skipped, 0 warnings. `swift test --package-path IntegrationTests` 6 tests / 2 suites passed. `swift package generate-documentation --target FoundationModelsACP --warnings-as-errors` exit 0. The 1 open Review Finding is fixed and checked.
+    - next: /review
+  timestamp: 2026-08-27T08:48:31.972455+00:00
+- actor: claude-code
+  id: 01m116jj4gsw8y4mr7va6m1y2d
+  text: |-
+    ### test — green
+    - evidence: `swift test` at repo root — 107 tests, 14 suites, 0 failures, 0 warnings. `swift test --package-path IntegrationTests` — 6 tests, 2 suites, 0 failures, 0 warnings. `swift package generate-documentation --target FoundationModelsACP --warnings-as-errors` — build OK, doc archive built, 0 warnings.
+    - `git status --porcelain -- Sources/` is empty. No source file has a change.
+    - next: the task is clean. It can move to review.
+  timestamp: 2026-08-27T08:49:51.248370+00:00
 depends_on:
 - 01M112K7M506DDHQ3SN6QDCGGY
 position_column: doing
@@ -101,3 +177,15 @@ After the schema moves from pinned commit `7a13081` to tag `schema-v2.0.0-alpha.
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass. #schema-alpha3
+
+## Review Findings (2026-08-27 03:39)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 6 file(s) reviewed, 5 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+> 1 file(s) not reviewed — no validator matched:
+> - `plan.md` — no validator matches this file
+
+- [x] `Tests/FoundationModelsACPTests/AgentProtocolTests.swift:194` `completeness/invariant-propagation` — The new test verifies terminal-only agents throw on `loginAuth`, but the same documentation change applies to `logoutAuth` with the identical terminal-method exception. Both methods now carry the same documented requirement but only one is tested for the terminal case. Add a test verifying that terminal-only agents also throw on `logoutAuth`. For example, extend the test at line 194 to include: `await #expect(throws: RequestError.self) { _ = try await agent.logoutAuth(LogoutAuthRequest()) }`.
