@@ -29,8 +29,25 @@ comments:
     - evidence: 13 files — Schema/acp-v2.json, Schema/README.md, Sources/FoundationModelsACP/Generated/.schema-hash, Sources/FoundationModelsACP/Generated/Models{,2,3,4,5,6,7,8}.generated.swift, Sources/FoundationModelsACP/Generated/Unions.generated.swift, Tests/ACPGenerateTests/VendoredSchemaTests.swift. `swift test`: 253 tests in 24 suites passed, plus 107 tests in 14 suites passed; 0 failures, 0 warnings. `cd IntegrationTests && swift test`: 6 tests in 2 suites passed.
     - next: /review
   timestamp: 2026-08-27T08:02:57.241071+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m114f34kzdmxdhwgjfc5ptd4
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit cbf541d) — 0 findings, 0 confirmed, 0 refuted, 21 validator passes attempted, 0 failed. 10 files reviewed. Not reviewed: 8 `.kanban/` files (ignore rule), and `Schema/README.md`, `Schema/acp-v2.json`, `Sources/FoundationModelsACP/Generated/.schema-hash` (no validator matches these file types).
+    - next: task moved to done. No open findings.
+  timestamp: 2026-08-27T08:13:00.435706+00:00
+- actor: claude-code
+  id: 01m114fr19nhect8rmw4s1szbr
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 13 files (Schema/acp-v2.json, Schema/README.md, Generated/.schema-hash, Generated/Models{,2..8}.generated.swift, Generated/Unions.generated.swift, Tests/ACPGenerateTests/VendoredSchemaTests.swift)
+    - test: green — swift test 107 tests / 14 suites passed; IntegrationTests 6 tests / 2 suites passed; 0 failures, 0 warnings
+    - commit: cbf541d
+    - review: clean — 0 findings, 21 validator passes attempted, 0 failed
+    - next: task in done; proceed to the blocked dependants ^29gsgma and ^skm9j5t
+  timestamp: 2026-08-27T08:13:21.833282+00:00
+position_column: done
+position_ordinal: '9880'
 title: Vendor ACP schema-v2.0.0-alpha.3 and regenerate
 ---
 ## What

@@ -110,7 +110,7 @@ import Testing
         // A variant whose payload has required members throws before it can be
         // re-encoded, which also proves the tag matched — but only because
         // `everyUnionReadsTheDiscriminatorItsVariantsPin` has already ruled out
-        // the other way a union can throw here. That matters: 37 of these 44
+        // the other way a union can throw here. That matters: 38 of these 45
         // tags reach the probe by way of a thrown payload error, so on its own
         // this test would leave 9 of the 13 unions asserting nothing.
         for union in Self.unionsUnderTest {
@@ -311,6 +311,84 @@ import Testing
             return
         }
         #expect(boolean.currentValue)
+    }
+
+    // MARK: - Terminal authentication method
+
+    /// The `terminal` payload of an auth method, or `nil` for any other case.
+    ///
+    /// The terminal fixtures below all read the same variant, so binding it
+    /// once keeps each test to the one behavior it pins.
+    ///
+    /// - Parameter method: The decoded auth method.
+    /// - Returns: The payload, or `nil` when the method is another variant.
+    private static func terminalPayload(of method: AuthMethod) -> AuthMethodTerminal? {
+        guard case .terminal(let payload) = method else { return nil }
+        return payload
+    }
+
+    @Test func theTerminalAuthMethodRoundTripsItsWholePayload() throws {
+        let method = try WireRoundTrip.expectLossless(
+            AuthMethod.self,
+            """
+            {"type":"terminal","methodId":"login","name":"Log in","description":"Run login",\
+            "args":["auth","login"],"env":[{"name":"FOO","value":"bar"}],"_meta":{"k":1}}
+            """
+        )
+        let payload = try #require(Self.terminalPayload(of: method))
+        #expect(payload.methodId == AuthMethodId(rawValue: "login"))
+        #expect(payload.name == "Log in")
+        #expect(payload.description == "Run login")
+        #expect(payload.args == ["auth", "login"])
+        #expect(payload.env?.count == 1)
+        #expect(payload.env?.first == EnvVariable(name: "FOO", value: "bar"))
+        #expect(payload.meta == .object(["k": .number(1)]))
+        #expect(try WireRoundTrip.encode(method)["type"] == .string("terminal"))
+    }
+
+    @Test func omittedTerminalLaunchOverridesStayAbsentOnTheWire() throws {
+        // `args` and `env` are not required, so the generator emits optionals
+        // and `encodeIfPresent`. An absent override must not come back as an
+        // empty array or a null, either of which reads as "override with
+        // nothing" rather than "do not override".
+        let method = try WireRoundTrip.expectLossless(
+            AuthMethod.self,
+            """
+            {"type":"terminal","methodId":"login","name":"Log in"}
+            """
+        )
+        let payload = try #require(Self.terminalPayload(of: method))
+        #expect(payload.args == nil)
+        #expect(payload.env == nil)
+        let encoded = try WireRoundTrip.encode(method)
+        #expect(encoded["args"] == nil)
+        #expect(encoded["env"] == nil)
+    }
+
+    @Test func aMalformedTerminalArgumentIsDroppedNotFatal() throws {
+        // `x-deserialize-skip-invalid-items`: one bad element must not cost
+        // the whole authentication method.
+        let method = try WireRoundTrip.decode(
+            AuthMethod.self,
+            from: """
+                {"type":"terminal","methodId":"login","name":"Log in","args":["a",1,"b"]}
+                """
+        )
+        let payload = try #require(Self.terminalPayload(of: method))
+        #expect(payload.args == ["a", "b"])
+    }
+
+    @Test func aTerminalArgumentsFieldOfTheWrongTypeDegradesToNil() throws {
+        // `x-deserialize-default-on-error`: a field that is not an array at
+        // all degrades to absent, rather than failing the message.
+        let method = try WireRoundTrip.decode(
+            AuthMethod.self,
+            from: """
+                {"type":"terminal","methodId":"login","name":"Log in","args":"notanarray"}
+                """
+        )
+        let payload = try #require(Self.terminalPayload(of: method))
+        #expect(payload.args == nil)
     }
 
     // MARK: - Schema access
