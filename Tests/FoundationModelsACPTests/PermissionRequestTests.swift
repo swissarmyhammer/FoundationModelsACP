@@ -97,12 +97,13 @@ import Testing
 
     // MARK: - Elicitation is a stable sibling, not this suite's subject
     //
-    // The pinned schema revision promotes elicitation to the stable client
-    // surface: `elicitation/create` routes beside `session/request_permission`
-    // as the other long-lived, human-gated request, and
-    // `ElicitationLifecycleTests` covers its lifecycle the way this suite
-    // covers permissions. `ClientProtocolTests.clientCarriesNoUnstableOnlyMethod`
-    // still asserts that no unstable-only handler name leaks onto `Client`.
+    // The vendored `schema-v2.0.0-alpha.3` holds elicitation on the stable
+    // client surface: `elicitation/create` routes beside
+    // `session/request_permission` as the other long-lived, human-gated
+    // request, and `ElicitationLifecycleTests` covers its lifecycle the way
+    // this suite covers permissions.
+    // `ClientProtocolTests.clientCarriesNoUnstableOnlyMethod` still asserts
+    // that no unstable-only handler name leaks onto `Client`.
 
     // MARK: - A pending permission request must not block the read loop
 

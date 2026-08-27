@@ -86,8 +86,12 @@ public protocol Agent: Sendable {
 
     /// Authenticates with the agent.
     ///
-    /// Required only when this agent's `initialize` response advertises at
-    /// least one `authMethods` entry; clients must not call it otherwise.
+    /// This agent must supply this method only when its `initialize` response
+    /// advertises an `authMethods` entry that is not a `terminal` method. A
+    /// `terminal` entry tells the client to run the agent program as a
+    /// separate interactive process, and the client must not send a
+    /// `terminal` method to `auth/login`. Thus an agent that advertises no
+    /// `authMethods` entry, or `terminal` entries only, keeps this default.
     ///
     /// - Parameter params: The login request, naming the method to use.
     /// - Returns: The login response.
@@ -96,8 +100,12 @@ public protocol Agent: Sendable {
 
     /// Logs out of the agent.
     ///
-    /// Required only when this agent's `initialize` response advertises at
-    /// least one `authMethods` entry; clients must not call it otherwise.
+    /// This agent must supply this method only when its `initialize` response
+    /// advertises an `authMethods` entry that is not a `terminal` method. The
+    /// client never sends a `terminal` method to `auth/login`, thus a
+    /// `terminal` entry opens no authenticated session for `auth/logout` to
+    /// end. An agent that advertises no `authMethods` entry, or `terminal`
+    /// entries only, keeps this default.
     ///
     /// - Parameter params: The logout request.
     /// - Returns: The logout response.

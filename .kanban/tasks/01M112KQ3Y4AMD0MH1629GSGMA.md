@@ -45,10 +45,27 @@ comments:
     - evidence: 2 files — Tests/FoundationModelsACPTests/TaggedUnionRoundTripTests.swift (4 new tests, 1 new private helper, 1 doc-comment number corrected), Tests/FoundationModelsACPTests/AuthCapabilitiesRoundTripTests.swift (new file, 7 tests). `swift build` clean. `swift test`: 264 tests in 25 suites and 107 tests in 14 suites, 0 failures, 0 warnings, 0 skipped. `swift test --package-path IntegrationTests`: 6 tests in 2 suites, all passed.
     - next: /review
   timestamp: 2026-08-27T08:21:56.551858+00:00
+- actor: claude-code
+  id: 01m11581s14yv19yh1b4mzemyn
+  text: |-
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit edd5871) — 0 findings, 0 confirmed, 0 refuted; 7 validator pairs attempted, 0 failed, 0 skipped. 2 files reviewed: `Tests/FoundationModelsACPTests/TaggedUnionRoundTripTests.swift`, `Tests/FoundationModelsACPTests/AuthCapabilitiesRoundTripTests.swift`. 4 `.kanban/` files excluded by `.reviewignore`.
+    - next: no prior findings sections and no new findings — task moved to `done`.
+  timestamp: 2026-08-27T08:26:38.241996+00:00
+- actor: claude-code
+  id: 01m1158jazhr73jj341ypccz0r
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 2 files (Tests/FoundationModelsACPTests/TaggedUnionRoundTripTests.swift: 4 fixtures, 1 helper, corrected tag count; Tests/FoundationModelsACPTests/AuthCapabilitiesRoundTripTests.swift: new suite, 7 tests)
+    - test: green — swift test 107 tests passed; IntegrationTests 6 tests passed; 0 failures, 0 warnings, 0 skipped
+    - commit: edd5871
+    - review: clean — 0 findings, 7 validator pairs attempted, 0 failed
+    - next: task in done; proceed to ^skm9j5t
+  timestamp: 2026-08-27T08:26:55.199301+00:00
 depends_on:
 - 01M112K7M506DDHQ3SN6QDCGGY
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9980'
 title: Add round-trip tests for terminal auth method and client auth capabilities
 ---
 ## What

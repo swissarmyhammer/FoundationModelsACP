@@ -5,10 +5,15 @@ import Testing
 /// A minimal `Agent` conformer implementing only the session baseline, to
 /// prove that a conforming type needs nothing else to serve a session.
 private struct BaselineAgent: Agent {
+    /// The `authMethods` list this agent reports from `initialize`. `nil`,
+    /// the default, advertises none.
+    var advertisedAuthMethods: [AuthMethod]?
+
     func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
         InitializeResponse(
             info: Implementation(name: "baseline-agent", version: "0.0.0"),
             protocolVersion: .v2,
+            authMethods: advertisedAuthMethods,
             capabilities: AgentCapabilities(session: SessionCapabilities())
         )
     }
@@ -186,6 +191,38 @@ private struct FullAgent: Agent {
         #expect(logoutResponse == LogoutAuthResponse())
     }
 
+    @Test func terminalOnlyAuthMethodsKeepTheThrowingLoginDefault() async throws {
+        // `AuthMethodTerminal` in the vendored schema says the client must
+        // not pass a terminal method to `auth/login`. Thus an agent that
+        // advertises terminal auth alone has no `auth/login` obligation, and
+        // the throwing default stays correct for it.
+        let terminal = AuthMethodTerminal(
+            methodId: AuthMethodId(rawValue: "terminal"),
+            name: "Terminal login"
+        )
+        let agent = BaselineAgent(advertisedAuthMethods: [.terminal(terminal)])
+
+        let initResponse = try await agent.initialize(
+            InitializeRequest(info: Implementation(name: "test-client", version: "1.0.0"), protocolVersion: .v2)
+        )
+        #expect(initResponse.authMethods == [.terminal(terminal)])
+
+        await #expect(throws: RequestError.self) {
+            _ = try await agent.loginAuth(LoginAuthRequest(methodId: terminal.methodId))
+        }
+    }
+
+    @Test func loginAndLogoutDocsExcludeTerminalMethodsFromTheLoginObligation() throws {
+        // The two doc comments once claimed that any `authMethods` entry
+        // makes `auth/login` necessary. The vendored schema contradicts that
+        // for terminal methods, so both comments must name the exception.
+        let source = try sourceOfAgentProtocolFile()
+        for declaration in ["func loginAuth(", "func logoutAuth("] {
+            let doc = try #require(docComment(above: declaration, in: source))
+            #expect(doc.contains("terminal"), "\(declaration) doc must name the terminal-method exception")
+        }
+    }
+
     @Test func sessionDeleteIsGatedAndOverridableIndependently() async throws {
         let withoutDelete = BaselineAgent()
         await #expect(throws: RequestError.self) {
@@ -198,12 +235,13 @@ private struct FullAgent: Agent {
     }
 
     @Test func agentCarriesNoUnstableOnlyMethod() throws {
-        // Elicitation graduated to the stable surface in the pinned schema
-        // revision — but it routes to the *client* side, so no elicitation
-        // method belongs on `Agent` either way. What must never appear here
-        // is any method the unstable manifest alone routes (`session/fork`,
-        // `nes/*`, `providers/*`, `document/did*`, `mcp/*`). Checked against
-        // the generated unstable handler names rather than prose keywords.
+        // Elicitation graduated to the stable surface in the vendored
+        // `schema-v2.0.0-alpha.3` — but it routes to the *client* side, so no
+        // elicitation method belongs on `Agent` either way. What must never
+        // appear here is any method the unstable manifest alone routes
+        // (`session/fork`, `nes/*`, `providers/*`, `document/did*`, `mcp/*`).
+        // Checked against the generated unstable handler names rather than
+        // prose keywords.
         let source = try sourceOfAgentProtocolFile()
         for handlerName in Unstable.MethodTable.methods.map(\.handlerName) {
             #expect(!source.contains("func \(handlerName)("), "\(handlerName) is unstable-only; it must not appear on Agent")

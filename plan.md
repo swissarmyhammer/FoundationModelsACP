@@ -82,7 +82,7 @@ this out in the milestone that restores it, because it is easy to lose quietly:
 - Every connection, transport, replay, and end-to-end test — **M3** onward.
 
 **Resolved by M0.** `Schema/` now holds `acp-v2.json` and both meta manifests,
-vendored from the tagged pre-release `schema-v2.0.0-alpha.2`;
+vendored from the tagged pre-release `schema-v2.0.0-alpha.3`;
 `SchemaSet.acpV2` / `GeneratorConfig.acpV2` point at them, generation is
 idempotent, and the CI codegen diff gate passes again. v2 **does** publish an
 unstable manifest, so the generator's `Unstable` namespace is live code, not
@@ -200,9 +200,9 @@ field and `null` both mean the client gives no elicitation support.
 **Unstable-only, and nothing may be built on it** (`acp-v2.meta.unstable.json`,
 routed by name and side only): `mcp/connect`, `mcp/message`, `mcp/disconnect`,
 `session/fork`, `providers/list` / `providers/set` / `providers/disable`,
-`nes/*`, and `document/did*`. Elicitation is **stable** in the pinned upstream
-commit `7a13081`: `elicitation/create` and `elicitation/complete` route on the
-stable client surface, and this package implements them.
+`nes/*`, and `document/did*`. Elicitation is **stable** in the vendored
+`schema-v2.0.0-alpha.3`: `elicitation/create` and `elicitation/complete` route
+on the stable client surface, and this package implements them.
 
 **`session/update` carries everything that happens** — the sixteen variants the
 schema lists, in order: `user_message_chunk`, `user_message`,
@@ -375,9 +375,10 @@ replayable script.
 ## Milestones
 
 - [x] **M0 — Vendor v2 and restart the pipeline.** `acp-v2.json` and both meta
-  manifests vendored from `schema-v2.0.0-alpha.2`; `SchemaSet.acpV2` /
-  `GeneratorConfig.acpV2` re-pointed; the generator taught v2's `anyOf` union
-  vocabulary; plugin, content-hash no-op, and CI diff gate green. The method and
+  manifests vendored from `schema-v2.0.0-alpha.3` (a later re-vendor replaced
+  M0's first artifact set); `SchemaSet.acpV2` / `GeneratorConfig.acpV2`
+  re-pointed; the generator taught v2's `anyOf` union vocabulary; plugin,
+  content-hash no-op, and CI diff gate green. The method and
   payload inventory above is now read off the schema, and every question the
   plan had open about it — `session/delete`, the `session/update` variant list,
   display terminals, `mcp/*`, message deletion — is answered in place.
@@ -430,12 +431,12 @@ replayable script.
 - [x] **M8 — Permissions.** `session/request_permission` with `title` /
   `description` / tagged `subject` (`tool_call` or `command`, the latter
   optionally naming a `terminalId`). **Elicitation is now stable and
-  implemented** — the pinned upstream commit `7a13081` promotes
-  `elicitation/create` and `elicitation/complete` to the stable client
+  implemented** — the vendored `schema-v2.0.0-alpha.3` holds
+  `elicitation/create` and `elicitation/complete` on the stable client
   surface. `Client` carries `createElicitation` and `elicitationComplete`,
   both connections route them, and `ElicitationLifecycleTests` covers the
-  lifecycle. (At M8 time the vendored `schema-v2.0.0-alpha.2` held them
-  unstable-only, so M8 deferred them; the re-vendor picked them up.)
+  lifecycle. (At M8 time the vendored schema held them unstable-only, so M8
+  deferred them; the re-vendor picked them up.)
 - [x] **M9 — Replay and interop.** `ReplayTransport` recovered from git history
   (protocol-version-agnostic, as M3's connection layer was) and re-tested on
   its own mechanics, plus a session-level fixture proving unrecognized enum

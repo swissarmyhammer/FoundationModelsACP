@@ -2,8 +2,8 @@
 ///
 /// Stable v2 gives the client four entry points, and all four are required
 /// members with no default: v2 removed `fs/*` and `terminal/*` outright, and
-/// the pinned schema revision promotes elicitation to the stable surface —
-/// `elicitation/create` and `elicitation/complete` route beside
+/// the vendored `schema-v2.0.0-alpha.3` holds elicitation on the stable
+/// surface — `elicitation/create` and `elicitation/complete` route beside
 /// `session/request_permission` and `session/update`. `ClientCapabilities`
 /// gates elicitation behind its `elicitation` field, where omitted and `null`
 /// both mean no support.

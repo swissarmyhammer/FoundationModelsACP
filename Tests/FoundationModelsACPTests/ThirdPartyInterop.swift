@@ -7,7 +7,7 @@
 ///
 /// ## Why deferred
 ///
-/// v2 is a **draft** (`schema-v2.0.0-alpha.2`): `plan.md`'s own "Decision: v2
+/// v2 is a **draft** (`schema-v2.0.0-alpha.3`): `plan.md`'s own "Decision: v2
 /// only" section notes the plan was written from a handful of doc pages plus
 /// the migration guide, and that the migration guide has already proven to
 /// run ahead of the schema. Both consumers this wire is for —
