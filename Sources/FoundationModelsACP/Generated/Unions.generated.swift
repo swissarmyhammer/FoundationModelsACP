@@ -5,6 +5,10 @@
 ///
 /// The `type` field acts as the discriminator in the serialized JSON form.
 public enum AuthMethod: Codable, Hashable, Sendable {
+    /// Client runs the configured agent program as a separate interactive
+    /// process, without passing this method to `auth/login`.
+    case terminal(AuthMethodTerminal)
+
     /// Agent handles authentication itself through `auth/login`.
     ///
     /// The `type` discriminator value is `agent`.
@@ -25,6 +29,7 @@ public enum AuthMethod: Codable, Hashable, Sendable {
     }
 
     private enum Tag: String {
+        case terminal = "terminal"
         case agent = "agent"
     }
 
@@ -40,6 +45,8 @@ public enum AuthMethod: Codable, Hashable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let discriminator = try container.decode(String.self, forKey: .type)
         switch Tag(rawValue: discriminator) {
+        case .terminal:
+            self = .terminal(try AuthMethodTerminal(from: decoder))
         case .agent:
             self = .agent(try AuthMethodAgent(from: decoder))
         case nil:
@@ -55,6 +62,9 @@ public enum AuthMethod: Codable, Hashable, Sendable {
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
+        case .terminal(let payload):
+            try container.encode(Tag.terminal.rawValue, forKey: .type)
+            try payload.encode(to: encoder)
         case .agent(let payload):
             try container.encode(Tag.agent.rawValue, forKey: .type)
             try payload.encode(to: encoder)

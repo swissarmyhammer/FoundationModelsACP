@@ -5,26 +5,16 @@ vendored byte-identical from upstream.
 
 ## Vendored version
 
-- **Source:** upstream `main`, pinned to commit
-  `7a13081ae8cb2b93d02ea0c8b538c4f3a086768c` (2026-08-19). The newest tag,
-  `schema-v2.0.0-alpha.2`, does not contain the promotion of elicitation to
-  the stable client surface. This package needs that promotion. A pinned
-  commit is immutable: you can get the same bytes again from
-  `https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/<commit>/schema/v2/<file>`.
-  When upstream publishes the next `schema-v*` tag, move back to that tag.
+- **Source:** the upstream tag `schema-v2.0.0-alpha.3`, released 2026-08-20. A
+  tag does not move. Thus you can get the same bytes again from the release
+  assets at
+  `https://github.com/agentclientprotocol/agent-client-protocol/releases/tag/schema-v2.0.0-alpha.3`.
 
-| Vendored file | Upstream file at pinned commit | SHA-256 |
+| Vendored file | Upstream release asset | SHA-256 |
 |---|---|---|
-| `acp-v2.json` | `schema/v2/schema.json` | `9480f7224002f60725e2bd509725c40cd76bd391627a95d62d08d1b2e948e43c` |
-| `acp-v2.meta.json` | `schema/v2/meta.json` | `ad94c01f2736416776fd53d66e3aaf89242ab72d99832664f39d6ab41e049736` |
-| `acp-v2.meta.unstable.json` | `schema/v2/meta.unstable.json` | `2c274308d2a773628bf6316b7f6c535cf87d2c1ceb495d02be9ee899dce0f0bc` |
-
-Differences from `schema-v2.0.0-alpha.2`: the pinned commit promotes
-elicitation (`elicitation/create`, `elicitation/complete`, the
-`ClientCapabilities.elicitation` field, and 26 `Elicitation*` /
-`*PropertySchema` definitions) from unstable to stable. All other changes
-are documentation strings only. `meta.unstable.json` is byte-identical to
-the tagged release.
+| `acp-v2.json` | `schema.json` | `36e8270fb12d4d067005cc02f729f5433930e6834ab4a72260838ee096d62378` |
+| `acp-v2.meta.json` | `meta.json` | `ad94c01f2736416776fd53d66e3aaf89242ab72d99832664f39d6ab41e049736` |
+| `acp-v2.meta.unstable.json` | `meta.unstable.json` | `2c274308d2a773628bf6316b7f6c535cf87d2c1ceb495d02be9ee899dce0f0bc` |
 
 `acp-v2.json` is the JSON Schema (draft 2020-12) with all protocol types under
 `$defs`. The meta manifests map method identifiers to wire method names in

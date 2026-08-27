@@ -1,0 +1,1 @@
+{"id":"01M112K7M6W6BF5P0NSJB41VMH","timestamp":"2026-08-27T07:40:18.950980Z","op":"create","item_id":"01M112K7M6E5PHWQ5VJNXPA0PJ","forward_patch":"--- original\n+++ modified\n@@ -0,0 +1,2 @@\n+color: e4e669\n+tag_name: schema-alpha3\n","reverse_patch":"--- original\n+++ modified\n@@ -1,2 +0,0 @@\n-color: e4e669\n-tag_name: schema-alpha3\n","transaction_id":null}
