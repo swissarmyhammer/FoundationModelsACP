@@ -152,10 +152,28 @@ comments:
     - `git status --porcelain -- Sources/` is empty. No source file has a change.
     - next: the task is clean. It can move to review.
   timestamp: 2026-08-27T08:49:51.248370+00:00
+- actor: claude-code
+  id: 01m116nwt1dev2bfzrn49y6awv
+  text: |
+    ### review — clean
+    - evidence: `review sha HEAD~1..HEAD` (commit 80c983b) — 0 findings, 0 confirmed, 0 refuted, 7 attempted, 0 failed. 1 file reviewed (`Tests/FoundationModelsACPTests/AgentProtocolTests.swift`), 2 files excluded by `.reviewignore` (`.kanban/`).
+    - prior findings: the one item from the 2026-08-27 03:39 section is checked and genuinely done — `terminalOnlyAuthMethodsKeepTheThrowingAuthDefaults` now asserts `RequestError` from `logoutAuth` as well as `loginAuth` for a terminal-only agent.
+    - next: task moved to `done`. No open findings.
+  timestamp: 2026-08-27T08:51:40.481568+00:00
+- actor: claude-code
+  id: 01m116pbcxym83z42vmpw54yec
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 1 file (Tests/FoundationModelsACPTests/AgentProtocolTests.swift, +9/-2); the terminal-only guard test is renamed to terminalOnlyAuthMethodsKeepTheThrowingAuthDefaults and now covers logoutAuth
+    - test: green — swift test 107 tests passed; IntegrationTests 6 tests passed; DocC --warnings-as-errors exit 0
+    - commit: 80c983b
+    - review: clean — 0 findings, 7 validator pairs attempted, 0 failed; the prior finding is checked and addressed
+    - next: task in done; the schema-alpha3 scope is clear
+  timestamp: 2026-08-27T08:51:55.421440+00:00
 depends_on:
 - 01M112K7M506DDHQ3SN6QDCGGY
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: 9a80
 title: Sweep stale schema-pin references and fix loginAuth/logoutAuth DocC for terminal auth
 ---
 ## What
