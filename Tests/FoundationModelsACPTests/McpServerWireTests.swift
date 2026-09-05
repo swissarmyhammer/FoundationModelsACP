@@ -91,10 +91,18 @@ import Testing
         }
     }
 
-    @Test func stdioCommandMustBeAbsolute() throws {
-        #expect(throws: DecodingError.self) {
-            try WireRoundTrip.decode(MCPServer.self, from: #"{"type":"stdio","name":"local","command":"bin/server"}"#)
+    @Test func stdioCommandKeepsARelativePathAsSent() throws {
+        // The schema types `command` as `AbsolutePath`, a bare string whose
+        // rule is prose only. The value is carried as sent so the agent can
+        // validate it (`WireInvariantTests.relativePathDecodesAsTheSchemaSays`).
+        let server = try WireRoundTrip.expectLossless(
+            MCPServer.self, #"{"type":"stdio","name":"local","command":"bin/server"}"#
+        )
+        guard case .stdio(let payload) = server else {
+            Issue.record("expected .stdio, got \(server)")
+            return
         }
+        #expect(payload.command.rawValue == "bin/server")
     }
 
     @Test func resumeSessionRequestAcceptsMcpServersJustAsNewSessionDoes() throws {

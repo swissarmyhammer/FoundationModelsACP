@@ -1,27 +1,19 @@
-/// A file path that is guaranteed absolute — the ACP wire invariant (spec §4).
+/// A file-system path on the ACP wire: the schema's `AbsolutePath` `$def`.
 ///
-/// All paths crossing the protocol boundary must be absolute; a relative path
-/// is rejected at construction and at decode so it becomes a compile- or
-/// decode-time error instead of a silent interop bug. Wire coding comes from
-/// ``WireRawValueCodable``, which re-validates through `init?(rawValue:)`.
+/// The schema gives this definition the type `string`. It states the rule in
+/// prose only: the path must be absolute. The protocol names no validator.
+/// The agent owns the file system, so the agent checks the path and answers
+/// JSON-RPC invalid params when the path is not absolute. This type carries
+/// the value as sent, so that check can run. It does not refuse a value.
+/// Wire coding comes from ``WireRawValueCodable``.
 public struct AbsolutePath: WireRawValueCodable, Hashable, Sendable {
-    /// The absolute path string, always beginning with `/`.
+    /// The path string, as sent on the wire.
     public let rawValue: String
 
-    /// Creates an absolute path, rejecting relative input.
+    /// Creates a path from its wire string.
     ///
-    /// - Parameter rawValue: The candidate path string.
-    /// - Returns: `nil` unless `rawValue` begins with `/`.
-    public init?(rawValue: String) {
-        guard rawValue.hasPrefix("/") else { return nil }
+    /// - Parameter rawValue: The path string, accepted as given.
+    public init(rawValue: String) {
         self.rawValue = rawValue
-    }
-
-    /// Explains a rejected wire value in `DecodingError` messages.
-    ///
-    /// - Parameter rawValue: The relative path that was rejected.
-    /// - Returns: A statement of the absolute-path wire invariant.
-    public static func invalidWireValueDescription(of rawValue: String) -> String {
-        "ACP paths must be absolute; got \"\(rawValue)\""
     }
 }

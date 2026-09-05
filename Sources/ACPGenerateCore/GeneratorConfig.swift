@@ -1,19 +1,21 @@
 /// Configuration for the schema generator, reviewed alongside the output.
 ///
 /// The wire-invariant field table below is the field→invariant-type mapping
-/// for invariants a schema states only in prose: such fields emit as
-/// `AbsolutePath` or `LineNumber` rather than bare `String`/`Int`, so a
-/// relative path or a 0-based line is a decode-time error. Invariant-mapped
-/// fields always decode strictly — the invariant wins over any
-/// `x-deserialize-default-on-error` annotation on the same field. A schema
-/// that gives the invariant its own definition (as ACP v2 does for
-/// `AbsolutePath`) needs no entries: the `$ref` carries the type, and the
-/// definition is listed in `handwrittenDefinitions` instead.
+/// for rules a schema states only in prose: such fields emit as
+/// `AbsolutePath` or `LineNumber` rather than bare `String`/`Int`, so the
+/// type name states the rule at each use. Invariant-mapped fields always
+/// decode strictly — a value of the wrong JSON type is a decode-time error,
+/// and the strict decode wins over any `x-deserialize-default-on-error`
+/// annotation on the same field. A schema that gives the rule its own
+/// definition (as ACP v2 does for `AbsolutePath`) needs no entries: the
+/// `$ref` carries the type, and the definition is listed in
+/// `handwrittenDefinitions` instead.
 public struct GeneratorConfig: Sendable {
     /// A hand-written invariant-carrying newtype a schema field can map to.
     public enum InvariantType: String, Sendable {
-        /// The field carries a file path that must be absolute; it emits as
-        /// the hand-written `AbsolutePath`, rejecting relative paths at decode.
+        /// The field carries a file path the schema says must be absolute; it
+        /// emits as the hand-written `AbsolutePath`, which carries the value
+        /// as sent so the agent can validate it.
         case absolutePath = "AbsolutePath"
 
         /// The field carries a 1-based line number; it emits as the
@@ -135,7 +137,8 @@ public struct GeneratorConfig: Sendable {
             "HTTP",
         ],
         handwrittenDefinitions: [
-            // Hand-written in Core, rejecting relative paths at decode.
+            // Hand-written in Core. The schema states the absolute-path rule
+            // in prose, and the agent enforces it.
             "AbsolutePath",
             // Hand-written in Core with the negotiated-version invariant.
             "ProtocolVersion",

@@ -96,7 +96,7 @@ private struct FullAgent: Agent {
 
 /// `Agent` — the role protocol a client drives.
 @Suite struct AgentProtocolTests {
-    private static let cwd = AbsolutePath(rawValue: "/tmp")!
+    private static let cwd = AbsolutePath(rawValue: "/tmp")
 
     @Test func conformerImplementingOnlyTheBaselineCompilesAndServesASession() async throws {
         // The whole point: a type declaring only the six baseline methods

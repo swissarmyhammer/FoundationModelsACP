@@ -142,7 +142,7 @@ import Testing
     // MARK: - Fixtures
 
     private static let sessionId = SessionId(rawValue: "s1")
-    private static let workingDirectory = AbsolutePath(rawValue: "/work")!
+    private static let workingDirectory = AbsolutePath(rawValue: "/work")
 
     // MARK: - Agent-side coverage
 

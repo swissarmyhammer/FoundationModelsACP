@@ -1859,8 +1859,9 @@ public struct SchemaGenerator: Sendable {
 
     /// Chooses how the generated `init(from:)` decodes a property.
     ///
-    /// Wire invariants win over forgiving annotations: a relative path or
-    /// 0-based line must stay a decode-time error.
+    /// Wire invariants win over forgiving annotations: an invariant-mapped
+    /// field decodes strictly, so a value of the wrong JSON type stays a
+    /// decode-time error.
     ///
     /// - Parameters:
     ///   - of: The property's schema fragment.

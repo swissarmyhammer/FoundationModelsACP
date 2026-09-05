@@ -12,12 +12,12 @@ import Testing
 /// and `RequestPermissionSubject`, complementing the generic tag-exhaustiveness
 /// coverage `TaggedUnionRoundTripTests` already gives every union including this
 /// one — what that generic coverage cannot give is a real `command` payload
-/// (required `command` + absolute `cwd`, optional `toolCallId`/`terminalId`) or
-/// the absolute-path invariant enforced at decode time. The second half proves,
-/// with the real `Agent`/`Client` connection rather than a raw `Connection`
-/// stand-in, that a pending permission request never blocks the read loop that
-/// keeps other traffic — like a concurrent `session/update` — flowing on the
-/// same connection.
+/// (required `command` + `cwd`, optional `toolCallId`/`terminalId`) or the
+/// proof that a relative `cwd` is carried as sent for the agent to validate.
+/// The second half proves, with the real `Agent`/`Client` connection rather
+/// than a raw `Connection` stand-in, that a pending permission request never
+/// blocks the read loop that keeps other traffic — like a concurrent
+/// `session/update` — flowing on the same connection.
 @Suite struct PermissionRequestTests {
     // MARK: - RequestPermissionRequest: title/description/subject
 
@@ -76,23 +76,21 @@ import Testing
         #expect(command.terminalId == TerminalId(rawValue: "term-1"))
     }
 
-    @Test func commandSubjectWithARelativeCwdFailsDecodingWithAClearError() throws {
-        // The invariant the type system enforces: `AbsolutePath` rejects a
-        // relative wire value at decode time, same as every other absolute-path
-        // field in the schema (`WireInvariantTests.relativePathFailsDecodingWithAClearError`)
-        // — this pins it specifically for `CommandPermissionSubject.cwd`, which
-        // the task calls out as required to be absolute.
-        let json = """
+    @Test func commandSubjectKeepsARelativeCwdAsSent() throws {
+        // The schema states in prose that `cwd` must be absolute, and it
+        // names no validator. `AbsolutePath` carries the wire value as sent,
+        // same as every other path field
+        // (`WireInvariantTests.relativePathDecodesAsTheSchemaSays`), so the
+        // agent can validate it and answer invalid params. This pins that for
+        // `CommandPermissionSubject.cwd`.
+        let subject = try WireRoundTrip.expectLossless(RequestPermissionSubject.self, """
             {"type":"command","command":"npm test","cwd":"project"}
-            """
-        let error = #expect(throws: DecodingError.self) {
-            try WireRoundTrip.decode(RequestPermissionSubject.self, from: json)
-        }
-        guard case .dataCorrupted(let context) = try #require(error) else {
-            Issue.record("expected a dataCorrupted error, got \(String(describing: error))")
+            """)
+        guard case .command(let command) = subject else {
+            Issue.record("expected .command, got \(subject)")
             return
         }
-        #expect(context.debugDescription == #"ACP paths must be absolute; got "project""#)
+        #expect(command.cwd.rawValue == "project")
     }
 
     // MARK: - Elicitation is a stable sibling, not this suite's subject

@@ -32,7 +32,7 @@ private let standardTestTimeout = 1  // minute
     fileprivate static let toolCallId = ToolCallId(rawValue: "call-1")
     fileprivate static let terminalId = TerminalId(rawValue: "term-1")
     fileprivate static let permissionOptionId = PermissionOptionId(rawValue: "allow-once")
-    fileprivate static let workingDirectory = AbsolutePath(rawValue: "/work")!
+    fileprivate static let workingDirectory = AbsolutePath(rawValue: "/work")
 
     // MARK: - The scripted agent
 

@@ -417,7 +417,7 @@ private let selectConfigOption = SessionConfigOption(
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
 
-        let cwd = try #require(AbsolutePath(rawValue: "/work/one"))
+        let cwd = AbsolutePath(rawValue: "/work/one")
         let created = try await client.newSession(NewSessionRequest(cwd: cwd))
 
         let listed = try await client.listSessions(ListSessionsRequest())
@@ -434,8 +434,8 @@ private let selectConfigOption = SessionConfigOption(
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
 
-        let cwdOne = try #require(AbsolutePath(rawValue: "/work/one"))
-        let cwdTwo = try #require(AbsolutePath(rawValue: "/work/two"))
+        let cwdOne = AbsolutePath(rawValue: "/work/one")
+        let cwdTwo = AbsolutePath(rawValue: "/work/two")
         let sessionOne = try await client.newSession(NewSessionRequest(cwd: cwdOne)).sessionId
         _ = try await client.newSession(NewSessionRequest(cwd: cwdTwo))
 
@@ -456,7 +456,7 @@ private let selectConfigOption = SessionConfigOption(
         }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
 
-        let cwd = try #require(AbsolutePath(rawValue: "/work"))
+        let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
 
         // Two config changes happen before anyone subscribes, so they land
@@ -500,7 +500,7 @@ private let selectConfigOption = SessionConfigOption(
         }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
 
-        let cwd = try #require(AbsolutePath(rawValue: "/work"))
+        let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
 
         // A history entry exists before anyone subscribes, so there is
@@ -535,7 +535,7 @@ private let selectConfigOption = SessionConfigOption(
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
 
-        let cwd = try #require(AbsolutePath(rawValue: "/work"))
+        let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
         let payload = JSONValue.object(["offset": .number(42)])
         let cursor = ReplayFrom.unknown("checkpoint", payload)
@@ -561,8 +561,8 @@ private let selectConfigOption = SessionConfigOption(
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
 
-        let cwd = try #require(AbsolutePath(rawValue: "/work"))
-        let otherCwd = try #require(AbsolutePath(rawValue: "/elsewhere"))
+        let cwd = AbsolutePath(rawValue: "/work")
+        let otherCwd = AbsolutePath(rawValue: "/elsewhere")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
 
         await #expect(throws: RequestError.self) {
@@ -581,7 +581,7 @@ private let selectConfigOption = SessionConfigOption(
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
 
-        let cwd = try #require(AbsolutePath(rawValue: "/work"))
+        let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
 
         var updates = client.updates(for: session).makeAsyncIterator()
@@ -613,7 +613,7 @@ private let selectConfigOption = SessionConfigOption(
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
 
-        let cwd = try #require(AbsolutePath(rawValue: "/work"))
+        let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
 
         var updates = client.updates(for: session).makeAsyncIterator()
@@ -657,7 +657,7 @@ private let selectConfigOption = SessionConfigOption(
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
 
-        let cwd = try #require(AbsolutePath(rawValue: "/work"))
+        let cwd = AbsolutePath(rawValue: "/work")
         let toDelete = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
         let toKeep = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
 
@@ -705,7 +705,7 @@ private let selectConfigOption = SessionConfigOption(
         }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
 
-        let cwd = try #require(AbsolutePath(rawValue: "/work"))
+        let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
         var updates = client.updates(for: session).makeAsyncIterator()
 
@@ -742,7 +742,7 @@ private let selectConfigOption = SessionConfigOption(
         }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
 
-        let cwd = try #require(AbsolutePath(rawValue: "/work"))
+        let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
         var updates = client.updates(for: session).makeAsyncIterator()
 
@@ -786,7 +786,7 @@ private let selectConfigOption = SessionConfigOption(
         }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
 
-        let cwd = try #require(AbsolutePath(rawValue: "/work"))
+        let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
 
         await #expect(throws: RequestError.self) {
@@ -801,24 +801,23 @@ private let selectConfigOption = SessionConfigOption(
         await client.close()
     }
 
-    // MARK: Wire invariants: absolute cwd
+    // MARK: The cwd is carried as sent; the agent validates it
 
-    @Test func newSessionRequestRejectsARelativeCwdAtDecodeTime() throws {
-        #expect(throws: DecodingError.self) {
-            try WireRoundTrip.decode(NewSessionRequest.self, from: #"{"cwd":"relative/path"}"#)
-        }
+    @Test func newSessionRequestKeepsARelativeCwdAsSent() throws {
+        let request = try WireRoundTrip.expectLossless(NewSessionRequest.self, #"{"cwd":"relative/path"}"#)
+        #expect(request.cwd.rawValue == "relative/path")
     }
 
-    @Test func resumeSessionRequestRejectsARelativeCwdAtDecodeTime() throws {
-        #expect(throws: DecodingError.self) {
-            try WireRoundTrip.decode(ResumeSessionRequest.self, from: #"{"cwd":"relative/path","sessionId":"s"}"#)
-        }
+    @Test func resumeSessionRequestKeepsARelativeCwdAsSent() throws {
+        let request = try WireRoundTrip.expectLossless(
+            ResumeSessionRequest.self, #"{"cwd":"relative/path","sessionId":"s"}"#
+        )
+        #expect(request.cwd.rawValue == "relative/path")
     }
 
-    @Test func listSessionsRequestRejectsARelativeCwdFilterAtDecodeTime() throws {
-        #expect(throws: DecodingError.self) {
-            try WireRoundTrip.decode(ListSessionsRequest.self, from: #"{"cwd":"relative/path"}"#)
-        }
+    @Test func listSessionsRequestKeepsARelativeCwdFilterAsSent() throws {
+        let request = try WireRoundTrip.expectLossless(ListSessionsRequest.self, #"{"cwd":"relative/path"}"#)
+        #expect(request.cwd?.rawValue == "relative/path")
     }
 
     // MARK: v1's `modes` field is gone

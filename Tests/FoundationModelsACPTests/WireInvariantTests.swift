@@ -3,26 +3,25 @@ import Testing
 
 @testable import FoundationModelsACP
 
-/// The invariants the type system is supposed to enforce at decode time, and
-/// the one v1 enforced that v2 does not state.
+/// What the wire types check at decode time, what they carry through as the
+/// schema states it, and the one rule v1 enforced that v2 does not state.
 @Suite struct WireInvariantTests {
-    @Test func relativePathFailsDecodingWithAClearError() throws {
-        // The point of the newtype: a relative path is a decode-time error at
-        // the protocol boundary, not a surprise three layers up in whatever
-        // opens the file.
-        let json = """
+    @Test func relativePathDecodesAsTheSchemaSays() throws {
+        // The schema types `AbsolutePath` as a bare string and states the
+        // absolute-path rule in prose only. The agent owns the file system,
+        // so the agent validates the path and answers invalid params. This
+        // package carries the value as sent, so that check can run.
+        let location = try WireRoundTrip.expectLossless(ToolCallLocation.self, """
             {"path":"src/main.swift"}
-            """
-        let error = #expect(throws: DecodingError.self) {
-            try WireRoundTrip.decode(ToolCallLocation.self, from: json)
-        }
-        guard case .dataCorrupted(let context) = try #require(error) else {
-            Issue.record("expected a dataCorrupted error, got \(String(describing: error))")
-            return
-        }
-        // The message has to name the invariant, or a caller reading the log
-        // learns only that "something" failed to decode.
-        #expect(context.debugDescription == #"ACP paths must be absolute; got "src/main.swift""#)
+            """)
+        #expect(location.path.rawValue == "src/main.swift")
+    }
+
+    @Test func anyStringIsAnAbsolutePathValue() {
+        // The initializer mirrors the schema: a named string type with no
+        // guard. An empty string and a relative path are values, not `nil`.
+        #expect(AbsolutePath(rawValue: "").rawValue == "")
+        #expect(AbsolutePath(rawValue: "src").rawValue == "src")
     }
 
     @Test func absolutePathDecodesAndRoundTripsAsABareString() throws {
@@ -31,12 +30,6 @@ import Testing
             """)
         #expect(location.path == AbsolutePath(rawValue: "/src/main.swift"))
         #expect(location.line == 12)
-    }
-
-    @Test func emptyPathIsRejectedToo() throws {
-        // `hasPrefix("/")` is false for the empty string, so the boundary case
-        // lands on the right side of the invariant.
-        #expect(AbsolutePath(rawValue: "") == nil)
     }
 
     @Test func toolCallLocationAcceptsLineZero() throws {
@@ -83,7 +76,7 @@ import Testing
     @Test func aMalformedPathStillFailsTheMessage() throws {
         // The inverse of the case above, and the reason it is safe: forgiving
         // decoding is opt-in per field. `path` is not annotated, so it decodes
-        // strictly and the invariant cannot be degraded away.
+        // strictly and a value that is not a string fails the message.
         #expect(throws: DecodingError.self) {
             try WireRoundTrip.decode(ToolCallLocation.self, from: """
                 {"path":42}

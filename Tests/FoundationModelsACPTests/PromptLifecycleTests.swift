@@ -342,7 +342,7 @@ private struct LoggingTransport: ACPTransport {
 
 /// The working directory every test session is created under; its value
 /// never matters to these tests, only that session creation succeeds.
-private let workingDirectory = AbsolutePath(rawValue: "/work")!
+private let workingDirectory = AbsolutePath(rawValue: "/work")
 
 /// How many fresh agent/client pairs `promptResponseArrivesBeforeTheFirstStateUpdate`
 /// drives through the same race: a single pass could observe the correct

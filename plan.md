@@ -266,9 +266,12 @@ when proxying**; values beginning with `_` are implementation-specific, and
 unknown non-underscore values are reserved for future versions. `_meta` follows
 patch semantics in updates.
 
-v2 gives absolute paths a first-class `AbsolutePath` definition, so the
-invariant rides the `$ref` and the generator needs no per-field override table —
-`AbsolutePath` is simply listed as hand-written in `GeneratorConfig.acpV2`.
+v2 gives absolute paths a first-class `AbsolutePath` definition, so the type
+rides the `$ref` and the generator needs no per-field override table —
+`AbsolutePath` is simply listed as hand-written in `GeneratorConfig.acpV2`. The
+schema states the absolute-path rule in prose and names no validator. The agent
+owns the file system, so the agent enforces the rule and answers invalid params.
+This package carries the path as sent, so that check can run.
 
 **There is no 1-based line-number invariant in v2.** The vendored schema has
 exactly one line-valued field, `ToolCallLocation.line`, described only as
@@ -351,8 +354,9 @@ replayable script.
 - **Unknown-value preservation** — decode a payload carrying an unrecognized enum
   case and a `_`-prefixed extension, re-encode, and assert nothing was dropped.
   This is a protocol requirement, not politeness.
-- **Conventions** — relative paths must fail at decode time. (v2 states no
-  line-number base, so there is no 0-based case to reject; see *Conventions*.)
+- **Conventions** — a relative path decodes as sent, so the agent can validate
+  it. (v2 states no line-number base, so there is no 0-based case to reject;
+  see *Conventions*.)
 
 ## Decisions
 
@@ -394,9 +398,10 @@ replayable script.
   and `data` would only be able to disagree with it; and now that `ErrorCode`
   generates, no code number is restated anywhere in hand-written source.
 
-  **Absolute paths ride the schema's own `AbsolutePath` `$def`**, so the
-  invariant reaches every path field through its `$ref` with no per-field
-  configuration. **No line-number invariant** — see *Conventions* above.
+  **Absolute paths ride the schema's own `AbsolutePath` `$def`**, so the type
+  reaches every path field through its `$ref` with no per-field configuration.
+  The schema states the rule, and the agent enforces it. **No line-number
+  invariant** — see *Conventions* above.
 
   **One conformance gap, deliberately left for M7.** Six upsert `_meta` fields
   say "Omitted means no metadata update; `null` is an explicit clear signal",

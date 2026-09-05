@@ -188,7 +188,7 @@ import Testing
 
     @Test func terminalUpdateOmittedNullAndValueFoldOntoPriorState() {
         var aggregator = SessionUpdateAggregator()
-        let cwd = try! #require(AbsolutePath(rawValue: "/work"))
+        let cwd = AbsolutePath(rawValue: "/work")
         aggregator.apply(
             .terminalUpdate(TerminalUpdate(terminalId: Self.terminalId, command: .value("ls"), cwd: .value(cwd)))
         )

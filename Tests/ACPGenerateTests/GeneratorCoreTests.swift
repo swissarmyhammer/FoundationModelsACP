@@ -230,7 +230,8 @@ import Testing
     @Test func wireInvariantFieldsDecodeStrictlyDespiteForgivingAnnotation() throws {
         let source = try miniatureOutput(named: "Models.generated.swift")
         // Invariant-mapped fields must not go through the forgiving helpers:
-        // a relative path or 0 line is a decode error, never a silent default.
+        // a value of the wrong JSON type is a decode error, never a silent
+        // default.
         #expect(source.contains("try container.decode(AbsolutePath.self, forKey: .cwd)"))
         #expect(source.contains("try container.decodeIfPresent(LineNumber.self, forKey: .line)"))
         #expect(source.contains("try container.decodeIfPresent([AbsolutePath].self, forKey: .additionalDirectories)"))
