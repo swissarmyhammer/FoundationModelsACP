@@ -15,3 +15,4 @@ Package.resolved
 .shell/
 .code-context/
 .claude/settings.local.json
+.kanban/mcp.*.log
