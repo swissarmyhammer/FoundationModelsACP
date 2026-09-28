@@ -12,7 +12,7 @@ private let sampleTracestate = "rojo=00f067aa0ba902b7,congo=t61rcWkgMzE"
 
 /// Tests for `TraceContextMeta`, the codec for the W3C `traceparent` and
 /// `tracestate` members of an ACP `_meta` object.
-@Suite struct TraceContextMetaTests {
+struct TraceContextMetaTests {
     // MARK: - traceparent validation
 
     @Test func aValidTraceparentWithoutTracestateIsAccepted() throws {
@@ -205,9 +205,12 @@ private let sampleTracestate = "rojo=00f067aa0ba902b7,congo=t61rcWkgMzE"
         #expect(context.inject(into: meta) == meta)
     }
 
-    @Test func injectThenExtractGivesTheSameValue() throws {
+    /// The round trip runs for a context without `tracestate` and for a
+    /// context with `tracestate`.
+    @Test(arguments: [nil, sampleTracestate] as [String?])
+    func injectThenExtractGivesTheSameValue(tracestate: String?) throws {
         let context = try #require(
-            TraceContextMeta(traceparent: validTraceparent, tracestate: sampleTracestate)
+            TraceContextMeta(traceparent: validTraceparent, tracestate: tracestate)
         )
         let meta = context.inject(into: .object(["other": .string("value")]))
         #expect(TraceContextMeta.extract(from: meta) == context)
@@ -215,9 +218,13 @@ private let sampleTracestate = "rojo=00f067aa0ba902b7,congo=t61rcWkgMzE"
 
     // MARK: - Wire round trip
 
-    @Test func aPromptRequestWithInjectedMetaRoundTripsOnTheWire() throws {
+    /// The wire round trip runs for a context without `tracestate` and for a
+    /// context with `tracestate`. Without `tracestate`, `_meta` on the wire
+    /// has no `tracestate` member.
+    @Test(arguments: [nil, sampleTracestate] as [String?])
+    func aPromptRequestWithInjectedMetaRoundTripsOnTheWire(tracestate: String?) throws {
         let context = try #require(
-            TraceContextMeta(traceparent: validTraceparent, tracestate: sampleTracestate)
+            TraceContextMeta(traceparent: validTraceparent, tracestate: tracestate)
         )
         let request = PromptRequest(
             prompt: [.text(TextContent(text: "hi"))],
@@ -226,15 +233,17 @@ private let sampleTracestate = "rojo=00f067aa0ba902b7,congo=t61rcWkgMzE"
         )
 
         let wire = try WireRoundTrip.encode(request)
-        let expectedMeta: JSONValue = .object([
+        var expectedMetaMembers: [String: JSONValue] = [
             "vendor.example/flag": .bool(true),
             "traceparent": .string(validTraceparent),
-            "tracestate": .string(sampleTracestate),
-        ])
+        ]
+        // A `nil` value removes the key, so a context without `tracestate`
+        // expects no `tracestate` member.
+        expectedMetaMembers["tracestate"] = tracestate.map(JSONValue.string)
         #expect(wire == .object([
             "prompt": .array([.object(["type": .string("text"), "text": .string("hi")])]),
             "sessionId": .string("s1"),
-            "_meta": expectedMeta,
+            "_meta": .object(expectedMetaMembers),
         ]))
 
         let decoded = try JSONDecoder().decode(PromptRequest.self, from: JSONEncoder().encode(request))

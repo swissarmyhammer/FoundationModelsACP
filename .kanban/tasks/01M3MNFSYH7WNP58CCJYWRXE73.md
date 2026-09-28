@@ -31,6 +31,42 @@ comments:
     - note: SwiftPM prints 6 "disk I/O error" warnings about its manifest cache. They come from the environment, not from the code.
     - next: review
   timestamp: 2026-09-28T19:02:35.433428+00:00
+- actor: claude-code
+  id: 01m3mpsn5rknmpgdmdxd1x9cyj
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD. 3 findings, 3 confirmed, 0 refuted. Tests/FoundationModelsACPTests/TraceContextMetaTests.swift:15, Tests/FoundationModelsACPTests/TraceContextMetaTests.swift:208, Tests/FoundationModelsACPTests/TraceContextMetaTests.swift:218
+    - next: Do the 3 open items in the "Review Findings (2026-09-28 14:03)" section. Then review again.
+  timestamp: 2026-09-28T19:10:18.808206+00:00
+- actor: claude-code
+  id: 01m3mptg5antbgm4gnzdck12at
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 2 new files
+    - test: green — swift test --parallel, 282 + 107 passed, 0 failed
+    - commit: 983da3b
+    - review: findings — Tests/FoundationModelsACPTests/TraceContextMetaTests.swift:15, Tests/FoundationModelsACPTests/TraceContextMetaTests.swift:208, Tests/FoundationModelsACPTests/TraceContextMetaTests.swift:218
+  timestamp: 2026-09-28T19:10:46.442069+00:00
+- actor: claude-code
+  id: 01m3mpz70s1gdqd53yk23s82cj
+  text: |-
+    Review findings fixed. All three changes are in Tests/FoundationModelsACPTests/TraceContextMetaTests.swift. No change to Sources.
+    - Finding 1 (redundantSwiftTestingSuite): I removed the `@Suite` attribute with no arguments. It was the only `@Suite` in the file.
+    - Findings 2 and 3 (inverse-operation-coverage): `injectThenExtractGivesTheSameValue` and `aPromptRequestWithInjectedMetaRoundTripsOnTheWire` are now parameterized with `@Test(arguments: [nil, sampleTracestate] as [String?])`. Thus each round trip runs for a context without `tracestate` and for a context with `tracestate`. These were the only two round-trip tests in the file. I used arguments, not a second copy of each test, so the duplication rule has no copy to report. The wire test builds the expected `_meta` members and sets `tracestate` with `tracestate.map(JSONValue.string)`. A `nil` value removes the key, so the test has no branch.
+    - Proof that the new cases can fail: the codec already supported a context without `tracestate`, so the new cases passed at once. For a short time I changed `injected(into:)` to write JSON `null` for a `nil` tracestate. The wire case with `tracestate` nil then failed (the wire had `"tracestate": null`). `injectReplacesAnEarlierTraceContext` also failed. I then reverted the change. `git diff` on Sources is empty.
+    - Note: the inject-then-extract case with `tracestate` nil does not fail under that change, because `extract` ignores a `tracestate` that is not a string. The round-trip property is still true in that case, so the test is correct.
+
+    ### implement: changed
+    - evidence: 1 file: Tests/FoundationModelsACPTests/TraceContextMetaTests.swift. `swift test --filter 'FoundationModelsACPTests.TraceContextMetaTests'`: 16 tests in 1 suite passed (the two round-trip tests now each have 2 test cases). `swift test --parallel`: 282 tests in 26 suites passed, and 107 tests in 14 suites passed, 0 failures. The only warnings are the 6 SwiftPM "disk I/O error" manifest cache warnings from the environment. No compiler warnings.
+    - next: test, then review
+  timestamp: 2026-09-28T19:13:20.921905+00:00
+- actor: claude-code
+  id: 01m3mq24hh6xq2d3k727sn744y
+  text: |-
+    ### test — green
+    - evidence: swift test --parallel: 282 tests in 26 suites passed, 107 tests in 14 suites passed, 0 failed, 0 skipped. swift build --build-tests -Xswiftc -warnings-as-errors: Build complete, 0 code warnings.
+    - next: review. Note: SwiftPM prints "disk I/O error" cache warnings about its manifest cache. They come from the environment, not from the code.
+  timestamp: 2026-09-28T19:14:56.689915+00:00
 position_column: doing
 position_ordinal: '80'
 title: 'OTel: add a codec that reads and writes W3C traceparent and tracestate in an ACP _meta object'
@@ -81,3 +117,14 @@ Do this:
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
 - Do not run `swift format`.
+
+## Review Findings (2026-09-28 14:03)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 2 file(s) reviewed, 2 not reviewed.
+
+> 2 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 2 file(s)
+
+- [x] `Tests/FoundationModelsACPTests/TraceContextMetaTests.swift:15` `code-hygiene/idioms-swift` — redundantSwiftTestingSuite: Remove redundant @Suite attribute with no arguments.
+- [x] `Tests/FoundationModelsACPTests/TraceContextMetaTests.swift:208` `completeness/inverse-operation-coverage` — The round-trip test `injectThenExtractGivesTheSameValue` claims that injecting then extracting preserves the value, but only proves this for contexts with a tracestate present. A context without tracestate is a valid input supported by both directions (inject tested at line 154, extract at line 90), but the round-trip property is not verified for this variant. Add a test that creates a TraceContextMeta with only traceparent (no tracestate), injects it, extracts it, and asserts the round-trip produces an equal context.
+- [x] `Tests/FoundationModelsACPTests/TraceContextMetaTests.swift:218` `completeness/inverse-operation-coverage` — The wire round-trip test `aPromptRequestWithInjectedMetaRoundTripsOnTheWire` encodes and decodes a PromptRequest with injected trace context, but only tests with a context that has tracestate. A context without tracestate is a valid input that should also round-trip correctly through wire encoding/decoding. Add a wire round-trip test that uses a trace context without tracestate to ensure wire encoding/decoding handles all valid trace context variants.
