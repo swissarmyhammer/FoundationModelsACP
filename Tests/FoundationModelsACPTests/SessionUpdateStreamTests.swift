@@ -83,14 +83,17 @@ private func sessionUpdateEnvelope(_ notification: UpdateSessionNotification) th
 
 /// Frames a `session/prompt` acknowledgement keyed to a request id.
 ///
-/// - Parameter id: The prompt request's wire id, echoed on the response.
+/// - Parameters:
+///   - id: The prompt request's wire id, echoed on the response.
+///   - messageId: The id of the user message that the agent inserted for the
+///     prompt. The response names this id.
 /// - Returns: The response envelope ready to write over a transport.
 /// - Throws: Rethrows any encoding failure.
-private func promptAckEnvelope(id: JSONValue) throws -> JSONValue {
+private func promptAckEnvelope(id: JSONValue, messageId: MessageId) throws -> JSONValue {
     .object([
         "jsonrpc": .string("2.0"),
         "id": id,
-        "result": try JSONValue.encode(result: PromptResponse.stubAcknowledgement),
+        "result": try JSONValue.encode(result: PromptResponse(messageId: messageId)),
     ])
 }
 
@@ -155,8 +158,10 @@ func lateToolCallUpdateAfterIdleStateUpdateIsDelivered() async throws {
 
     // v2's prompt acknowledges immediately — the turn's actual progress and
     // completion arrive as `state_update` notifications, not as this response.
-    try await send(promptAckEnvelope(id: id), over: agentEnd)
-    #expect(try await prompt.value == PromptResponse.stubAcknowledgement)
+    // The client must give back the user-message id that the agent sent.
+    let promptMessage = MessageId(rawValue: "user-msg-straggler")
+    try await send(promptAckEnvelope(id: id, messageId: promptMessage), over: agentEnd)
+    #expect(try await prompt.value.messageId == promptMessage)
 
     try await send(sessionUpdateEnvelope(notification(for: sessionOne, messageChunk("mid-turn"))), over: agentEnd)
     try await send(sessionUpdateEnvelope(notification(for: sessionOne, idleState(stopReason: .endTurn))), over: agentEnd)
@@ -182,8 +187,9 @@ func postCancelTrailingUpdatesThenCancelledStopReasonInOrder() async throws {
 
     var updates = client.updates(for: sessionOne).makeAsyncIterator()
     let (prompt, id) = try await startPrompt(on: client, session: sessionOne, reader: reader)
-    try await send(promptAckEnvelope(id: id), over: agentEnd)
-    #expect(try await prompt.value == PromptResponse.stubAcknowledgement)
+    let promptMessage = MessageId(rawValue: "user-msg-cancelled")
+    try await send(promptAckEnvelope(id: id, messageId: promptMessage), over: agentEnd)
+    #expect(try await prompt.value.messageId == promptMessage)
 
     // The client cancels; cancel is a notification, so nothing here waits.
     try await client.sessionCancel(CancelSessionNotification(sessionId: sessionOne))

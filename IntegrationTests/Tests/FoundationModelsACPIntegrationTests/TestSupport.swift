@@ -96,6 +96,24 @@ func withTimeout<Value: Sendable>(
 /// mutated after `init`, and the only mutable state (`stdoutBuffer`) is a
 /// `Mutex`.
 final class LiveAgentProcess: @unchecked Sendable {
+    /// The longest time, in seconds, to wait for one matching line from the
+    /// agent.
+    private static let lineTimeoutSeconds = 10
+
+    /// The time, in milliseconds, to wait before the next look at the stdout
+    /// buffer, when the buffer has no full line.
+    private static let pollIntervalMilliseconds = 20
+
+    /// The longest time to wait for one matching line from the agent.
+    private static let lineTimeout: Duration = .seconds(lineTimeoutSeconds)
+
+    /// The time to wait before the next look at the stdout buffer, when the
+    /// buffer has no full line.
+    private static let pollInterval: Duration = .milliseconds(pollIntervalMilliseconds)
+
+    /// The byte that ends each JSON-RPC line on the wire (`\n`).
+    private static let lineTerminator: UInt8 = 0x0A
+
     private let process: Process
     private let stdin: Pipe
     private let stdout: Pipe
@@ -151,7 +169,7 @@ final class LiveAgentProcess: @unchecked Sendable {
         // racing closure returns a boxed, `@unchecked Sendable` wrapper
         // instead — safe here because nothing else touches the value until
         // it is unboxed on this task after the race resolves.
-        let receivedBox = try await withTimeout(.seconds(10)) {
+        let receivedBox = try await withTimeout(Self.lineTimeout) {
             UncheckedBox(value: try await self.nextLine { object in
                 (object["id"] as? Int) == id && (object["result"] != nil || object["error"] != nil)
             })
@@ -167,7 +185,7 @@ final class LiveAgentProcess: @unchecked Sendable {
     ///   the caller to inspect or validate against the schema.
     /// - Throws: `TimedOutError` if no matching notification arrives in time.
     func notification(method: String) async throws -> [String: Any] {
-        let receivedBox = try await withTimeout(.seconds(10)) {
+        let receivedBox = try await withTimeout(Self.lineTimeout) {
             UncheckedBox(value: try await self.nextLine { object in
                 (object["method"] as? String) == method && object["id"] == nil
             })
@@ -193,7 +211,7 @@ final class LiveAgentProcess: @unchecked Sendable {
     private func send(_ envelope: [String: Any]) throws {
         let data = try JSONSerialization.data(withJSONObject: envelope, options: [.fragmentsAllowed])
         stdin.fileHandleForWriting.write(data)
-        stdin.fileHandleForWriting.write(Data([0x0A]))
+        stdin.fileHandleForWriting.write(Data([Self.lineTerminator]))
     }
 
     /// Reads stdout until a line satisfying `predicate` decodes, buffering
@@ -202,13 +220,13 @@ final class LiveAgentProcess: @unchecked Sendable {
     private func nextLine(where predicate: ([String: Any]) -> Bool) async throws -> [String: Any] {
         while true {
             let lineData: Data? = stdoutBuffer.withLock { buffer in
-                guard let newlineIndex = buffer.firstIndex(of: 0x0A) else { return nil }
+                guard let newlineIndex = buffer.firstIndex(of: Self.lineTerminator) else { return nil }
                 let line = Data(buffer[buffer.startIndex..<newlineIndex])
                 buffer.removeSubrange(buffer.startIndex...newlineIndex)
                 return line
             }
             guard let lineData else {
-                try await Task.sleep(for: .milliseconds(20))
+                try await Task.sleep(for: Self.pollInterval)
                 continue
             }
             guard !lineData.isEmpty,
