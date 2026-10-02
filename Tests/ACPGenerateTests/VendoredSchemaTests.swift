@@ -525,9 +525,9 @@ import FoundationModelsACP
             emitted.mapValues(\.count) == [
                 "Identifiers.generated.swift": 13,
                 "MethodTable.generated.swift": 2,
-                "Models.generated.swift": 15,
+                "Models.generated.swift": 14,
                 "Models2.generated.swift": 16,
-                "Models3.generated.swift": 14,
+                "Models3.generated.swift": 15,
                 "Models4.generated.swift": 15,
                 "Models5.generated.swift": 15,
                 "Models6.generated.swift": 15,

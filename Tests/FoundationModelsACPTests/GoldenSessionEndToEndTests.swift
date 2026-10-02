@@ -246,13 +246,13 @@ private let standardTestTimeout = 1  // minute
         #expect(promptResponse == PromptResponse(messageId: Self.userMessageId))
 
         // Drain the session's updates through the closing idle, applying
-        // each to an aggregator so the test asserts accumulated *state*, not
+        // each to a merge engine so the test asserts accumulated *state*, not
         // only that some bytes happened to match.
-        var aggregator = SessionUpdateAggregator()
+        var engine = SessionMergeEngine()
         var sawRequiresAction = false
         var stopReason: StopReason?
         while let update = await updates.next() {
-            aggregator.apply(update)
+            engine.apply(update)
             if case .stateUpdate(.requiresAction) = update {
                 sawRequiresAction = true
             }
@@ -265,12 +265,14 @@ private let standardTestTimeout = 1  // minute
         #expect(sawRequiresAction, "the permission-gated pause never reported requires_action")
         #expect(stopReason == .endTurn)
 
-        let echoedUser = try #require(aggregator.messages[Self.userMessageId])
-        #expect(echoedUser == [.text(TextContent(text: "Please run ls."))])
-        #expect(aggregator.messages[Self.thoughtMessageId] == [.text(TextContent(text: "Planning to run ls."))])
-        #expect(aggregator.messages[Self.agentMessageId] == [.text(TextContent(text: "Running ls now."))])
+        let echoedUser = try #require(engine.entry(withID: .userMessage(Self.userMessageId))?.kind.message)
+        #expect(echoedUser.content == [.text(TextContent(text: "Please run ls."))])
+        let thought = try #require(engine.entry(withID: .agentThought(Self.thoughtMessageId))?.kind.message)
+        #expect(thought.content == [.text(TextContent(text: "Planning to run ls."))])
+        let agentMessage = try #require(engine.entry(withID: .agentMessage(Self.agentMessageId))?.kind.message)
+        #expect(agentMessage.content == [.text(TextContent(text: "Running ls now."))])
 
-        let toolCall = try #require(aggregator.toolCalls[Self.toolCallId])
+        let toolCall = try #require(engine.entry(withID: .toolCall(Self.toolCallId))?.kind.toolCall)
         #expect(toolCall.status == .value(.completed))
         #expect(toolCall.title == .value("Run ls"))
         guard case .value(let toolCallContent) = toolCall.content, case .terminal(let displayed)? = toolCallContent.first else {
@@ -279,7 +281,7 @@ private let standardTestTimeout = 1  // minute
         }
         #expect(displayed.terminalId == Self.terminalId)
 
-        let terminal = try #require(aggregator.terminals[Self.terminalId])
+        let terminal = try #require(engine.entry(withID: .terminal(Self.terminalId))?.kind.terminal)
         #expect(terminal.output == Data("total 0\n".utf8))
         #expect(terminal.exitStatus == .value(TerminalExitStatus(exitCode: 0)))
 

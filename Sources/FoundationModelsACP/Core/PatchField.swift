@@ -117,7 +117,7 @@ extension PatchField {
     /// patch-semantics field ("omitted fields leave the existing value
     /// unchanged, `null` clears it, and concrete values replace it"), applied
     /// one field at a time by something folding a stream of updates — see
-    /// `SessionUpdateAggregator`.
+    /// `SessionMergeEngine`.
     ///
     /// - Parameter previous: The field's previously accumulated state.
     /// - Returns: The field's newly accumulated state.
@@ -125,6 +125,35 @@ extension PatchField {
         switch self {
         case .unchanged: previous
         case .cleared, .value: self
+        }
+    }
+
+    /// Makes the patch state of a plain optional wire field.
+    ///
+    /// A plain optional field has no `null` state. When the field is
+    /// omitted (`nil`), the stored value does not change. A value replaces
+    /// the stored value.
+    ///
+    /// - Parameter value: The decoded optional field.
+    init(optional value: Wrapped?) {
+        self = value.map(PatchField.value) ?? .unchanged
+    }
+}
+
+extension PatchField where Wrapped: RangeReplaceableCollection {
+    /// Applies this patch state to a collection that has no `null` state of
+    /// its own, such as the content of a message.
+    ///
+    /// `.unchanged` keeps the current collection, `.cleared` gives an empty
+    /// collection, and `.value` replaces the collection.
+    ///
+    /// - Parameter current: The current collection.
+    /// - Returns: The collection after this patch.
+    func resolved(onto current: Wrapped) -> Wrapped {
+        switch self {
+        case .unchanged: current
+        case .cleared: Wrapped()
+        case .value(let replacement): replacement
         }
     }
 }

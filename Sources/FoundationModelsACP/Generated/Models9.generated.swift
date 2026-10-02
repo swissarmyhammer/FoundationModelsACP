@@ -174,6 +174,28 @@ public struct ToolCallUpdate: Codable, Hashable, Sendable {
         try container.encodePatch(title, forKey: .title)
         try container.encodePatch(meta, forKey: .meta)
     }
+
+    /// Folds this update onto a value that earlier updates made.
+    ///
+    /// A field with patch semantics keeps the earlier value when this
+    /// update omits it. Each other field takes the value in this update.
+    ///
+    /// - Parameter existing: The value that earlier updates made.
+    /// - Returns: The value after this update.
+    public func folded(onto existing: ToolCallUpdate) -> ToolCallUpdate {
+        ToolCallUpdate(
+            toolCallId: toolCallId,
+            content: content.folded(onto: existing.content),
+            kind: kind.folded(onto: existing.kind),
+            locations: locations.folded(onto: existing.locations),
+            name: name.folded(onto: existing.name),
+            rawInput: rawInput.folded(onto: existing.rawInput),
+            rawOutput: rawOutput.folded(onto: existing.rawOutput),
+            status: status.folded(onto: existing.status),
+            title: title.folded(onto: existing.title),
+            meta: meta.folded(onto: existing.meta)
+        )
+    }
 }
 
 /// Notification containing a session update from the agent.
@@ -375,5 +397,20 @@ public struct UserMessage: Codable, Hashable, Sendable {
         try container.encode(messageId, forKey: .messageId)
         try container.encodePatch(content, forKey: .content)
         try container.encodePatch(meta, forKey: .meta)
+    }
+
+    /// Folds this update onto a value that earlier updates made.
+    ///
+    /// A field with patch semantics keeps the earlier value when this
+    /// update omits it. Each other field takes the value in this update.
+    ///
+    /// - Parameter existing: The value that earlier updates made.
+    /// - Returns: The value after this update.
+    public func folded(onto existing: UserMessage) -> UserMessage {
+        UserMessage(
+            messageId: messageId,
+            content: content.folded(onto: existing.content),
+            meta: meta.folded(onto: existing.meta)
+        )
     }
 }

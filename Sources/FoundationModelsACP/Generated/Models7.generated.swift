@@ -801,6 +801,21 @@ public struct SessionInfoUpdate: Codable, Hashable, Sendable {
         try container.encodePatch(updatedAt, forKey: .updatedAt)
         try container.encodePatch(meta, forKey: .meta)
     }
+
+    /// Folds this update onto a value that earlier updates made.
+    ///
+    /// A field with patch semantics keeps the earlier value when this
+    /// update omits it. Each other field takes the value in this update.
+    ///
+    /// - Parameter existing: The value that earlier updates made.
+    /// - Returns: The value after this update.
+    public func folded(onto existing: SessionInfoUpdate) -> SessionInfoUpdate {
+        SessionInfoUpdate(
+            title: title.folded(onto: existing.title),
+            updatedAt: updatedAt.folded(onto: existing.updatedAt),
+            meta: meta.folded(onto: existing.meta)
+        )
+    }
 }
 
 /// Request parameters for setting a session configuration option.

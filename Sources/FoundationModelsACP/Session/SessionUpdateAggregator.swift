@@ -20,6 +20,11 @@ import Foundation
 /// Each of those is already a complete, self-contained value with nothing to
 /// fold onto; a consumer that cares about them reads the `SessionUpdate`
 /// directly off the stream (e.g. from `SessionUpdateRouter`).
+///
+/// This type is deprecated. Use ``SessionMergeEngine``: it keeps the order of
+/// the transcript, the last-value session state, and a replay of the
+/// transcript.
+@available(*, deprecated, message: "Use the session merge engine")
 public struct SessionUpdateAggregator: Sendable {
     /// One message's current content, after every upsert and chunk applied
     /// so far, keyed by `messageId`. Covers `user_message`, `agent_message`,
@@ -89,14 +94,7 @@ public struct SessionUpdateAggregator: Sendable {
     ///   - id: The message's identifier.
     ///   - content: The upsert's patch-semantics `content` field.
     private mutating func upsertMessage(id: MessageId, content: PatchField<[ContentBlock]>) {
-        switch content {
-        case .unchanged:
-            messages[id] = messages[id] ?? []
-        case .cleared:
-            messages[id] = []
-        case .value(let blocks):
-            messages[id] = blocks
-        }
+        messages[id] = content.resolved(onto: messages[id] ?? [])
     }
 
     /// Appends one streamed content item to its message, creating the
@@ -115,22 +113,8 @@ public struct SessionUpdateAggregator: Sendable {
     ///
     /// - Parameter incoming: The received tool-call update.
     private mutating func upsertToolCall(_ incoming: ToolCallUpdate) {
-        guard let existing = toolCalls[incoming.toolCallId] else {
-            toolCalls[incoming.toolCallId] = incoming
-            return
-        }
-        toolCalls[incoming.toolCallId] = ToolCallUpdate(
-            toolCallId: incoming.toolCallId,
-            content: incoming.content.folded(onto: existing.content),
-            kind: incoming.kind.folded(onto: existing.kind),
-            locations: incoming.locations.folded(onto: existing.locations),
-            name: incoming.name.folded(onto: existing.name),
-            rawInput: incoming.rawInput.folded(onto: existing.rawInput),
-            rawOutput: incoming.rawOutput.folded(onto: existing.rawOutput),
-            status: incoming.status.folded(onto: existing.status),
-            title: incoming.title.folded(onto: existing.title),
-            meta: incoming.meta.folded(onto: existing.meta)
-        )
+        let existing = toolCalls[incoming.toolCallId] ?? ToolCallUpdate(toolCallId: incoming.toolCallId)
+        toolCalls[incoming.toolCallId] = incoming.folded(onto: existing)
     }
 
     /// Appends one streamed content item to a tool call's accumulated
@@ -143,14 +127,7 @@ public struct SessionUpdateAggregator: Sendable {
     ///
     /// - Parameter chunk: The streamed tool-call content chunk.
     private mutating func appendToolCallContentChunk(_ chunk: ToolCallContentChunk) {
-        var toolCall = toolCalls[chunk.toolCallId] ?? ToolCallUpdate(toolCallId: chunk.toolCallId)
-        let accumulated: [ToolCallContent]
-        switch toolCall.content {
-        case .unchanged, .cleared: accumulated = []
-        case .value(let content): accumulated = content
-        }
-        toolCall.content = .value(accumulated + [chunk.content])
-        toolCalls[chunk.toolCallId] = toolCall
+        toolCalls[chunk.toolCallId, default: ToolCallUpdate(toolCallId: chunk.toolCallId)].appendContent(chunk.content)
     }
 
     // MARK: - Terminals
@@ -162,26 +139,7 @@ public struct SessionUpdateAggregator: Sendable {
     ///
     /// - Parameter incoming: The received terminal update.
     private mutating func upsertTerminal(_ incoming: TerminalUpdate) {
-        var terminal = terminals[incoming.terminalId] ?? AccumulatedTerminal()
-        terminal.command = incoming.command.folded(onto: terminal.command)
-        terminal.cwd = incoming.cwd.folded(onto: terminal.cwd)
-        terminal.exitStatus = incoming.exitStatus.folded(onto: terminal.exitStatus)
-        terminal.meta = incoming.meta.folded(onto: terminal.meta)
-        switch incoming.output {
-        case .unchanged:
-            break
-        case .cleared:
-            terminal.output = Data()
-        case .value(let snapshot):
-            // A snapshot that fails to decode as base64 is dropped rather
-            // than corrupting the accumulated buffer, matching the
-            // forgiving-decode posture the generated types use elsewhere for
-            // malformed peer data.
-            if let bytes = Data(base64Encoded: snapshot.data) {
-                terminal.output = bytes
-            }
-        }
-        terminals[incoming.terminalId] = terminal
+        terminals[incoming.terminalId, default: AccumulatedTerminal()].apply(incoming)
     }
 
     /// Appends one chunk's base64-decoded bytes to a terminal's accumulated
@@ -191,8 +149,7 @@ public struct SessionUpdateAggregator: Sendable {
     ///
     /// - Parameter chunk: The streamed terminal output chunk.
     private mutating func appendTerminalOutputChunk(_ chunk: TerminalOutputChunk) {
-        guard let bytes = Data(base64Encoded: chunk.data) else { return }
-        terminals[chunk.terminalId, default: AccumulatedTerminal()].output.append(bytes)
+        terminals[chunk.terminalId, default: AccumulatedTerminal()].appendOutput(base64: chunk.data)
     }
 
     // MARK: - Plans
@@ -208,34 +165,4 @@ public struct SessionUpdateAggregator: Sendable {
         guard case .items(let items) = update.plan else { return }
         plans[items.planId] = items.entries
     }
-}
-
-/// One agent-owned terminal's accumulated state, folded from `terminal_update`
-/// and `terminal_output_chunk` notifications.
-///
-/// `output` is tracked separately from the other fields: `terminal_update`'s
-/// own `output` field carries a `TerminalOutput` snapshot that *replaces* the
-/// accumulated bytes outright (an authoritative resync), while
-/// `terminal_output_chunk` appends to them — two different operations on the
-/// same buffer, not a patch-semantics field to fold like the rest.
-public struct AccumulatedTerminal: Hashable, Sendable {
-    /// The command being run.
-    public var command: PatchField<String> = .unchanged
-
-    /// The absolute working directory of the command.
-    public var cwd: PatchField<AbsolutePath> = .unchanged
-
-    /// Exit information. A concrete value marks the terminal as exited.
-    public var exitStatus: PatchField<TerminalExitStatus> = .unchanged
-
-    /// The `_meta` extension field.
-    public var meta: PatchField<JSONValue> = .unchanged
-
-    /// The terminal's accumulated output bytes, decoded from base64 as they
-    /// arrive.
-    public var output = Data()
-
-    /// Creates a terminal with every field unknown — the state a
-    /// never-before-seen `terminalId` starts in.
-    public init() {}
 }

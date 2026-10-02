@@ -12,6 +12,12 @@ import Testing
 /// enforces "first sighting creates, later sightings patch" or "a chunk
 /// appends". These tests are the proof that the aggregator applies the wire
 /// prose correctly.
+///
+/// `SessionUpdateAggregator` is deprecated, and this suite keeps it working
+/// until a later task removes it. Swift Testing does not accept a deprecated
+/// suite, so the suite ignores the deprecation diagnostic for its own use of
+/// the type.
+@diagnose(DeprecatedDeclaration, as: ignored)
 @Suite struct SessionUpdateAggregatorTests {
     private static let messageId = MessageId(rawValue: "msg-1")
     private static let toolCallId = ToolCallId(rawValue: "call-1")

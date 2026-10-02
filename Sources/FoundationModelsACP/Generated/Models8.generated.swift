@@ -607,6 +607,24 @@ public struct TerminalUpdate: Codable, Hashable, Sendable {
         try container.encodePatch(output, forKey: .output)
         try container.encodePatch(meta, forKey: .meta)
     }
+
+    /// Folds this update onto a value that earlier updates made.
+    ///
+    /// A field with patch semantics keeps the earlier value when this
+    /// update omits it. Each other field takes the value in this update.
+    ///
+    /// - Parameter existing: The value that earlier updates made.
+    /// - Returns: The value after this update.
+    public func folded(onto existing: TerminalUpdate) -> TerminalUpdate {
+        TerminalUpdate(
+            terminalId: terminalId,
+            command: command.folded(onto: existing.command),
+            cwd: cwd.folded(onto: existing.cwd),
+            exitStatus: exitStatus.folded(onto: existing.exitStatus),
+            output: output.folded(onto: existing.output),
+            meta: meta.folded(onto: existing.meta)
+        )
+    }
 }
 
 /// All text that was typed after the command name is provided as input.

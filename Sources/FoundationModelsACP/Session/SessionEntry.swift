@@ -1,0 +1,198 @@
+import Foundation
+
+/// One entry of a session transcript that ``SessionMergeEngine`` keeps.
+///
+/// An entry has a stable identifier and a kind. The identifier comes from the
+/// wire identifier of the item (for example, the `messageId` of a message).
+/// Thus, an entry that an agent replays keeps the same identifier. Each later
+/// update for the same item changes the entry, and the entry keeps the
+/// position where it first appeared.
+public struct SessionEntry: Hashable, Sendable, Identifiable {
+    /// The stable identifier of a transcript entry.
+    ///
+    /// The three message kinds have different cases. Thus, a thought and an
+    /// agent message that use the same `messageId` are two entries.
+    public enum ID: Hashable, Sendable {
+        /// A user message, by its `messageId`.
+        case userMessage(MessageId)
+
+        /// An agent message, by its `messageId`.
+        case agentMessage(MessageId)
+
+        /// An agent thought, by its `messageId`.
+        case agentThought(MessageId)
+
+        /// A tool call, by its `toolCallId`.
+        case toolCall(ToolCallId)
+
+        /// An agent-owned terminal, by its `terminalId`.
+        case terminal(TerminalId)
+
+        /// A plan, by its `planId`.
+        case plan(PlanId)
+
+        /// An entry that has no wire identifier: an unknown session update,
+        /// or a plan update with unknown content and no `planId`. The value is
+        /// the position of the entry in the transcript. A replay in the same
+        /// order gives the same position.
+        case unidentified(position: Int)
+    }
+
+    /// The kind of a transcript entry, with its merged state.
+    public enum Kind: Hashable, Sendable {
+        /// A message from the user.
+        case userMessage(Message)
+
+        /// A message from the agent.
+        case agentMessage(Message)
+
+        /// A thought (reasoning) from the agent.
+        case agentThought(Message)
+
+        /// A tool call. The value holds each field after all updates. A field
+        /// that no update gave stays `.unchanged`.
+        case toolCall(ToolCallUpdate)
+
+        /// An agent-owned terminal, with its identifier and its merged state.
+        case terminal(TerminalId, AccumulatedTerminal)
+
+        /// A plan. The value is the last plan update for this plan.
+        case plan(PlanUpdate)
+
+        /// A session update that this revision of the schema does not know.
+        /// The entry keeps the update type and the raw payload, so that a
+        /// replay sends the update again without change.
+        case unknown(type: String, payload: JSONValue)
+    }
+
+    /// The merged state of one message or thought.
+    public struct Message: Hashable, Sendable {
+        /// The identifier of the message.
+        public var messageId: MessageId
+
+        /// The content of the message. A whole-message update replaces it,
+        /// and a chunk appends to it. An unknown content block stays in the
+        /// content as the generated `.unknown` value.
+        public var content: [ContentBlock] = []
+
+        /// The `_meta` field of the message, folded with the patch rules.
+        public var meta: PatchField<JSONValue> = .unchanged
+    }
+
+    /// The stable identifier of the entry.
+    public let id: ID
+
+    /// The kind of the entry, with its merged state.
+    public internal(set) var kind: Kind
+}
+
+extension SessionEntry.Kind {
+    /// The message, when this entry is a user message, an agent message, or
+    /// a thought.
+    var message: SessionEntry.Message? {
+        switch self {
+        case .userMessage(let message), .agentMessage(let message), .agentThought(let message): message
+        case .toolCall, .terminal, .plan, .unknown: nil
+        }
+    }
+
+    /// The tool call, when this entry is a tool call.
+    var toolCall: ToolCallUpdate? {
+        switch self {
+        case .toolCall(let toolCall): toolCall
+        case .userMessage, .agentMessage, .agentThought, .terminal, .plan, .unknown: nil
+        }
+    }
+
+    /// The terminal state, when this entry is a terminal.
+    var terminal: AccumulatedTerminal? {
+        switch self {
+        case .terminal(_, let terminal): terminal
+        case .userMessage, .agentMessage, .agentThought, .toolCall, .plan, .unknown: nil
+        }
+    }
+
+    /// The plan update, when this entry is a plan.
+    var plan: PlanUpdate? {
+        switch self {
+        case .plan(let plan): plan
+        case .userMessage, .agentMessage, .agentThought, .toolCall, .terminal, .unknown: nil
+        }
+    }
+}
+
+extension SessionEntry {
+    /// The one session update that makes this entry in an empty engine, with
+    /// the same identifier and the same state.
+    var replayUpdate: SessionUpdate {
+        switch kind {
+        case .userMessage(let message):
+            .userMessage(UserMessage(messageId: message.messageId, content: .value(message.content), meta: message.meta))
+        case .agentMessage(let message):
+            .agentMessage(AgentMessage(messageId: message.messageId, content: .value(message.content), meta: message.meta))
+        case .agentThought(let message):
+            .agentThought(AgentThought(messageId: message.messageId, content: .value(message.content), meta: message.meta))
+        case .toolCall(let toolCall):
+            .toolCallUpdate(toolCall)
+        case .terminal(let terminalId, let terminal):
+            .terminalUpdate(terminal.replayUpdate(terminalId: terminalId))
+        case .plan(let plan):
+            .planUpdate(plan)
+        case .unknown(let type, let payload):
+            .unknown(type, payload)
+        }
+    }
+}
+
+extension SessionEntry.Message {
+    /// Appends the content of a chunk. A chunk that has `_meta` replaces the
+    /// `_meta` of the message.
+    ///
+    /// - Parameter chunk: The streamed content chunk.
+    mutating func append(_ chunk: ContentChunk) {
+        content.append(chunk.content)
+        meta = PatchField(optional: chunk.meta).folded(onto: meta)
+    }
+
+    /// Applies a whole-message update. Each field follows the patch rules.
+    ///
+    /// - Parameters:
+    ///   - newContent: The `content` field of the update.
+    ///   - newMeta: The `_meta` field of the update.
+    mutating func apply(content newContent: PatchField<[ContentBlock]>, meta newMeta: PatchField<JSONValue>) {
+        content = newContent.resolved(onto: content)
+        meta = newMeta.folded(onto: meta)
+    }
+}
+
+extension ToolCallUpdate {
+    /// Appends one streamed content item to the content of this tool call.
+    ///
+    /// When the content is `.unchanged` or `.cleared`, the tool call has no
+    /// content yet, so the item starts a new list. A later update that
+    /// carries `content` replaces the list, and later chunks append to that
+    /// replacement.
+    ///
+    /// - Parameter item: The streamed content item.
+    mutating func appendContent(_ item: ToolCallContent) {
+        content = .value(content.resolved(onto: []) + [item])
+    }
+}
+
+extension PlanUpdate {
+    /// The identifier of the plan.
+    ///
+    /// Known content holds the `planId`. For unknown content, the identifier
+    /// comes from a `planId` string in the raw payload, when there is one.
+    var planId: PlanId? {
+        switch plan {
+        case .items(let items):
+            return items.planId
+        case .unknown(_, let payload):
+            guard case .object(let members) = payload, case .string(let rawValue)? = members["planId"] else {
+                return nil
+            }
+            return PlanId(rawValue: rawValue)
+        }
+    }
+}

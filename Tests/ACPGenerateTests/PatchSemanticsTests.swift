@@ -112,6 +112,31 @@ import Testing
         #expect(source.contains("code: PatchField<Int> = .unchanged"))
     }
 
+    @Test func aStructWithPatchFieldsEmitsAFoldOntoAnEarlierValue() throws {
+        let source = try modelsSource()
+        #expect(source.contains("public func folded(onto existing: Widget) -> Widget {"))
+        #expect(source.contains("note: note.folded(onto: existing.note)"))
+        #expect(source.contains("tags: tags.folded(onto: existing.tags)"))
+        #expect(source.contains("code: code.folded(onto: existing.code)"))
+    }
+
+    @Test func theFoldTakesEachFieldWithoutPatchSemanticsFromTheNewValue() throws {
+        // `id` and `color` have no patch semantics. The new value is the
+        // complete value for these fields, so the fold does not read
+        // `existing` for them.
+        let source = try modelsSource()
+        #expect(source.contains("id: id"))
+        #expect(source.contains("color: color"))
+        #expect(!source.contains("existing.id"))
+        #expect(!source.contains("existing.color"))
+    }
+
+    @Test func aStructWithNoPatchFieldsEmitsNoFold() throws {
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: Self.schema)
+        let source = try #require(files.first { $0.name == "Models.generated.swift" }).contents
+        #expect(!source.contains("folded(onto"))
+    }
+
     @Test func staleConfigEntryNamingAMissingFieldFailsGeneration() {
         let config = GeneratorConfig(patchSemanticsFields: ["Widget.doesNotExist"])
         #expect(throws: GeneratorError.self) {

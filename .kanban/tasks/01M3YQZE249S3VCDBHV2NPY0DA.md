@@ -10,10 +10,46 @@ comments:
   id: 01m3yrg30ky22tcc17q2f78wdr
   text: 'Migration decision: do NOT delete `SessionUpdateAggregator` in this task. Mark it `@available(*, deprecated, message: "Use the session merge engine")` and keep it working (with the `name` fold from ^g2mkx79). FoundationModelsACPClient''s ACPSessionState still uses it until that package deletes ACPSessionState. A separate task removes it after foundationmodelsacpclient-ae reports that ACPSessionState is gone.'
   timestamp: 2026-10-02T16:52:26.771135+00:00
+- actor: claude-code
+  id: 01m3ywmk5a9d4xjdq29vtefs23
+  text: |-
+    Research done. Findings:
+    - No ARCHITECTURE.md. Engine goes in Sources/FoundationModelsACP/Session/ beside the aggregator.
+    - Six generated structs have PatchField fields: UserMessage, AgentMessage, AgentThought, ToolCallUpdate, TerminalUpdate, SessionInfoUpdate. `PatchField.folded(onto:)` is internal.
+    - Plan for the "fold cannot miss a new field" requirement: the generator (Emitter.structDeclaration) emits `public func folded(onto existing: Self) -> Self` on each struct with a patch field. Patch fields fold, other fields take the new value. VendoredSchemaTests compares the checked-in output, so the Generated files must be regenerated (delete Generated/.schema-hash, then `swift package generate-acp`).
+    - Other users of SessionUpdateAggregator: OutOfOrderConvergenceTests and GoldenSessionEndToEndTests. After deprecation they give warnings, so they move to the new engine. SessionUpdateAggregatorTests stays and is marked deprecated so that it does not warn.
+    - AccumulatedTerminal is reused by the engine for terminal entries. The shared terminal and tool-call chunk logic moves to internal helpers so that the aggregator and the engine do not copy code.
+  timestamp: 2026-10-02T18:04:48.682884+00:00
+- actor: claude-code
+  id: 01m3yx96eb14rqv69x4ckjzzjz
+  text: |-
+    Implementation landed (not committed).
+
+    Public API added:
+    - `public struct SessionMergeEngine: Hashable, Sendable` with `entries: [SessionEntry]`, `availableCommands: [AvailableCommand]?`, `configOptions: [SessionConfigOption]?`, `usage: UsageUpdate?`, `agentState: StateUpdate?`, `sessionInfo: SessionInfoUpdate` (all `public private(set)`), `init()`, `@discardableResult mutating func apply(_: SessionUpdate) -> Change`, `@discardableResult mutating func seed(from: NewSessionResponse) -> [Change]`, `@discardableResult mutating func seed(from: ResumeSessionResponse) -> [Change]`, `mutating func reset()`, `func entry(withID: SessionEntry.ID) -> SessionEntry?`, `var transcriptUpdates: [SessionUpdate]`, `var stateUpdates: [SessionUpdate]`.
+    - `SessionMergeEngine.Change`: `entryAdded(index:entry:)`, `entryChanged(index:entry:)`, `availableCommandsChanged([AvailableCommand])`, `configOptionsChanged([SessionConfigOption])`, `usageChanged(UsageUpdate)`, `agentStateChanged(StateUpdate)`, `sessionInfoChanged(SessionInfoUpdate)`.
+    - `public struct SessionEntry: Hashable, Sendable, Identifiable` with `id: ID`, `kind: Kind`; `SessionEntry.ID` (userMessage/agentMessage/agentThought(MessageId), toolCall(ToolCallId), terminal(TerminalId), plan(PlanId), unidentified(position: Int)); `SessionEntry.Kind` (userMessage/agentMessage/agentThought(Message), toolCall(ToolCallUpdate), terminal(TerminalId, AccumulatedTerminal), plan(PlanUpdate), unknown(type:payload:)); `SessionEntry.Message` (messageId, content: [ContentBlock], meta: PatchField<JSONValue>).
+    - Generator: each struct with a patch field gets `public func folded(onto existing: Self) -> Self` (ToolCallUpdate, TerminalUpdate, SessionInfoUpdate, UserMessage, AgentMessage, AgentThought). Regenerated.
+
+    Decisions to note:
+    - A chunk `_meta` (plain optional) replaces the entry `_meta` when present; absent keeps it.
+    - A plan update with unknown content keys by a `planId` string in its payload; with none, it becomes a new `.unidentified` plan entry. It is never dropped.
+    - configOptions seed: any present list sets it (also `[]`); only availableCommands treats omitted/empty as "leave nil".
+    - `AccumulatedTerminal` moved to its own file (public API same) so that the removal task can delete the aggregator file only.
+    - Swift Testing rejects `@available(*, deprecated)` on a `@Suite`. `SessionUpdateAggregatorTests` uses `@diagnose(DeprecatedDeclaration, as: ignored)` instead (Swift 6.4). OutOfOrderConvergenceTests and GoldenSessionEndToEndTests moved to the engine.
+    - VendoredSchemaTests shard-count pins changed (Models 15->14, Models3 14->15) because the fold methods move shard boundaries.
+  timestamp: 2026-10-02T18:16:03.787810+00:00
+- actor: claude-code
+  id: 01m3yx9a0k4y2gdvp2ngsgzqsk
+  text: |-
+    ### implement — changed
+    - evidence: `swift test` 349 + 110 tests pass, 0 warnings (rebuild of all touched files); `swift package generate-documentation --target FoundationModelsACP --warnings-as-errors` exit 0. 17 files: Sources/ACPGenerateCore/Emitter.swift, Sources/FoundationModelsACP/Core/PatchField.swift, Sources/FoundationModelsACP/Generated/Models{,2,3,7,8,9}.generated.swift, Sources/FoundationModelsACP/Session/{SessionMergeEngine,SessionEntry,AccumulatedTerminal,SessionUpdateAggregator}.swift, Tests/ACPGenerateTests/{PatchSemanticsTests,VendoredSchemaTests}.swift, Tests/FoundationModelsACPTests/{SessionMergeEngineTests,SessionUpdateAggregatorTests,OutOfOrderConvergenceTests,GoldenSessionEndToEndTests}.swift
+    - next: /review
+  timestamp: 2026-10-02T18:16:07.443735+00:00
 depends_on:
 - 01M3YQYR2Y867FQBAZJG2MKX79
-position_column: todo
-position_ordinal: '8280'
+position_column: doing
+position_ordinal: '80'
 title: Replace SessionUpdateAggregator with a Sendable session merge engine
 ---
 ## What

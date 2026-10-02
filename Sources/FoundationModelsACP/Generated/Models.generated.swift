@@ -192,6 +192,21 @@ public struct AgentMessage: Codable, Hashable, Sendable {
         try container.encodePatch(content, forKey: .content)
         try container.encodePatch(meta, forKey: .meta)
     }
+
+    /// Folds this update onto a value that earlier updates made.
+    ///
+    /// A field with patch semantics keeps the earlier value when this
+    /// update omits it. Each other field takes the value in this update.
+    ///
+    /// - Parameter existing: The value that earlier updates made.
+    /// - Returns: The value after this update.
+    public func folded(onto existing: AgentMessage) -> AgentMessage {
+        AgentMessage(
+            messageId: messageId,
+            content: content.folded(onto: existing.content),
+            meta: meta.folded(onto: existing.meta)
+        )
+    }
 }
 
 /// A JSON-RPC notification object.
@@ -365,6 +380,21 @@ public struct AgentThought: Codable, Hashable, Sendable {
         try container.encode(messageId, forKey: .messageId)
         try container.encodePatch(content, forKey: .content)
         try container.encodePatch(meta, forKey: .meta)
+    }
+
+    /// Folds this update onto a value that earlier updates made.
+    ///
+    /// A field with patch semantics keeps the earlier value when this
+    /// update omits it. Each other field takes the value in this update.
+    ///
+    /// - Parameter existing: The value that earlier updates made.
+    /// - Returns: The value after this update.
+    public func folded(onto existing: AgentThought) -> AgentThought {
+        AgentThought(
+            messageId: messageId,
+            content: content.folded(onto: existing.content),
+            meta: meta.folded(onto: existing.meta)
+        )
     }
 }
 
@@ -897,80 +927,6 @@ public struct BlobResourceContents: Codable, Hashable, Sendable {
         try container.encode(blob, forKey: .blob)
         try container.encode(uri, forKey: .uri)
         try container.encodeIfPresent(mimeType, forKey: .mimeType)
-        try container.encodeIfPresent(meta, forKey: .meta)
-    }
-}
-
-/// Schema for boolean properties in an elicitation form.
-public struct BooleanPropertySchema: Codable, Hashable, Sendable {
-    /// Default value.
-    ///
-    /// Optional. Omitted and `null` are equivalent and mean no default value is provided.
-    public var `default`: Bool?
-
-    /// Human-readable description.
-    ///
-    /// Optional. Omitted and `null` are equivalent and mean no description is provided.
-    public var description: String?
-
-    /// Optional title for the property.
-    ///
-    /// Optional. Omitted and `null` are equivalent and mean no title is provided.
-    public var title: String?
-
-    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
-    ///
-    /// Optional. Omitted and `null` are equivalent and mean no metadata.
-    ///
-    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
-
-    /// Creates a `BooleanPropertySchema`.
-    public init(
-        `default`: Bool? = nil,
-        description: String? = nil,
-        title: String? = nil,
-        meta: JSONValue? = nil
-    ) {
-        self.`default` = `default`
-        self.description = description
-        self.title = title
-        self.meta = meta
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case `default` = "default"
-        case description
-        case title
-        case meta = "_meta"
-    }
-
-    /// Decodes a `BooleanPropertySchema`; forgiving fields degrade to their
-    /// schema defaults instead of failing the message.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
-    ///   or violates a wire invariant.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.`default` = container.forgivingDecodeIfPresent(Bool.self, forKey: .`default`)
-        self.description = container.forgivingDecodeIfPresent(String.self, forKey: .description)
-        self.title = container.forgivingDecodeIfPresent(String.self, forKey: .title)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
-    }
-
-    /// Encodes a `BooleanPropertySchema`, omitting nil optional fields — never
-    /// emitting JSON null for an absent capability-gated field.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encodeIfPresent(`default`, forKey: .`default`)
-        try container.encodeIfPresent(description, forKey: .description)
-        try container.encodeIfPresent(title, forKey: .title)
         try container.encodeIfPresent(meta, forKey: .meta)
     }
 }

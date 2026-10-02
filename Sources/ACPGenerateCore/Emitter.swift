@@ -249,6 +249,10 @@ enum Emitter {
         lines.append(contentsOf: decoderInit(model: model))
         lines.append("")
         lines.append(contentsOf: encodeMethod(model: model))
+        if model.properties.contains(where: \.hasPatchSemantics) {
+            lines.append("")
+            lines.append(contentsOf: foldMethod(model: model))
+        }
         lines.append("}")
         return lines.joined(separator: "\n")
     }
@@ -313,13 +317,57 @@ enum Emitter {
     ///
     /// - Parameters:
     ///   - items: The parameters to render, in order.
+    ///   - indent: The indentation of each parameter line.
     ///   - render: Renders one item to its `name: Type[ = default]` fragment.
     /// - Returns: The parameter lines, without the surrounding `(` and `)`.
-    private static func renderParameters<T>(items: [T], render: (T) -> String) -> [String] {
+    private static func renderParameters<T>(
+        items: [T],
+        indent: String = indent2,
+        render: (T) -> String
+    ) -> [String] {
         items.enumerated().map { index, item in
             let comma = index < items.count - 1 ? "," : ""
-            return indent2 + render(item) + comma
+            return indent + render(item) + comma
         }
+    }
+
+    /// Renders `folded(onto:)` for a struct that has one or more fields with
+    /// patch semantics.
+    ///
+    /// The method gives one place that folds every field. A field that the
+    /// schema adds later gets its fold from the generator, so a consumer
+    /// cannot forget it. A patch field keeps the earlier value when the new
+    /// value omits it. Each other field takes the new value.
+    ///
+    /// - Parameter model: The struct's emission model.
+    /// - Returns: The method lines, indented one level.
+    private static func foldMethod(model: StructModel) -> [String] {
+        var lines = [
+            indentUnit + "/// Folds this update onto a value that earlier updates made.",
+            indentUnit + "///",
+            indentUnit + "/// A field with patch semantics keeps the earlier value when this",
+            indentUnit + "/// update omits it. Each other field takes the value in this update.",
+            indentUnit + "///",
+            indentUnit + "/// - Parameter existing: The value that earlier updates made.",
+            indentUnit + "/// - Returns: The value after this update.",
+            indentUnit + "public func folded(onto existing: \(model.name)) -> \(model.name) {",
+            indent2 + "\(model.name)(",
+        ]
+        lines.append(contentsOf: renderParameters(items: model.properties, indent: indent3, render: foldArgument))
+        lines.append(contentsOf: [indent2 + ")", indentUnit + "}"])
+        return lines
+    }
+
+    /// Renders one argument of the initializer call in `folded(onto:)`.
+    ///
+    /// - Parameter property: The property model.
+    /// - Returns: The `name: value` fragment, without indentation.
+    private static func foldArgument(property: PropertyModel) -> String {
+        let name = property.swiftName
+        guard property.hasPatchSemantics else {
+            return "\(name): \(name)"
+        }
+        return "\(name): \(name).folded(onto: existing.\(name))"
     }
 
     /// Renders the explicit CodingKeys enum mapping Swift names to wire names.

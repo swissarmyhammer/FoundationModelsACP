@@ -5,16 +5,16 @@ import Testing
 
 /// A `session/update` fixture whose frames arrive deliberately out of the
 /// order a single well-behaved turn would send them, proving
-/// `SessionUpdateAggregator` converges on the correct end state regardless of
+/// `SessionMergeEngine` converges on the correct end state regardless of
 /// arrival order — correlation is by `messageId` / `toolCallId` / `terminalId`,
 /// never by position in the stream (plan.md M9, *Testing strategy*).
 ///
-/// `SessionUpdateAggregatorTests` already proves every individual folding
+/// `SessionMergeEngineTranscriptTests` already proves every individual folding
 /// rule (upsert replaces, chunks append, a patch folds onto what exists) from
 /// direct, hand-ordered Swift calls. What is new here is decoding a single
 /// **wire-level transcript** — replayed through `ReplayTransport`, so the
 /// scrambled order lives in the recorded bytes, not in the order the test
-/// happens to call `apply(_:)` — and confirming the aggregator still lands on
+/// happens to call `apply(_:)` — and confirming the engine still lands on
 /// the same accumulated state a naturally-ordered stream would have produced.
 @Suite struct OutOfOrderConvergenceTests {
     private static let toolCallId = ToolCallId(rawValue: "call-1")
@@ -42,7 +42,7 @@ import Testing
     /// before the terminal is ever upserted, an intervening upsert replaces
     /// the tool call's content mid-stream, and a straggler tool-call patch
     /// arrives after the turn's closing `idle` — none of which stop the
-    /// aggregator from converging correctly.
+    /// engine from converging correctly.
     ///
     /// - Returns: The out-of-order transcript, one ndJSON line per update.
     /// - Throws: Rethrows any encoding failure.
@@ -75,7 +75,7 @@ import Testing
 
     @Test func lateAndOutOfOrderUpdatesStillConvergeCorrectly() async throws {
         let transport = ReplayTransport(script: try Self.outOfOrderTranscript())
-        var aggregator = SessionUpdateAggregator()
+        var engine = SessionMergeEngine()
 
         for try await frame in NDJSONCodec.frames(from: transport.bytes, logger: .disabled) {
             guard
@@ -87,15 +87,15 @@ import Testing
                 continue
             }
             let notification = try params.decoded(as: UpdateSessionNotification.self)
-            aggregator.apply(notification.update)
+            engine.apply(notification.update)
         }
 
-        let toolCall = try #require(aggregator.toolCalls[Self.toolCallId])
+        let toolCall = try #require(engine.entry(withID: .toolCall(Self.toolCallId))?.kind.toolCall)
         #expect(toolCall.status == .value(.completed), "the earlier-arriving completion must survive the later creation update")
         #expect(toolCall.title == .value("Run ls"))
         #expect(toolCall.kind == .value(.execute))
 
-        let terminal = try #require(aggregator.terminals[Self.terminalId])
+        let terminal = try #require(engine.entry(withID: .terminal(Self.terminalId))?.kind.terminal)
         #expect(terminal.output == Data("late start\n".utf8))
         #expect(terminal.exitStatus == .value(TerminalExitStatus(exitCode: 0)), "the straggler after idle must still be applied")
     }
