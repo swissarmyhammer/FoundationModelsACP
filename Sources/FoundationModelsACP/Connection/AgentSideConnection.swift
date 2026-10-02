@@ -10,8 +10,14 @@ import Foundation
 /// importantly to request permission or user input without ever blocking the
 /// read loop that keeps `session/cancel` and other traffic flowing.
 public final class AgentSideConnection: Sendable {
+    /// The prefix of each diagnostic that this type writes to the logger.
+    private static let logPrefix = "AgentSideConnection: "
+
     /// The shared engine owning the connection and the served agent.
     private let core: RoleConnectionCore<any Agent>
+
+    /// The diagnostic sink that the caller gave to `init`.
+    private let logger: ACPLogger
 
     /// Creates the connection, wires the factory's agent, and starts serving.
     ///
@@ -32,6 +38,7 @@ public final class AgentSideConnection: Sendable {
         requestTimeout: Duration? = nil,
         _ factory: @Sendable (AgentSideConnection) -> any Agent
     ) async {
+        self.logger = logger
         core = await RoleConnectionCore(
             stream: stream,
             logger: logger,
@@ -208,5 +215,141 @@ public final class AgentSideConnection: Sendable {
     ///   response has been handed to the transport.
     public func afterRespondingToCurrentRequest(_ work: @escaping @Sendable () async -> Void) {
         Connection.currentResponseHooks?.append(work)
+    }
+
+    // MARK: - Inserting the user message of a prompt
+
+    /// Inserts the prompt as a user message, echoes the message to the
+    /// client, and returns the identifier of the message.
+    ///
+    /// The ACP prompt lifecycle has three steps for each accepted prompt:
+    ///
+    /// 1. The agent adds the user message to the conversation and gives it a
+    ///    `messageId`.
+    /// 2. The agent echoes the message as a `user_message` session update
+    ///    with that identifier.
+    /// 3. The `session/prompt` response names the same identifier.
+    ///
+    /// This method does steps 1 and 2. The handler does step 3 with the
+    /// returned identifier:
+    ///
+    /// ```swift
+    /// func prompt(_ params: PromptRequest) async throws -> PromptResponse {
+    ///     let messageId = connection.insertUserMessage(params)
+    ///     connection.afterRespondingToCurrentRequest { /* run the turn */ }
+    ///     return PromptResponse(messageId: messageId)
+    /// }
+    /// ```
+    ///
+    /// The echo goes to the client after the response, with
+    /// ``afterRespondingToCurrentRequest(_:)``. Thus, call this method
+    /// synchronously in the handler of the request, before the handler
+    /// returns. Outside a request handler, the method stops a debug build
+    /// with an assertion, logs the error, and does not send the echo.
+    ///
+    /// Call it before you defer other work, because deferred work runs in the
+    /// order of registration. If the handler throws after this call, the
+    /// echo goes out after the error response. Thus, do the checks
+    /// that can fail (for example, an unknown session) before this call. If
+    /// the connection closes before the echo goes out, the connection logs
+    /// the failure.
+    ///
+    /// To also keep the message in a retained history, use
+    /// ``insertUserMessage(_:messageId:into:)``.
+    ///
+    /// - Parameters:
+    ///   - request: The prompt request. The echo carries its session and its
+    ///     content.
+    ///   - messageId: The identifier of the user message. When it is `nil`,
+    ///     the method makes a new unique identifier.
+    /// - Returns: The identifier of the user message. Return it in
+    ///   ``PromptResponse/messageId``.
+    @discardableResult
+    public func insertUserMessage(_ request: PromptRequest, messageId: MessageId? = nil) -> MessageId {
+        insert(request, messageId: messageId) { _ in }
+    }
+
+    /// Inserts the prompt as a user message, applies the echo to a retained
+    /// history, echoes the message to the client, and returns the identifier
+    /// of the message.
+    ///
+    /// This method does the same steps as ``insertUserMessage(_:messageId:)``.
+    /// It also applies the `user_message` echo to `history` before it
+    /// returns. Thus, the transcript of the history has the message with the
+    /// same identifier, and a later `session/resume` replay keeps that
+    /// identifier.
+    ///
+    /// The method is synchronous, so an agent can give it the history in a
+    /// lock or in actor-isolated state:
+    ///
+    /// ```swift
+    /// let messageId = history.withLock { connection.insertUserMessage(params, into: &$0) }
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - request: The prompt request. The echo carries its session and its
+    ///     content.
+    ///   - messageId: The identifier of the user message. When it is `nil`,
+    ///     the method makes a new unique identifier.
+    ///   - history: The retained history of the session. The method applies
+    ///     the echo to it.
+    /// - Returns: The identifier of the user message. Return it in
+    ///   ``PromptResponse/messageId``.
+    @discardableResult
+    public func insertUserMessage(
+        _ request: PromptRequest,
+        messageId: MessageId? = nil,
+        into history: inout SessionMergeEngine
+    ) -> MessageId {
+        insert(request, messageId: messageId) { history.apply($0) }
+    }
+
+    /// Makes the `user_message` echo of a prompt, gives it to `record`, and
+    /// sends it after the response to the current request.
+    ///
+    /// - Parameters:
+    ///   - request: The prompt request.
+    ///   - messageId: The identifier of the user message, or `nil` for a new
+    ///     unique identifier.
+    ///   - record: Gets the echo update before the method returns.
+    /// - Returns: The identifier of the user message.
+    private func insert(
+        _ request: PromptRequest,
+        messageId: MessageId?,
+        recording record: (SessionUpdate) -> Void
+    ) -> MessageId {
+        let insertedId = messageId ?? MessageId(rawValue: UUID().uuidString)
+        let echo = UpdateSessionNotification(
+            sessionId: request.sessionId,
+            update: .userMessage(UserMessage(messageId: insertedId, content: .value(request.prompt)))
+        )
+        record(echo.update)
+        sendAfterCurrentResponse(echo)
+        return insertedId
+    }
+
+    /// Sends a `user_message` echo after the response to the current request.
+    ///
+    /// With no current request, the echo cannot follow a response. This is
+    /// an error of the caller: the method stops a debug build, logs the
+    /// error, and does not send the echo.
+    ///
+    /// - Parameter echo: The echo notification.
+    private func sendAfterCurrentResponse(_ echo: UpdateSessionNotification) {
+        guard let hooks = Connection.currentResponseHooks else {
+            assertionFailure("insertUserMessage must run in the handler of a request")
+            logger.log(
+                Self.logPrefix + "insertUserMessage ran outside a request handler; "
+                    + "the user_message echo for session \(echo.sessionId.rawValue) was not sent"
+            )
+            return
+        }
+        hooks.append { [self] in
+            do {
+                try await sessionUpdate(echo)
+            } catch {
+                logger.log(Self.logPrefix + "the user_message echo was not sent: \(error)")
+            }
+        }
     }
 }

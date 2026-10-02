@@ -40,16 +40,8 @@ struct MyAgent: Agent {
     }
 
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {
-        // Echo the user message, and return the same id in the response.
-        let messageId = MessageId(rawValue: UUID().uuidString)
-        let echo = UpdateSessionNotification(
-            sessionId: params.sessionId,
-            update: .userMessage(UserMessage(messageId: messageId, content: .value(params.prompt)))
-        )
-        connection.afterRespondingToCurrentRequest { [connection] in
-            try? await connection.sessionUpdate(echo)
-        }
-        return PromptResponse(messageId: messageId)
+        // Insert and echo the user message, and return its id in the response.
+        PromptResponse(messageId: connection.insertUserMessage(params))
     }
 
     func sessionCancel(_ params: CancelSessionNotification) async {}

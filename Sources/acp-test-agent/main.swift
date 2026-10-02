@@ -58,25 +58,15 @@ struct TestAgent: Agent {
 
     /// Acknowledges the turn immediately, as v2's prompt lifecycle requires.
     ///
-    /// The agent gives the user message a new `MessageId`. After the response
-    /// is on the wire, the agent echoes the prompt as a `user_message` update
-    /// with that same id, because the response and the echo must name the
-    /// same message.
+    /// `AgentSideConnection.insertUserMessage` gives the user message a new
+    /// `MessageId`. After the response is on the wire, it echoes the prompt
+    /// as a `user_message` update with that same id, because the response
+    /// and the echo must name the same message.
     ///
     /// - Parameter params: The prompt request.
     /// - Returns: The immediate acknowledgement, which names the user message.
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {
-        let messageId = MessageId(rawValue: UUID().uuidString)
-        let echo = UpdateSessionNotification(
-            sessionId: params.sessionId,
-            update: .userMessage(UserMessage(messageId: messageId, content: .value(params.prompt)))
-        )
-        connection.afterRespondingToCurrentRequest { [connection] in
-            // A closed connection drops the echo. This fixture has no caller
-            // to tell, and the response already went out.
-            try? await connection.sessionUpdate(echo)
-        }
-        return PromptResponse(messageId: messageId)
+        PromptResponse(messageId: connection.insertUserMessage(params))
     }
 
     /// Ignores cancellation; the test agent runs no long turns.
