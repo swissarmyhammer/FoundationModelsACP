@@ -211,6 +211,17 @@ public final class AgentSideConnection: Sendable {
     /// is no current request to follow, so `work` is silently dropped rather
     /// than run at an arbitrary, unspecified time.
     ///
+    /// A task that the handler starts inherits the current request. A call
+    /// from that task after the deferred work of the request started to run
+    /// does not run `work`, and does not keep it: the connection drops `work`
+    /// and logs a warning to its logger. The connection does not run `work`
+    /// at once, because then `work` has no order with the deferred work that
+    /// still runs. The same occurs when the connection closed before it wrote
+    /// the response: the deferred work does not run, and the connection
+    /// releases it. Thus, after the deferred work runs or is released, the
+    /// connection keeps no reference to it or to the values it captures, also
+    /// while a task that the handler started is alive.
+    ///
     /// - Parameter work: The deferred work, run once the current request's
     ///   response has been handed to the transport.
     public func afterRespondingToCurrentRequest(_ work: @escaping @Sendable () async -> Void) {
@@ -252,7 +263,10 @@ public final class AgentSideConnection: Sendable {
     /// echo goes out after the error response. Thus, do the checks
     /// that can fail (for example, an unknown session) before this call. If
     /// the connection closes before the echo goes out, the connection logs
-    /// the failure.
+    /// the failure. A call from a task that the handler started, after the
+    /// deferred work of the request started to run, does not send the echo:
+    /// the connection drops it and logs a warning, as
+    /// ``afterRespondingToCurrentRequest(_:)`` tells.
     ///
     /// To also keep the message in a retained history, use
     /// ``insertUserMessage(_:messageId:into:)``.

@@ -12,24 +12,123 @@ import Synchronization
 /// synchronous, with no `await` between "the handler decides to defer work"
 /// and "the work is recorded" — an actor hop there would reopen a scheduling
 /// gap of exactly the kind this type exists to close.
+///
+/// A task that the handler starts inherits the task-local, and thus keeps
+/// this object for its full life. Thus, this object keeps a closure only
+/// until the closures run or are discarded. After that, it keeps no closure:
+/// `append` drops the closure and logs a warning, because no response
+/// follows and the closure can never run.
 final class ResponseHooks: Sendable {
-    private let hooks = Mutex<[@Sendable () async -> Void]>([])
+    /// One deferred closure.
+    typealias Work = @Sendable () async -> Void
+
+    /// Why the collector keeps no more closures.
+    private enum ClosingReason {
+        /// `runAll()` took the closures, after the response was written.
+        case ran
+
+        /// `discardAll()` released the closures, because the connection
+        /// wrote no response.
+        case discarded
+    }
+
+    /// The life cycle of the collector.
+    private enum Phase {
+        /// The handler can still defer work. The closures wait for the
+        /// response, in registration order.
+        case collecting([Work])
+
+        /// The closures were taken. The collector keeps no closure.
+        case closed(ClosingReason)
+    }
+
+    /// The guarded phase. A closure is in it only while the phase is
+    /// `collecting`.
+    private let phase = Mutex(Phase.collecting([]))
+
+    /// Gets the warning for a closure that comes too late.
+    private let logger: ACPLogger
+
+    /// The wire id of the request that the hooks follow. The warning names
+    /// it.
+    private let requestId: RequestId
+
+    /// Makes an empty collector for one inbound request.
+    ///
+    /// - Parameters:
+    ///   - logger: The connection logger. It gets the warning for a closure
+    ///     that comes after the closures ran or were discarded.
+    ///   - requestId: The wire id of the request that the hooks follow.
+    init(logger: ACPLogger, requestId: RequestId) {
+        self.logger = logger
+        self.requestId = requestId
+    }
 
     /// Registers one closure to run after the current response is written.
     ///
+    /// After `runAll()` or `discardAll()`, the method does not keep the
+    /// closure. It drops the closure and logs a warning.
+    ///
     /// - Parameter work: The deferred work, run once this request's response
     ///   has been handed to the transport.
-    func append(_ work: @escaping @Sendable () async -> Void) {
-        hooks.withLock { $0.append(work) }
+    func append(_ work: @escaping Work) {
+        let closingReason: ClosingReason? = phase.withLock { phase in
+            switch phase {
+            case .collecting(var pending):
+                pending.append(work)
+                phase = .collecting(pending)
+                return nil
+            case .closed(let reason):
+                return reason
+            }
+        }
+        guard let closingReason else { return }
+        logger.log(Connection.logPrefix + dropWarning(for: closingReason))
     }
 
-    /// Runs every registered closure, in registration order, awaiting each
-    /// before starting the next.
+    /// Takes every registered closure and clears them in the same lock, then
+    /// runs them in registration order, awaiting each before starting the
+    /// next. After this call starts, the collector keeps no closure.
     func runAll() async {
-        let work = hooks.withLock { $0 }
-        for item in work {
+        for item in take(closingAs: .ran) {
             await item()
         }
+    }
+
+    /// Releases every registered closure and does not run them. The
+    /// connection calls this when it wrote no response, so the closures can
+    /// never run.
+    func discardAll() {
+        _ = take(closingAs: .discarded)
+    }
+
+    /// Takes the registered closures and closes the collector in one lock.
+    ///
+    /// - Parameter reason: Why the collector closes.
+    /// - Returns: The closures that were waiting, in registration order. The
+    ///   result is empty when the collector closed before.
+    private func take(closingAs reason: ClosingReason) -> [Work] {
+        phase.withLock { phase in
+            guard case .collecting(let pending) = phase else { return [] }
+            phase = .closed(reason)
+            return pending
+        }
+    }
+
+    /// The warning for a closure that came after the collector closed.
+    ///
+    /// - Parameter closingReason: Why the collector closed.
+    /// - Returns: The warning text, without the log prefix.
+    private func dropWarning(for closingReason: ClosingReason) -> String {
+        let cause =
+            switch closingReason {
+            case .ran:
+                "the response was written and the deferred work already ran"
+            case .discarded:
+                "the connection wrote no response"
+            }
+        return "dropped work deferred for request \(requestId): \(cause); "
+            + "defer work from the request handler before it returns"
     }
 }
 
@@ -127,8 +226,9 @@ public actor Connection {
     /// file states the field name once rather than repeating the literal.
     private static let paramsKey = "params"
 
-    /// Prefix applied to every diagnostic this connection logs.
-    private static let logPrefix = "Connection: "
+    /// Prefix applied to every diagnostic this connection logs. `ResponseHooks`
+    /// in this file uses it too, because it logs for the connection.
+    fileprivate static let logPrefix = "Connection: "
 
     /// The wire method name for `$/cancel_request`, read from the generated
     /// routing table rather than hardcoded, so this file never restates a
@@ -574,7 +674,7 @@ public actor Connection {
             // below — outside this scope, after the response is written —
             // is what makes deferred work provably follow the response
             // rather than merely being likely to.
-            let hooks = ResponseHooks()
+            let hooks = ResponseHooks(logger: logger, requestId: id)
             let outcome = await Self.$currentResponseHooks.withValue(hooks) {
                 await Self.outcome(of: handler, method: method, params: params)
             }
@@ -582,8 +682,13 @@ public actor Connection {
             // `completeInbound` skips writing if the connection closed while
             // the handler ran, and running hooks anyway would break the
             // documented contract that they follow a response that exists.
+            // With no response, discard the hooks: a task that the handler
+            // started keeps `hooks` through the task-local, and must not keep
+            // the closures and their captured values too.
             if await self.completeInbound(id: id, outcome: outcome, batchToken: batchToken) {
                 await hooks.runAll()
+            } else {
+                hooks.discardAll()
             }
         }
         inboundTasks[id] = task
