@@ -107,6 +107,54 @@ public final class ClientSideConnection: Sendable {
         subscribe(to: sessionId).updates
     }
 
+    // MARK: - Outgoing requests
+
+    /// Subscribes to the start and the finish of each request that this
+    /// connection sends to the agent.
+    ///
+    /// Use the events to match an ID that the agent names to a request of the
+    /// client. For example, a request-scoped elicitation names the ID of a
+    /// client request in ``ElicitationRequestScope/requestId``. A client can
+    /// show the elicitation while that request is in flight, and remove it on
+    /// ``OutgoingRequestEvent/finished(id:)``.
+    ///
+    /// The stream first gets one ``OutgoingRequestEvent/started(id:method:)``
+    /// for each request that is in flight when you subscribe, in start order.
+    /// Then it gets the live events. Each subscription gets every event. The
+    /// connection sends `started` before it writes the request, and sends
+    /// `finished` before the call returns or throws. The request finishes on
+    /// a result, an error, a cancelled call, a timeout, a failed write, or
+    /// connection close. When the connection closes, the stream gets
+    /// `finished` for each request that is in flight, and then the stream
+    /// finishes. A subscription after close gets a stream that is already
+    /// finished.
+    ///
+    /// The stream keeps all events until you read them. Read the stream, or
+    /// stop the iteration, so that it does not keep events that you do not
+    /// need.
+    ///
+    /// - Returns: A stream of the outgoing-request events.
+    public func subscribeToOutgoingRequests() -> AsyncStream<OutgoingRequestEvent> {
+        core.outgoingRequests.subscribe()
+    }
+
+    /// Gives the wire method of one request that this connection sent to the
+    /// agent and that has not finished.
+    ///
+    /// The lookup is synchronous. It agrees with
+    /// ``subscribeToOutgoingRequests()``: it gives the method after
+    /// ``OutgoingRequestEvent/started(id:method:)`` and `nil` after
+    /// ``OutgoingRequestEvent/finished(id:)``. For example, when a
+    /// request-scoped elicitation arrives during `loginAuth(_:)`,
+    /// `inFlightMethod(for: scope.requestId)` gives `auth/login`.
+    ///
+    /// - Parameter requestId: The JSON-RPC ID of the request.
+    /// - Returns: The wire method of the request, or `nil` when no in-flight
+    ///   request of this connection has this ID.
+    public func inFlightMethod(for requestId: RequestId) -> String? {
+        core.outgoingRequests.method(for: requestId)
+    }
+
     // MARK: - Inbound dispatch (Agent → Client)
 
     /// Decodes and dispatches one request to the client's typed handler.

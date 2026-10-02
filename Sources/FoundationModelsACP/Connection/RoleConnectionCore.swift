@@ -114,6 +114,12 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
         try await RoleDispatch.notify(connection, handler: handler, on: peerSide, params)
     }
 
+    /// The outbound peer requests that wait for a response, and the events
+    /// that tell when each one starts and finishes.
+    var outgoingRequests: OutgoingRequestTracker {
+        connection.outgoingRequests
+    }
+
     /// Shuts the connection down, rejecting every pending request.
     func close() async {
         await connection.close()

@@ -289,7 +289,13 @@ public actor Connection {
     /// Monotonic id for outbound requests.
     private var nextRequestID = 1
     /// Outbound requests awaiting a response, keyed by their wire id.
+    /// Each change to this map is also recorded in `outgoingRequests`.
     private var pending: [RequestId: PendingRequest] = [:]
+    /// The outbound requests that wait for a response, and the events that
+    /// tell when each one starts and finishes. The connection records a start
+    /// before it writes the request, and a finish before it resumes the
+    /// caller, so the role connections can give a synchronous lookup.
+    nonisolated let outgoingRequests = OutgoingRequestTracker()
     /// In-flight inbound request handlers, keyed by the request's own wire
     /// id — the same id a `$/cancel_request` names — and cancelled on
     /// disconnect.
@@ -407,8 +413,11 @@ public actor Connection {
                 }
                 let timeoutTask = makeTimeoutTask(for: id, after: limit)
                 pending[id] = PendingRequest(continuation: continuation, timeout: timeoutTask)
+                outgoingRequests.start(id: id, method: method)
                 // Write only after registering, so a response arriving
-                // immediately always finds its continuation.
+                // immediately always finds its continuation, and a peer
+                // message that names this id always comes after its start
+                // event.
                 Task { await self.write(frame, failing: id) }
             }
         } onCancel: {
@@ -823,7 +832,7 @@ public actor Connection {
     ///   - id: The response's wire id.
     ///   - fields: The response envelope's members.
     private func resolve(id: JSONValue, fields: [String: JSONValue]) {
-        guard let entry = pending.removeValue(forKey: id) else {
+        guard let entry = removePending(id: id) else {
             log("dropping response for unknown id \(id)")
             return
         }
@@ -907,10 +916,22 @@ public actor Connection {
     /// - Returns: Whether a pending entry was found and rejected.
     @discardableResult
     private func fail(id: RequestId, with error: any Error) -> Bool {
-        guard let entry = pending.removeValue(forKey: id) else { return false }
+        guard let entry = removePending(id: id) else { return false }
         entry.timeout?.cancel()
         entry.continuation.resume(throwing: error)
         return true
+    }
+
+    /// Removes one pending request and records its finish in
+    /// `outgoingRequests`, before the caller resumes the continuation.
+    ///
+    /// - Parameter id: The pending entry's wire id.
+    /// - Returns: The removed entry, or `nil` when no request with this id
+    ///   is pending.
+    private func removePending(id: RequestId) -> PendingRequest? {
+        guard let entry = pending.removeValue(forKey: id) else { return nil }
+        outgoingRequests.finish(id: id)
+        return entry
     }
 
     /// Rejects one outbound request whose awaiting `Task` was cancelled, and
@@ -928,8 +949,10 @@ public actor Connection {
         await writeEncoded(notification, logMessage: "failed to send $/cancel_request")
     }
 
-    /// Fails loud: marks the connection closed, rejects every pending
-    /// request with `ConnectionError.closed`, cancels in-flight inbound
+    /// Fails loud: marks the connection closed, records the finish of every
+    /// pending request in `outgoingRequests` and finishes its event streams,
+    /// rejects every pending request with `ConnectionError.closed`, cancels
+    /// in-flight inbound
     /// handlers, stops the read loop, and fires the close handler last so
     /// upper layers finish derived streams only after callers are unblocked.
     /// Idempotent.
@@ -940,6 +963,7 @@ public actor Connection {
         readTask = nil
         let rejected = pending
         pending = [:]
+        outgoingRequests.finishAll()
         for entry in rejected.values {
             entry.timeout?.cancel()
             entry.continuation.resume(throwing: ConnectionError.closed)
