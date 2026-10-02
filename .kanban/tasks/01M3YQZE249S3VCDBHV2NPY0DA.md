@@ -81,10 +81,26 @@ comments:
     - evidence: `swift build --build-tests` after touch of all Sources/Tests Swift files: 0 warnings, 0 errors. `swift test`: 349 tests in 31 suites and 110 tests in 14 suites pass. `swift package generate-documentation --target FoundationModelsACP --warnings-as-errors`: exit 0. Replay test failed once with the replay broken, then passed after the revert. 5 files: Sources/FoundationModelsACP/Core/PatchField.swift, Sources/FoundationModelsACP/Session/SessionEntry.swift, Sources/FoundationModelsACP/Session/AccumulatedTerminal.swift, Sources/FoundationModelsACP/Session/SessionMergeEngine.swift, Tests/FoundationModelsACPTests/SessionMergeEngineTests.swift. Not committed.
     - next: /review
   timestamp: 2026-10-02T18:35:04.057065+00:00
+- actor: claude-code
+  id: 01m3yyjdere28gzff66chh3qma
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (85bb373). 0 findings, 0 confirmed, 0 refuted. 5 files reviewed. 2 .kanban files not reviewed (.reviewignore). All 3 prior findings are checked.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-02T18:38:34.456073+00:00
+- actor: claude-code
+  id: 01m3yyjp1yhhqj3qcn0p2c84m1
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 5 files, explicit access modifiers, full replay check
+    - test: green — swift build --build-tests 0 warnings (forced recompile); swift test passed; IntegrationTests 7 passed
+    - commit: 85bb373
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-10-02T18:38:43.262466+00:00
 depends_on:
 - 01M3YQYR2Y867FQBAZJG2MKX79
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: 9f80
 title: Replace SessionUpdateAggregator with a Sendable session merge engine
 ---
 ## What
