@@ -34,11 +34,27 @@ comments:
     - evidence: 8 files — Sources/FoundationModelsACP/Connection/AgentSideConnection.swift, Sources/FoundationModelsACP/Session/PendingPromptCorrelator.swift (new), Sources/acp-test-agent/main.swift, README.md, Tests/FoundationModelsACPTests/PendingPromptCorrelatorTests.swift (new), Tests/FoundationModelsACPTests/UserMessageInsertionTests.swift (new), Tests/FoundationModelsACPTests/WireOrderTestSupport.swift (new), Tests/FoundationModelsACPTests/PromptLifecycleTests.swift. `swift build --build-tests`: 0 warnings. `swift test`: 366 + 110 tests passed. `swift test --package-path IntegrationTests`: 7 passed. DocC `--warnings-as-errors` for FoundationModelsACP: built.
     - next: /review
   timestamp: 2026-10-02T18:48:44.717603+00:00
+- actor: claude-code
+  id: 01m3yzeh62xt6ctrc55dc2bncz
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (aeb49c2). 0 findings, 0 confirmed, 0 refuted. 7 files attempted, 0 failed. Not reviewed: 2 .kanban files (ignore rule), README.md (no validator matches).
+    - next: none. The task moved to done.
+  timestamp: 2026-10-02T18:53:55.778491+00:00
+- actor: claude-code
+  id: 01m3yzeskc5mevx01tpbdmzyxa
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 8 files, insertUserMessage helper, PendingPromptCorrelator
+    - test: green — swift build --build-tests 0 warnings; swift test passed (new suites: 17 tests); IntegrationTests 7 passed
+    - commit: aeb49c2
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-10-02T18:54:04.396977+00:00
 depends_on:
 - 01M3YQYR2Y867FQBAZJG2MKX79
 - 01M3YQZE249S3VCDBHV2NPY0DA
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: a080
 title: Add the shared prompt messageId helper for agent and client
 ---
 ## What
