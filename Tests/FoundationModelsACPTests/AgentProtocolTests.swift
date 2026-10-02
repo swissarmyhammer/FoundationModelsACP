@@ -35,7 +35,7 @@ private struct BaselineAgent: Agent {
     }
 
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {
-        PromptResponse()
+        PromptResponse.stubAcknowledgement
     }
 
     func sessionCancel(_ params: CancelSessionNotification) async {}
@@ -70,7 +70,7 @@ private struct FullAgent: Agent {
     }
 
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {
-        PromptResponse()
+        PromptResponse.stubAcknowledgement
     }
 
     func sessionCancel(_ params: CancelSessionNotification) async {}
@@ -241,7 +241,7 @@ private struct FullAgent: Agent {
 
     @Test func agentCarriesNoUnstableOnlyMethod() throws {
         // Elicitation graduated to the stable surface in the vendored
-        // `schema-v2.0.0-alpha.3` — but it routes to the *client* side, so no
+        // `schema-v2.0.0-alpha.7` — but it routes to the *client* side, so no
         // elicitation method belongs on `Agent` either way. What must never
         // appear here is any method the unstable manifest alone routes
         // (`session/fork`, `nes/*`, `providers/*`, `document/did*`, `mcp/*`).

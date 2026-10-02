@@ -82,13 +82,13 @@ this out in the milestone that restores it, because it is easy to lose quietly:
 - Every connection, transport, replay, and end-to-end test — **M3** onward.
 
 **Resolved by M0.** `Schema/` now holds `acp-v2.json` and both meta manifests,
-vendored from the tagged pre-release `schema-v2.0.0-alpha.3`;
+vendored from the tagged pre-release `schema-v2.0.0-alpha.7`;
 `SchemaSet.acpV2` / `GeneratorConfig.acpV2` point at them, generation is
 idempotent, and the CI codegen diff gate passes again. v2 **does** publish an
 unstable manifest, so the generator's `Unstable` namespace is live code, not
-dead: the manifest declares 26 agent, 7 client, and 1 protocol method, and the
-emitted namespace routes the 20 entries the stable table does not already carry
-(15 agent, 5 client — `mcp/message` is routed on both sides, so it is two
+dead: the manifest declares 26 agent, 5 client, and 1 protocol method, and the
+emitted namespace routes the 16 entries the stable table does not already carry
+(15 agent, 1 client — `mcp/message` is routed on both sides, so it is two
 entries under one wire name).
 
 The gate needed one fix to mean anything: because the content-hash stamp is
@@ -198,10 +198,10 @@ and `_meta`. The `elicitation` field gates the elicitation methods; an omitted
 field and `null` both mean the client gives no elicitation support.
 
 **Unstable-only, and nothing may be built on it** (`acp-v2.meta.unstable.json`,
-routed by name and side only): `mcp/connect`, `mcp/message`, `mcp/disconnect`,
+routed by name and side only): `mcp/message`,
 `session/fork`, `providers/list` / `providers/set` / `providers/disable`,
 `nes/*`, and `document/did*`. Elicitation is **stable** in the vendored
-`schema-v2.0.0-alpha.3`: `elicitation/create` and `elicitation/complete` route
+`schema-v2.0.0-alpha.7`: `elicitation/create` and `elicitation/complete` route
 on the stable client surface, and this package implements them.
 
 **`session/update` carries everything that happens** — the sixteen variants the
@@ -214,8 +214,10 @@ schema lists, in order: `user_message_chunk`, `user_message`,
 
 ### The five changes that reshape the design
 
-1. **`session/prompt` acknowledges, it does not complete.** It returns `{}`
-   immediately. Progress and completion arrive as **`state_update`** notifications
+1. **`session/prompt` acknowledges, it does not complete.** It returns at once,
+   with the required `messageId` of the user message that the agent inserted
+   (since `schema-v2.0.0-alpha.5`; the agent echoes that message with the same
+   id). Progress and completion arrive as **`state_update`** notifications
    with three states: `running`, `idle` (carrying `stopReason`), and
    **`requires_action`** (foreground work blocked on the user). Cancellation is
    confirmed by an `idle` state with `stopReason: "cancelled"`.
@@ -379,7 +381,7 @@ replayable script.
 ## Milestones
 
 - [x] **M0 — Vendor v2 and restart the pipeline.** `acp-v2.json` and both meta
-  manifests vendored from `schema-v2.0.0-alpha.3` (a later re-vendor replaced
+  manifests vendored from `schema-v2.0.0-alpha.7` (later re-vendors replaced
   M0's first artifact set); `SchemaSet.acpV2` / `GeneratorConfig.acpV2`
   re-pointed; the generator taught v2's `anyOf` union vocabulary; plugin,
   content-hash no-op, and CI diff gate green. The method and
@@ -436,7 +438,7 @@ replayable script.
 - [x] **M8 — Permissions.** `session/request_permission` with `title` /
   `description` / tagged `subject` (`tool_call` or `command`, the latter
   optionally naming a `terminalId`). **Elicitation is now stable and
-  implemented** — the vendored `schema-v2.0.0-alpha.3` holds
+  implemented** — the vendored `schema-v2.0.0-alpha.7` holds
   `elicitation/create` and `elicitation/complete` on the stable client
   surface. `Client` carries `createElicitation` and `elicitationComplete`,
   both connections route them, and `ElicitationLifecycleTests` covers the

@@ -156,7 +156,7 @@ private final class PromptLifecycleAgent: Agent {
             }
             registry.beginWork(params.sessionId, task)
         }
-        return PromptResponse()
+        return PromptResponse(messageId: messageId)
     }
 
     func sessionCancel(_ params: CancelSessionNotification) async {
@@ -394,12 +394,14 @@ private let standardTestTimeout = 1  // minute
         return (agentConn, client, session)
     }
 
-    // MARK: session/prompt acknowledges with {}
+    // MARK: session/prompt acknowledges with the user message's id
 
-    @Test func promptResponseEncodesAsAnEmptyObject() throws {
-        // "It returns `{}` immediately" — the literal wire shape of
-        // acceptance, independent of any live agent/client scenario.
-        #expect(try WireRoundTrip.encode(PromptResponse()) == .object([:]))
+    @Test func promptResponseEncodesAsAnObjectCarryingOnlyTheMessageId() throws {
+        // The literal wire shape of acceptance, independent of any live
+        // agent/client scenario: the response names the user message that
+        // the agent inserted, and nothing else.
+        let response = PromptResponse(messageId: MessageId(rawValue: "user-msg-1"))
+        #expect(try WireRoundTrip.encode(response) == .object(["messageId": .string("user-msg-1")]))
     }
 
     // MARK: Ordering — the entire semantic change
@@ -447,14 +449,11 @@ private let standardTestTimeout = 1  // minute
         var updates = client.updates(for: session).makeAsyncIterator()
 
         let response = try await client.prompt(PromptRequest(prompt: [.text(TextContent(text: "go"))], sessionId: session))
-        #expect(response == PromptResponse())
 
         #expect(await updates.next() == .stateUpdate(.running(RunningStateUpdate())))
-        let echoed = try #require(await updates.next())
-        guard case .userMessageChunk = echoed else {
-            Issue.record("expected a user_message_chunk, got \(echoed)")
-            return
-        }
+        // The echo names the same user message that the response names.
+        let echo = ContentChunk(content: .text(TextContent(text: "go")), messageId: response.messageId)
+        #expect(await updates.next() == .userMessageChunk(echo))
         #expect(await updates.next() == .stateUpdate(.idle(IdleStateUpdate(stopReason: .maxTokens))))
 
         await agentConn.close()
@@ -464,11 +463,11 @@ private let standardTestTimeout = 1  // minute
     // MARK: The agent owns message identity
 
     @Test(.timeLimit(.minutes(standardTestTimeout)))
-    func acceptingAPromptEmitsUserMessageChunksSharingOneStableAgentGeneratedMessageId() async throws {
+    func acceptingAPromptEmitsUserMessageChunksSharingTheMessageIdThatTheResponseReturns() async throws {
         let (agentConn, client, session) = try await makeSessionPair(script: .completesImmediately)
         var updates = client.updates(for: session).makeAsyncIterator()
 
-        _ = try await client.prompt(
+        let response = try await client.prompt(
             PromptRequest(
                 prompt: [.text(TextContent(text: "first")), .text(TextContent(text: "second"))],
                 sessionId: session
@@ -490,6 +489,8 @@ private let standardTestTimeout = 1  // minute
         // Stable across chunks: the second chunk carries the very same id the
         // first one did, not a fresh one per chunk.
         #expect(first.messageId == second.messageId)
+        // The response names the same user message that the echo names.
+        #expect(first.messageId == response.messageId)
         #expect(first.content == .text(TextContent(text: "first")))
         #expect(second.content == .text(TextContent(text: "second")))
 

@@ -246,16 +246,6 @@ public enum Unstable {
                 side: .agent
             ),
             UnstableMethodInfo(
-                wireMethod: "mcp/connect",
-                handlerName: "mcpConnect",
-                side: .client
-            ),
-            UnstableMethodInfo(
-                wireMethod: "mcp/disconnect",
-                handlerName: "mcpDisconnect",
-                side: .client
-            ),
-            UnstableMethodInfo(
                 wireMethod: "mcp/message",
                 handlerName: "mcpMessage",
                 side: .client

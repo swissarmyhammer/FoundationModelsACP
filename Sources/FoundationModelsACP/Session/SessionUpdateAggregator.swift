@@ -124,6 +124,7 @@ public struct SessionUpdateAggregator: Sendable {
             content: incoming.content.folded(onto: existing.content),
             kind: incoming.kind.folded(onto: existing.kind),
             locations: incoming.locations.folded(onto: existing.locations),
+            name: incoming.name.folded(onto: existing.name),
             rawInput: incoming.rawInput.folded(onto: existing.rawInput),
             rawOutput: incoming.rawOutput.folded(onto: existing.rawOutput),
             status: incoming.status.folded(onto: existing.status),

@@ -65,7 +65,7 @@ public enum PlanUpdateContent: Codable, Hashable, Sendable {
 ///
 /// Replay includes the position identified by the cursor.
 public enum ReplayFrom: Codable, Hashable, Sendable {
-    /// Replay the whole conversation from its first replayable entry.
+    /// Replay all retained conversation history from its first replayable entry.
     case start(ReplayFromStart)
 
     /// An unrecognized `type` value, captured alongside the members

@@ -159,6 +159,22 @@ final class LiveAgentProcess: @unchecked Sendable {
         return (envelope, receivedBox.value)
     }
 
+    /// Waits for the next JSON-RPC notification with the given method from
+    /// the agent.
+    ///
+    /// - Parameter method: The JSON-RPC method name to wait for.
+    /// - Returns: The notification envelope received, as real wire bytes for
+    ///   the caller to inspect or validate against the schema.
+    /// - Throws: `TimedOutError` if no matching notification arrives in time.
+    func notification(method: String) async throws -> [String: Any] {
+        let receivedBox = try await withTimeout(.seconds(10)) {
+            UncheckedBox(value: try await self.nextLine { object in
+                (object["method"] as? String) == method && object["id"] == nil
+            })
+        }
+        return receivedBox.value
+    }
+
     /// Sends one JSON-RPC notification (no `id`, no response expected).
     ///
     /// - Parameters:

@@ -9,9 +9,12 @@ protocols, full-duplex JSON-RPC connections, ndJSON framing, and transports.
 It has zero library dependencies and it requires macOS 27.
 
 ```swift
+import Foundation
 import FoundationModelsACP
 
 struct MyAgent: Agent {
+    let connection: AgentSideConnection
+
     func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
         InitializeResponse(
             info: Implementation(name: "my-agent", version: "1.0.0"),
@@ -37,13 +40,22 @@ struct MyAgent: Agent {
     }
 
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {
-        PromptResponse()
+        // Echo the user message, and return the same id in the response.
+        let messageId = MessageId(rawValue: UUID().uuidString)
+        let echo = UpdateSessionNotification(
+            sessionId: params.sessionId,
+            update: .userMessage(UserMessage(messageId: messageId, content: .value(params.prompt)))
+        )
+        connection.afterRespondingToCurrentRequest { [connection] in
+            try? await connection.sessionUpdate(echo)
+        }
+        return PromptResponse(messageId: messageId)
     }
 
     func sessionCancel(_ params: CancelSessionNotification) async {}
 }
 
-let connection = await AgentSideConnection(stream: .stdio) { _ in MyAgent() }
+let connection = await AgentSideConnection(stream: .stdio) { conn in MyAgent(connection: conn) }
 ```
 
 ## Install

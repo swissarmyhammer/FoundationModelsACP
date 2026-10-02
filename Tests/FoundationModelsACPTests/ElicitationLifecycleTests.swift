@@ -209,7 +209,7 @@ private struct PassiveElicitationAgent: Agent {
     }
 
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {
-        PromptResponse()
+        PromptResponse.stubAcknowledgement
     }
 
     func sessionCancel(_ params: CancelSessionNotification) async {}

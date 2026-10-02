@@ -77,7 +77,7 @@ import Testing
 
         func prompt(_ params: PromptRequest) async throws -> PromptResponse {
             await log.record(name: "prompt")
-            return PromptResponse()
+            return PromptResponse.stubAcknowledgement
         }
 
         func sessionCancel(_ params: CancelSessionNotification) async {

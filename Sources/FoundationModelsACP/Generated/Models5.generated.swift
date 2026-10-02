@@ -608,6 +608,13 @@ public struct NewSessionResponse: Codable, Hashable, Sendable {
     /// Used in all subsequent requests for this conversation.
     public var sessionId: SessionId
 
+    /// Initial commands the agent can execute in this session.
+    ///
+    /// Optional. Omitted or empty means no initial commands are advertised.
+    /// Senders MUST use an array, not `null`; receivers treat `null` like omission.
+    /// Later `available_commands_update` notifications replace this list.
+    public var availableCommands: [AvailableCommand]?
+
     /// Initial session configuration options.
     public var configOptions: [SessionConfigOption]?
 
@@ -621,16 +628,19 @@ public struct NewSessionResponse: Codable, Hashable, Sendable {
     /// Creates a `NewSessionResponse`.
     public init(
         sessionId: SessionId,
+        availableCommands: [AvailableCommand]? = nil,
         configOptions: [SessionConfigOption]? = nil,
         meta: JSONValue? = nil
     ) {
         self.sessionId = sessionId
+        self.availableCommands = availableCommands
         self.configOptions = configOptions
         self.meta = meta
     }
 
     private enum CodingKeys: String, CodingKey {
         case sessionId
+        case availableCommands
         case configOptions
         case meta = "_meta"
     }
@@ -644,6 +654,7 @@ public struct NewSessionResponse: Codable, Hashable, Sendable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.sessionId = try container.decode(SessionId.self, forKey: .sessionId)
+        self.availableCommands = container.forgivingDecodeArrayIfPresent(of: AvailableCommand.self, forKey: .availableCommands)
         self.configOptions = container.forgivingDecodeArrayIfPresent(of: SessionConfigOption.self, forKey: .configOptions)
         self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
     }
@@ -656,6 +667,7 @@ public struct NewSessionResponse: Codable, Hashable, Sendable {
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(sessionId, forKey: .sessionId)
+        try container.encodeIfPresent(availableCommands, forKey: .availableCommands)
         try container.encodeIfPresent(configOptions, forKey: .configOptions)
         try container.encodeIfPresent(meta, forKey: .meta)
     }

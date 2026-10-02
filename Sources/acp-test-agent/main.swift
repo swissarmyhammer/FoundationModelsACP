@@ -7,6 +7,10 @@ import FoundationModelsACP
 /// test can prove stdout stays pure ndJSON while the agent logs internally —
 /// and answers the handshake with the latest protocol version.
 struct TestAgent: Agent {
+    /// The connection that the factory gave this agent. The agent uses it to
+    /// echo each prompt back to the client as a `user_message` update.
+    let connection: AgentSideConnection
+
     /// Logs to stderr and answers with the latest protocol version.
     ///
     /// - Parameter params: The client's initialization request.
@@ -54,10 +58,25 @@ struct TestAgent: Agent {
 
     /// Acknowledges the turn immediately, as v2's prompt lifecycle requires.
     ///
+    /// The agent gives the user message a new `MessageId`. After the response
+    /// is on the wire, the agent echoes the prompt as a `user_message` update
+    /// with that same id, because the response and the echo must name the
+    /// same message.
+    ///
     /// - Parameter params: The prompt request.
-    /// - Returns: The immediate acknowledgement.
+    /// - Returns: The immediate acknowledgement, which names the user message.
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {
-        PromptResponse()
+        let messageId = MessageId(rawValue: UUID().uuidString)
+        let echo = UpdateSessionNotification(
+            sessionId: params.sessionId,
+            update: .userMessage(UserMessage(messageId: messageId, content: .value(params.prompt)))
+        )
+        connection.afterRespondingToCurrentRequest { [connection] in
+            // A closed connection drops the echo. This fixture has no caller
+            // to tell, and the response already went out.
+            try? await connection.sessionUpdate(echo)
+        }
+        return PromptResponse(messageId: messageId)
     }
 
     /// Ignores cancellation; the test agent runs no long turns.
@@ -76,7 +95,7 @@ func runUntilTerminated(_ connection: AgentSideConnection) async {
     }
 }
 
-let connection = await AgentSideConnection(stream: .stdio, logger: .standardError) { _ in
-    TestAgent()
+let connection = await AgentSideConnection(stream: .stdio, logger: .standardError) { conn in
+    TestAgent(connection: conn)
 }
 await runUntilTerminated(connection)

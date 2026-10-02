@@ -90,7 +90,7 @@ private func promptAckEnvelope(id: JSONValue) throws -> JSONValue {
     .object([
         "jsonrpc": .string("2.0"),
         "id": id,
-        "result": try JSONValue.encode(result: PromptResponse()),
+        "result": try JSONValue.encode(result: PromptResponse.stubAcknowledgement),
     ])
 }
 
@@ -156,7 +156,7 @@ func lateToolCallUpdateAfterIdleStateUpdateIsDelivered() async throws {
     // v2's prompt acknowledges immediately — the turn's actual progress and
     // completion arrive as `state_update` notifications, not as this response.
     try await send(promptAckEnvelope(id: id), over: agentEnd)
-    #expect(try await prompt.value == PromptResponse())
+    #expect(try await prompt.value == PromptResponse.stubAcknowledgement)
 
     try await send(sessionUpdateEnvelope(notification(for: sessionOne, messageChunk("mid-turn"))), over: agentEnd)
     try await send(sessionUpdateEnvelope(notification(for: sessionOne, idleState(stopReason: .endTurn))), over: agentEnd)
@@ -183,7 +183,7 @@ func postCancelTrailingUpdatesThenCancelledStopReasonInOrder() async throws {
     var updates = client.updates(for: sessionOne).makeAsyncIterator()
     let (prompt, id) = try await startPrompt(on: client, session: sessionOne, reader: reader)
     try await send(promptAckEnvelope(id: id), over: agentEnd)
-    #expect(try await prompt.value == PromptResponse())
+    #expect(try await prompt.value == PromptResponse.stubAcknowledgement)
 
     // The client cancels; cancel is a notification, so nothing here waits.
     try await client.sessionCancel(CancelSessionNotification(sessionId: sessionOne))

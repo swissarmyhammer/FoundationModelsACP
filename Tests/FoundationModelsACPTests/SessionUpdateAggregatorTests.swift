@@ -112,6 +112,23 @@ import Testing
         #expect(toolCall.title == .value("Read a file"))
     }
 
+    @Test func secondToolCallUpdateWithoutANameKeepsTheNameFromTheFirst() throws {
+        var aggregator = SessionUpdateAggregator()
+        aggregator.apply(.toolCallUpdate(ToolCallUpdate(toolCallId: Self.toolCallId, name: .value("read_file"))))
+        aggregator.apply(.toolCallUpdate(ToolCallUpdate(toolCallId: Self.toolCallId, status: .value(.completed))))
+
+        let toolCall = try #require(aggregator.toolCalls[Self.toolCallId])
+        #expect(toolCall.name == .value("read_file"))
+        #expect(toolCall.status == .value(.completed))
+    }
+
+    @Test func toolCallUpdateWithANullNameClearsTheNameFromTheFirst() {
+        var aggregator = SessionUpdateAggregator()
+        aggregator.apply(.toolCallUpdate(ToolCallUpdate(toolCallId: Self.toolCallId, name: .value("read_file"))))
+        aggregator.apply(.toolCallUpdate(ToolCallUpdate(toolCallId: Self.toolCallId, name: .cleared)))
+        #expect(aggregator.toolCalls[Self.toolCallId]?.name == .cleared)
+    }
+
     @Test func toolCallUpdateClearingAFieldOverridesAnEarlierValue() {
         var aggregator = SessionUpdateAggregator()
         aggregator.apply(.toolCallUpdate(ToolCallUpdate(toolCallId: Self.toolCallId, title: .value("Read a file"))))

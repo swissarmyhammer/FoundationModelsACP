@@ -153,7 +153,9 @@ public struct GeneratorConfig: Sendable {
         // session info unchanged. `null` clears the corresponding value").
         // `UserMessage`/`AgentMessage`/`AgentThought` single out `content`
         // by name for the same rule; `messageId` is required and carries no
-        // patch prose, so it stays a plain required field.
+        // patch prose, so it stays a plain required field. `ToolCallUpdate.name`
+        // (added in `schema-v2.0.0-alpha.4`) also states the rule in its own
+        // description: omission means no change, `null` clears the name.
         patchSemanticsFields: [
             "UserMessage.content", "UserMessage._meta",
             "AgentMessage.content", "AgentMessage._meta",
@@ -161,7 +163,7 @@ public struct GeneratorConfig: Sendable {
             "SessionInfoUpdate.title", "SessionInfoUpdate.updatedAt", "SessionInfoUpdate._meta",
             "TerminalUpdate.command", "TerminalUpdate.cwd", "TerminalUpdate.output",
             "TerminalUpdate.exitStatus", "TerminalUpdate._meta",
-            "ToolCallUpdate.title", "ToolCallUpdate.kind", "ToolCallUpdate.status",
+            "ToolCallUpdate.name", "ToolCallUpdate.title", "ToolCallUpdate.kind", "ToolCallUpdate.status",
             "ToolCallUpdate.content", "ToolCallUpdate.locations", "ToolCallUpdate.rawInput",
             "ToolCallUpdate.rawOutput", "ToolCallUpdate._meta",
         ],

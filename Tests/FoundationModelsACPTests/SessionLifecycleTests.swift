@@ -241,7 +241,7 @@ private final class SessionManagingAgent: Agent {
             }
         }
         try await registry.beginWork(params.sessionId, task)
-        return PromptResponse()
+        return PromptResponse.stubAcknowledgement
     }
 
     func sessionCancel(_ params: CancelSessionNotification) async {
@@ -320,7 +320,7 @@ private struct SessionBaselineOnlyAgent: Agent {
     }
 
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {
-        PromptResponse()
+        PromptResponse.stubAcknowledgement
     }
 
     func sessionCancel(_ params: CancelSessionNotification) async {}

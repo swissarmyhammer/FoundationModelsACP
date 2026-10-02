@@ -133,7 +133,7 @@ private final class ReversePromptAgent: Agent {
             )
         )
         try await connection.sessionUpdate(update)
-        return PromptResponse()
+        return PromptResponse.stubAcknowledgement
     }
 
     func sessionCancel(_ params: CancelSessionNotification) async {}
@@ -258,7 +258,7 @@ private final class RecordingAgent: Agent {
     }
 
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {
-        PromptResponse()
+        PromptResponse.stubAcknowledgement
     }
 
     func sessionCancel(_ params: CancelSessionNotification) async {

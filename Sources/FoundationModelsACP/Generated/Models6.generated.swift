@@ -346,13 +346,23 @@ public struct PromptRequest: Codable, Hashable, Sendable {
     }
 }
 
-/// Response acknowledging that a user prompt was accepted.
+/// Response acknowledging that a user prompt was inserted into the ACP conversation.
 ///
-/// This response does not indicate that the agent has finished processing.
+/// This response does not indicate that the prompt was merely received or queued, nor that the
+/// agent has finished processing it.
 /// Processing and completion are reported through `state_update` session updates.
 ///
 /// See protocol docs: [Prompt Accepted](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#2-prompt-accepted)
 public struct PromptResponse: Codable, Hashable, Sendable {
+    /// Identifies the user message inserted into the ACP conversation.
+    ///
+    /// Required and non-null. Omission and explicit `null` are both invalid.
+    ///
+    /// The corresponding user-message session update carries this same identifier and may arrive
+    /// before or after this response. Agents must echo the message during the live session, but are
+    /// not required to retain it. If retained and replayed, the message keeps this identifier.
+    public var messageId: MessageId
+
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
     /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
     /// these keys.
@@ -362,12 +372,15 @@ public struct PromptResponse: Codable, Hashable, Sendable {
 
     /// Creates a `PromptResponse`.
     public init(
+        messageId: MessageId,
         meta: JSONValue? = nil
     ) {
+        self.messageId = messageId
         self.meta = meta
     }
 
     private enum CodingKeys: String, CodingKey {
+        case messageId
         case meta = "_meta"
     }
 
@@ -379,6 +392,7 @@ public struct PromptResponse: Codable, Hashable, Sendable {
     ///   or violates a wire invariant.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.messageId = try container.decode(MessageId.self, forKey: .messageId)
         self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
     }
 
@@ -389,6 +403,7 @@ public struct PromptResponse: Codable, Hashable, Sendable {
     /// - Throws: Rethrows any error from the underlying encoder.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(messageId, forKey: .messageId)
         try container.encodeIfPresent(meta, forKey: .meta)
     }
 }
@@ -439,7 +454,7 @@ public struct ProtocolLevelNotification: Codable, Hashable, Sendable {
     }
 }
 
-/// Inclusive replay cursor requesting replay from the start of the conversation.
+/// Inclusive replay cursor requesting replay from the start of retained conversation history.
 public struct ReplayFromStart: Codable, Hashable, Sendable {
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
     /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
@@ -777,7 +792,7 @@ public struct ResourceLink: Codable, Hashable, Sendable {
 
 /// Request parameters for resuming an existing session.
 ///
-/// Resumes an existing session and optionally replays prior conversation
+/// Resumes an existing session and optionally replays retained conversation
 /// history according to `replayFrom`.
 public struct ResumeSessionRequest: Codable, Hashable, Sendable {
     /// The working directory for this session. Must be an absolute path.
@@ -802,8 +817,8 @@ public struct ResumeSessionRequest: Codable, Hashable, Sendable {
     /// Optional. Omitted or `null` both mean the Agent should resume without
     /// replaying previous conversation history. Replay cursors are inclusive:
     /// replay includes the position identified by the cursor. Supplying
-    /// `{ "type": "start" }` means the Agent should replay the whole
-    /// conversation before responding.
+    /// `{ "type": "start" }` means the Agent should replay all retained
+    /// conversation history before responding.
     public var replayFrom: ReplayFrom?
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
@@ -873,6 +888,13 @@ public struct ResumeSessionRequest: Codable, Hashable, Sendable {
 
 /// Response from resuming an existing session.
 public struct ResumeSessionResponse: Codable, Hashable, Sendable {
+    /// Initial commands the agent can execute in this session.
+    ///
+    /// Optional. Omitted or empty means no initial commands are advertised.
+    /// Senders MUST use an array, not `null`; receivers treat `null` like omission.
+    /// Later `available_commands_update` notifications replace this list.
+    public var availableCommands: [AvailableCommand]?
+
     /// Initial session configuration options.
     public var configOptions: [SessionConfigOption]?
 
@@ -885,14 +907,17 @@ public struct ResumeSessionResponse: Codable, Hashable, Sendable {
 
     /// Creates a `ResumeSessionResponse`.
     public init(
+        availableCommands: [AvailableCommand]? = nil,
         configOptions: [SessionConfigOption]? = nil,
         meta: JSONValue? = nil
     ) {
+        self.availableCommands = availableCommands
         self.configOptions = configOptions
         self.meta = meta
     }
 
     private enum CodingKeys: String, CodingKey {
+        case availableCommands
         case configOptions
         case meta = "_meta"
     }
@@ -905,6 +930,7 @@ public struct ResumeSessionResponse: Codable, Hashable, Sendable {
     ///   or violates a wire invariant.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.availableCommands = container.forgivingDecodeArrayIfPresent(of: AvailableCommand.self, forKey: .availableCommands)
         self.configOptions = container.forgivingDecodeArrayIfPresent(of: SessionConfigOption.self, forKey: .configOptions)
         self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
     }
@@ -916,49 +942,8 @@ public struct ResumeSessionResponse: Codable, Hashable, Sendable {
     /// - Throws: Rethrows any error from the underlying encoder.
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(availableCommands, forKey: .availableCommands)
         try container.encodeIfPresent(configOptions, forKey: .configOptions)
-        try container.encodeIfPresent(meta, forKey: .meta)
-    }
-}
-
-/// Foreground work is in progress.
-public struct RunningStateUpdate: Codable, Hashable, Sendable {
-    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
-    ///
-    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
-
-    /// Creates a `RunningStateUpdate`.
-    public init(
-        meta: JSONValue? = nil
-    ) {
-        self.meta = meta
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case meta = "_meta"
-    }
-
-    /// Decodes a `RunningStateUpdate`; forgiving fields degrade to their
-    /// schema defaults instead of failing the message.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
-    ///   or violates a wire invariant.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
-    }
-
-    /// Encodes a `RunningStateUpdate`, omitting nil optional fields — never
-    /// emitting JSON null for an absent capability-gated field.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(meta, forKey: .meta)
     }
 }

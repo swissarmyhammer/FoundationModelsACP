@@ -469,8 +469,6 @@ import FoundationModelsACP
                 "agent providers/list -> providersList",
                 "agent providers/set -> providersSet",
                 "agent session/fork -> sessionFork",
-                "client mcp/connect -> mcpConnect",
-                "client mcp/disconnect -> mcpDisconnect",
                 "client mcp/message -> mcpMessage",
             ]
         )
@@ -532,10 +530,10 @@ import FoundationModelsACP
                 "Models3.generated.swift": 14,
                 "Models4.generated.swift": 15,
                 "Models5.generated.swift": 15,
-                "Models6.generated.swift": 16,
+                "Models6.generated.swift": 15,
                 "Models7.generated.swift": 13,
                 "Models8.generated.swift": 15,
-                "Models9.generated.swift": 4,
+                "Models9.generated.swift": 5,
                 "Unions.generated.swift": 14,
                 "Unions2.generated.swift": 12,
                 "Unions3.generated.swift": 1,

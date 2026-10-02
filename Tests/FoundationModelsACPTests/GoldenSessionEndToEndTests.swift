@@ -82,7 +82,7 @@ private let standardTestTimeout = 1  // minute
             connection.afterRespondingToCurrentRequest { [self] in
                 await runTurn(prompt: params.prompt)
             }
-            return PromptResponse()
+            return PromptResponse(messageId: Fixed.userMessageId)
         }
 
         func sessionCancel(_ params: CancelSessionNotification) async {}
@@ -242,7 +242,8 @@ private let standardTestTimeout = 1  // minute
         let promptResponse = try await client.prompt(
             PromptRequest(prompt: [.text(TextContent(text: "Please run ls."))], sessionId: Self.sessionId)
         )
-        #expect(promptResponse == PromptResponse())
+        // The response names the user message that the turn echoes below.
+        #expect(promptResponse == PromptResponse(messageId: Self.userMessageId))
 
         // Drain the session's updates through the closing idle, applying
         // each to an aggregator so the test asserts accumulated *state*, not
