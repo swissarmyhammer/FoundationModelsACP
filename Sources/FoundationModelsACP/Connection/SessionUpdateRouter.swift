@@ -24,7 +24,7 @@ import Synchronization
 /// subscriber gets the kept updates first, then the live updates. When the
 /// router discards kept updates because of a limit, it marks the session and
 /// logs a warning; the first subscriber reads the mark as
-/// `SessionUpdateSubscription.missedUpdates`.
+/// `SessionUpdateSubscription.hasMissedUpdates`.
 final class SessionUpdateRouter: Sendable {
     /// The subscriber registry, guarded for the read loop and subscribers.
     private struct Registry {
@@ -81,12 +81,12 @@ final class SessionUpdateRouter: Sendable {
         let (stream, continuation) = AsyncStream.makeStream(of: SessionUpdate.self)
         guard let attachment = attach(continuation, to: sessionId) else {
             continuation.finish()
-            return SessionUpdateSubscription(updates: stream, missedUpdates: false)
+            return SessionUpdateSubscription(updates: stream, hasMissedUpdates: false)
         }
         continuation.onTermination = { [weak self] _ in
             self?.removeSubscriber(sessionId: sessionId, token: attachment.token)
         }
-        return SessionUpdateSubscription(updates: stream, missedUpdates: attachment.missedUpdates)
+        return SessionUpdateSubscription(updates: stream, hasMissedUpdates: attachment.hasMissedUpdates)
     }
 
     /// Delivers one notification to every subscriber of its session.
@@ -158,7 +158,7 @@ final class SessionUpdateRouter: Sendable {
     private func attach(
         _ continuation: AsyncStream<SessionUpdate>.Continuation,
         to sessionId: SessionId
-    ) -> (token: Int, missedUpdates: Bool)? {
+    ) -> (token: Int, hasMissedUpdates: Bool)? {
         registry.withLock { registry in
             guard !registry.isFinished else { return nil }
             let token = registry.nextToken
@@ -168,7 +168,7 @@ final class SessionUpdateRouter: Sendable {
             for update in kept.updates {
                 continuation.yield(update)
             }
-            return (token, kept.missedUpdates)
+            return (token, kept.hasMissedUpdates)
         }
     }
 
@@ -271,10 +271,10 @@ struct PendingSessionUpdates {
     /// - Parameter sessionId: The session to take.
     /// - Returns: The kept updates, in order, and whether the session was
     ///   marked.
-    mutating func take(for sessionId: SessionId) -> (updates: [SessionUpdate], missedUpdates: Bool) {
+    mutating func take(for sessionId: SessionId) -> (updates: [SessionUpdate], hasMissedUpdates: Bool) {
         let updates = removeBuffer(of: sessionId)
-        let missedUpdates = overflowed.remove(sessionId) != nil
-        return (updates, missedUpdates)
+        let hasMissedUpdates = overflowed.remove(sessionId) != nil
+        return (updates, hasMissedUpdates)
     }
 
     /// Discards the kept updates and the overflow mark of a session.

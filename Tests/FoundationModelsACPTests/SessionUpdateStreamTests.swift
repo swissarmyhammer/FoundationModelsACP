@@ -359,7 +359,7 @@ func routerGivesBufferedUpdatesToTheFirstSubscriberInOrderBeforeLiveUpdates() as
     #expect(await updates.next() == messageChunk("early-1"))
     #expect(await updates.next() == messageChunk("early-2"))
     #expect(await updates.next() == messageChunk("live"))
-    #expect(!subscription.missedUpdates)
+    #expect(!subscription.hasMissedUpdates)
     #expect(log.messages.isEmpty)
 }
 
@@ -390,7 +390,7 @@ func routerDiscardsAFullSessionBufferMarksTheSessionAndLogsAWarning() async {
 
     var updates = subscription.updates.makeAsyncIterator()
     #expect(await updates.next() == messageChunk("live"))
-    #expect(subscription.missedUpdates)
+    #expect(subscription.hasMissedUpdates)
     #expect(log.messages.count == 1)
     #expect(log.messages.first?.contains(sessionOne.rawValue) == true)
 }
@@ -404,8 +404,8 @@ func routerGivesTheOverflowMarkToTheFirstSubscriberOnly() {
     let first = router.subscribe(to: sessionOne)
     let second = router.subscribe(to: sessionOne)
 
-    #expect(first.missedUpdates)
-    #expect(!second.missedUpdates)
+    #expect(first.hasMissedUpdates)
+    #expect(!second.hasMissedUpdates)
 }
 
 @Test(.timeLimit(.minutes(1)))
@@ -421,17 +421,17 @@ func routerEvictsTheOldestBufferWhenOneSessionTooManyHasABuffer() async {
     router.deliver(notification(for: sessions[0], messageChunk("live")))
     var oldestUpdates = oldest.updates.makeAsyncIterator()
     #expect(await oldestUpdates.next() == messageChunk("live"))
-    #expect(oldest.missedUpdates)
+    #expect(oldest.hasMissedUpdates)
 
     let secondOldest = router.subscribe(to: sessions[1])
     var secondOldestUpdates = secondOldest.updates.makeAsyncIterator()
     #expect(await secondOldestUpdates.next() == messageChunk(sessions[1].rawValue))
-    #expect(!secondOldest.missedUpdates)
+    #expect(!secondOldest.hasMissedUpdates)
 
     let newest = router.subscribe(to: sessions[sessionLimit])
     var newestUpdates = newest.updates.makeAsyncIterator()
     #expect(await newestUpdates.next() == messageChunk(sessions[sessionLimit].rawValue))
-    #expect(!newest.missedUpdates)
+    #expect(!newest.hasMissedUpdates)
 
     #expect(log.messages.count == 1)
     #expect(log.messages.first?.contains(sessions[0].rawValue) == true)
@@ -450,7 +450,7 @@ func routerDiscardsTheBufferAndTheMarkOfAClosedSession() async {
 
     var updates = subscription.updates.makeAsyncIterator()
     #expect(await updates.next() == messageChunk("live"))
-    #expect(!subscription.missedUpdates)
+    #expect(!subscription.hasMissedUpdates)
 }
 
 @Test(.timeLimit(.minutes(1)))
@@ -464,7 +464,7 @@ func routerDiscardsEveryBufferAndMarkWhenItFinishes() async {
     let subscription = router.subscribe(to: sessionOne)
 
     #expect(await drain(subscription).isEmpty)
-    #expect(!subscription.missedUpdates)
+    #expect(!subscription.hasMissedUpdates)
 }
 
 // MARK: - Connection buffer before the session/new response
@@ -484,7 +484,7 @@ func anUpdateSentBeforeTheNewSessionResponseReachesTheFirstSubscriber() async th
     var updates = subscription.updates.makeAsyncIterator()
     #expect(await updates.next() == messageChunk("before-response"))
     #expect(await updates.next() == messageChunk("after-subscribe"))
-    #expect(!subscription.missedUpdates)
+    #expect(!subscription.hasMissedUpdates)
 
     await client.close()
 }
@@ -503,7 +503,7 @@ func bufferLimitsSetOnTheConnectionMarkAnOverflowBeforeTheNewSessionResponse() a
     )
     let subscription = client.subscribe(to: session)
 
-    #expect(subscription.missedUpdates)
+    #expect(subscription.hasMissedUpdates)
     #expect(log.messages.count == 1)
 
     await client.close()
@@ -527,7 +527,7 @@ func closingASessionDiscardsItsBufferAndItsMark() async throws {
 
     var updates = subscription.updates.makeAsyncIterator()
     #expect(await updates.next() == messageChunk("live"))
-    #expect(!subscription.missedUpdates)
+    #expect(!subscription.hasMissedUpdates)
 
     await client.close()
 }
@@ -548,7 +548,7 @@ func closingTheConnectionDiscardsEveryBufferAndMark() async throws {
     let subscription = client.subscribe(to: session)
 
     #expect(await drain(subscription).isEmpty)
-    #expect(!subscription.missedUpdates)
+    #expect(!subscription.hasMissedUpdates)
 }
 
 // MARK: - The deprecated stream-only wrapper

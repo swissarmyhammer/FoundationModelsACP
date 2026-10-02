@@ -4,7 +4,7 @@ assignees:
 comments:
 - actor: claude-code
   id: 01m3yr4xc1gyrh4p5hcn44jy84
-  text: 'API decision (agreed with foundationmodelsacpclient-ae): an overflow can occur only while a session has no subscriber, so the mark is known when a subscriber attaches. Replace `updates(for:)` with a subscription value, for example `subscribe(to: SessionId) -> SessionUpdateSubscription` with `updates: AsyncStream<SessionUpdate>` and `missedUpdates: Bool`. The first subscriber takes the buffer and the mark; then both are cleared. The old `updates(for:)` does not need to be kept. The router clears the buffer and the mark by itself when the client sends `session/close` through the connection; the client does not call a separate method.'
+  text: 'API decision (agreed with foundationmodelsacpclient-ae): an overflow can occur only while a session has no subscriber, so the mark is known when a subscriber attaches. Replace `updates(for:)` with a subscription value, for example `subscribe(to: SessionId) -> SessionUpdateSubscription` with `updates: AsyncStream<SessionUpdate>` and `hasMissedUpdates: Bool`. The first subscriber takes the buffer and the mark; then both are cleared. The old `updates(for:)` does not need to be kept. The router clears the buffer and the mark by itself when the client sends `session/close` through the connection; the client does not call a separate method.'
   timestamp: 2026-10-02T16:46:20.545961+00:00
 - actor: claude-code
   id: 01m3yrg5bj1db4j6v3bcq083my
@@ -12,7 +12,7 @@ comments:
   timestamp: 2026-10-02T16:52:29.170660+00:00
 - actor: claude-code
   id: 01m3yv6amvbqkdy9v21ny04kqh
-  text: 'Research: `SessionUpdateRouter` (Connection/SessionUpdateRouter.swift) holds a Mutex registry; `deliver` yields under the lock, so buffered replay in `subscribe` under the same lock keeps order against live updates. `ClientSideConnection.init` builds the router and passes `onClose: router.finishAll()`; `closeSession` is the only client path that sends session/close, so the router clears there. `updates(for:)` has about 20 call sites, all in Tests (none in IntegrationTests, Sources, or docs). A deprecated public `updates(for:)` makes each test call site a warning, so the tests move to `subscribe(to:).updates`. Plan: public `SessionUpdateSubscription` (updates, missedUpdates), public `SessionUpdateBufferLimits` (maximumUpdatesPerSession 1024, maximumSessions 64) as a new `ClientSideConnection.init` parameter, router takes limits and logger. Overflow marks are kept in a separate set after the buffer is evicted; that set has no limit of its own (one session ID for each mark).'
+  text: 'Research: `SessionUpdateRouter` (Connection/SessionUpdateRouter.swift) holds a Mutex registry; `deliver` yields under the lock, so buffered replay in `subscribe` under the same lock keeps order against live updates. `ClientSideConnection.init` builds the router and passes `onClose: router.finishAll()`; `closeSession` is the only client path that sends session/close, so the router clears there. `updates(for:)` has about 20 call sites, all in Tests (none in IntegrationTests, Sources, or docs). A deprecated public `updates(for:)` makes each test call site a warning, so the tests move to `subscribe(to:).updates`. Plan: public `SessionUpdateSubscription` (updates, hasMissedUpdates), public `SessionUpdateBufferLimits` (maximumUpdatesPerSession 1024, maximumSessions 64) as a new `ClientSideConnection.init` parameter, router takes limits and logger. Overflow marks are kept in a separate set after the buffer is evicted; that set has no limit of its own (one session ID for each mark).'
   timestamp: 2026-10-02T17:39:32.635980+00:00
 - actor: claude-code
   id: 01m3yvf30fr7njxrakxd0n254f
@@ -21,12 +21,37 @@ comments:
 - actor: claude-code
   id: 01m3yvnk7ydf5fcczz78pj2xqm
   text: |-
-    Public API added (for downstream): `public struct SessionUpdateSubscription: Sendable { public let updates: AsyncStream<SessionUpdate>; public let missedUpdates: Bool }`; `public struct SessionUpdateBufferLimits: Sendable { public let maximumUpdatesPerSession: Int; public let maximumSessions: Int; public init(maximumUpdatesPerSession: Int, maximumSessions: Int); public static let default /* 1024, 64 */ }`; `ClientSideConnection.init(stream:logger:requestTimeout:bufferLimits: SessionUpdateBufferLimits = .default, _ factory:)`; `public func subscribe(to sessionId: SessionId) -> SessionUpdateSubscription`; `@available(*, deprecated) public func updates(for sessionId: SessionId) -> AsyncStream<SessionUpdate>` (returns `subscribe(to:).updates`, the mark is lost). `closeSession(_:)` discards the kept updates and mark in a `defer` (on success and on error). Behavior notes: after an overflow, later updates for the same session start a new buffer; the update that overflows is discarded with the buffer; marks have no own limit. Existing tests changed: all call sites moved to `subscribe(to:).updates`; `updateForASessionWithNoSubscriberIsDroppedWithoutError` renamed to `anUpdateForASessionWithNoSubscriberDoesNotStopOtherSessions`; the two resume tests in SessionLifecycleTests now read the kept config updates before the resume. Process note: two test blocks were appended with a shell heredoc, not with the files tool.
+    Public API added (for downstream): `public struct SessionUpdateSubscription: Sendable { public let updates: AsyncStream<SessionUpdate>; public let hasMissedUpdates: Bool }`; `public struct SessionUpdateBufferLimits: Sendable { public let maximumUpdatesPerSession: Int; public let maximumSessions: Int; public init(maximumUpdatesPerSession: Int, maximumSessions: Int); public static let default /* 1024, 64 */ }`; `ClientSideConnection.init(stream:logger:requestTimeout:bufferLimits: SessionUpdateBufferLimits = .default, _ factory:)`; `public func subscribe(to sessionId: SessionId) -> SessionUpdateSubscription`; `@available(*, deprecated) public func updates(for sessionId: SessionId) -> AsyncStream<SessionUpdate>` (returns `subscribe(to:).updates`, the mark is lost). `closeSession(_:)` discards the kept updates and mark in a `defer` (on success and on error). Behavior notes: after an overflow, later updates for the same session start a new buffer; the update that overflows is discarded with the buffer; marks have no own limit. Existing tests changed: all call sites moved to `subscribe(to:).updates`; `updateForASessionWithNoSubscriberIsDroppedWithoutError` renamed to `anUpdateForASessionWithNoSubscriberDoesNotStopOtherSessions`; the two resume tests in SessionLifecycleTests now read the kept config updates before the resume. Process note: two test blocks were appended with a shell heredoc, not with the files tool.
 
     ### implement — changed
     - evidence: `swift test` 308 + 107 tests passed, 0 failures, 0 warnings; `swift package generate-documentation --target FoundationModelsACP --warnings-as-errors` clean. Files: Sources/FoundationModelsACP/Connection/{SessionUpdateSubscription.swift (new), SessionUpdateRouter.swift, ClientSideConnection.swift}; Tests/FoundationModelsACPTests/{SessionUpdateStreamTests, SessionLifecycleTests, PromptLifecycleTests, PermissionRequestTests, GoldenSessionEndToEndTests, NDJSONCodecTests, WireTestSupport}.swift
     - next: /review
   timestamp: 2026-10-02T17:47:52.958179+00:00
+- actor: claude-code
+  id: 01m3yw46jnvykdfs1wgj77sbjs
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (8ced40d); 1 finding (1 confirmed, 0 refuted) — Sources/FoundationModelsACP/Connection/SessionUpdateSubscription.swift:23 (swift/naming-clarity)
+    - next: rename `missedUpdates` to `hasMissedUpdates` everywhere it occurs (source, tests, documentation), then review again.
+  timestamp: 2026-10-02T17:55:51.509126+00:00
+- actor: claude-code
+  id: 01m3yw4g89s978dqf8kf487syn
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 10 files, subscribe(to:), SessionUpdateBufferLimits, deprecated updates(for:)
+    - test: green — swift build --build-tests 0 warnings; swift test 308+107 passed; IntegrationTests 7 passed
+    - commit: 8ced40d
+    - review: findings — Sources/FoundationModelsACP/Connection/SessionUpdateSubscription.swift:23
+  timestamp: 2026-10-02T17:56:01.417979+00:00
+- actor: claude-code
+  id: 01m3yw9pf459j77st347m5t62w
+  text: |-
+    Finding fixed: the Boolean `SessionUpdateSubscription.missedUpdates` is now `hasMissedUpdates`. The rename is also in the internal tuple labels (`attach` return, `PendingSessionUpdates.take` return), the local in `take`, the DocC links (SessionUpdateSubscription.swift, ClientSideConnection.swift), the router doc comment, the deprecation message of `updates(for:)`, and 13 test assertions. The three comments on this card that state the API now say `hasMissedUpdates`. I checked the other Booleans in the new code of this task: only `Registry.isFinished` exists, and it already follows `is*`/`has*`. RED seen: `swift build --build-tests` gave 13 errors "value of type 'SessionUpdateSubscription' has no member 'hasMissedUpdates'". Process note: the files `edit file` op still replaces only one match with `replace_all: true`, so each line got its own edit.
+
+    ### implement — changed
+    - evidence: `swift build --build-tests` 0 warnings, 0 errors; `swift test` 308 + 107 tests passed, 0 failures; `swift package generate-documentation --target FoundationModelsACP --warnings-as-errors` clean. Files: Sources/FoundationModelsACP/Connection/SessionUpdateSubscription.swift, Sources/FoundationModelsACP/Connection/SessionUpdateRouter.swift, Sources/FoundationModelsACP/Connection/ClientSideConnection.swift, Tests/FoundationModelsACPTests/SessionUpdateStreamTests.swift; kanban task text (finding checked, three API comments).
+    - next: /review
+  timestamp: 2026-10-02T17:58:51.620644+00:00
 depends_on:
 - 01M3YQYR2Y867FQBAZJG2MKX79
 position_column: doing
@@ -56,3 +81,12 @@ A resume does not need the buffer: the session ID is known, so the client subscr
 - Tests: overflow discards the buffer, sets the mark, and logs a warning; the 65th session ID evicts the oldest.
 - Tests: the buffer is cleared on session/close and on connection close.
 - `swift test` passes with no warnings.
+
+## Review Findings (2026-10-02 12:48)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 10 file(s) reviewed, 2 not reviewed.
+
+> 2 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 2 file(s)
+
+- [x] `Sources/FoundationModelsACP/Connection/SessionUpdateSubscription.swift:23` `swift/naming-clarity` — Boolean property `missedUpdates` should follow the `is*`/`has*` naming pattern to read as an assertion about the subscription's state, not as a bare adjective. Rename `missedUpdates` to `hasMissedUpdates` to follow the Boolean property naming convention established in the standard library.

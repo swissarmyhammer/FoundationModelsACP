@@ -78,7 +78,7 @@ public final class ClientSideConnection: Sendable {
     ///
     /// When a limit makes the connection discard kept updates, the connection
     /// logs a warning and marks the session. The first subscription reads the
-    /// mark in ``SessionUpdateSubscription/missedUpdates``. The connection
+    /// mark in ``SessionUpdateSubscription/hasMissedUpdates``. The connection
     /// discards the kept updates and the mark of a session when
     /// ``closeSession(_:)`` closes it, and discards all of them when the
     /// connection closes.
@@ -102,7 +102,7 @@ public final class ClientSideConnection: Sendable {
     ///
     /// - Parameter sessionId: The session whose updates to observe.
     /// - Returns: A stream of that session's updates.
-    @available(*, deprecated, message: "Use subscribe(to:), which also gives the missedUpdates mark.")
+    @available(*, deprecated, message: "Use subscribe(to:), which also gives the hasMissedUpdates mark.")
     public func updates(for sessionId: SessionId) -> AsyncStream<SessionUpdate> {
         subscribe(to: sessionId).updates
     }

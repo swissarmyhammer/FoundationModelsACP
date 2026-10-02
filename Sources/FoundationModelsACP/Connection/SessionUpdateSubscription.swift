@@ -8,7 +8,7 @@
 /// The connection keeps the updates of a session only up to the limits in
 /// ``SessionUpdateBufferLimits``. When the connection discards kept updates,
 /// it marks the session. The first subscription reads that mark in
-/// ``missedUpdates``, and then the connection clears the mark.
+/// ``hasMissedUpdates``, and then the connection clears the mark.
 public struct SessionUpdateSubscription: Sendable {
     /// The updates of the session: first the kept updates, then the live
     /// updates. The stream finishes when the connection closes.
@@ -20,7 +20,7 @@ public struct SessionUpdateSubscription: Sendable {
     /// When this value is `true`, ``updates`` does not hold all of the updates
     /// of the session. The client must not trust a state that it builds only
     /// from these updates.
-    public let missedUpdates: Bool
+    public let hasMissedUpdates: Bool
 }
 
 /// The limits on the `session/update` notifications that a
@@ -36,7 +36,7 @@ public struct SessionUpdateSubscription: Sendable {
 /// sessions than ``maximumSessions`` have kept updates, the connection
 /// discards the kept updates of the session that started to keep updates
 /// first. In each case, the connection marks the session (see
-/// ``SessionUpdateSubscription/missedUpdates``) and logs a warning.
+/// ``SessionUpdateSubscription/hasMissedUpdates``) and logs a warning.
 public struct SessionUpdateBufferLimits: Sendable {
     /// The maximum number of updates that the connection keeps for one
     /// session.
