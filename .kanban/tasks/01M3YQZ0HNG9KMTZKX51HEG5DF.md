@@ -52,10 +52,26 @@ comments:
     - evidence: `swift build --build-tests` 0 warnings, 0 errors; `swift test` 308 + 107 tests passed, 0 failures; `swift package generate-documentation --target FoundationModelsACP --warnings-as-errors` clean. Files: Sources/FoundationModelsACP/Connection/SessionUpdateSubscription.swift, Sources/FoundationModelsACP/Connection/SessionUpdateRouter.swift, Sources/FoundationModelsACP/Connection/ClientSideConnection.swift, Tests/FoundationModelsACPTests/SessionUpdateStreamTests.swift; kanban task text (finding checked, three API comments).
     - next: /review
   timestamp: 2026-10-02T17:58:51.620644+00:00
+- actor: claude-code
+  id: 01m3ywdx7ttenekmvashd3xme7
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (42024c3); 0 findings, 0 confirmed, 0 refuted; 4 files reviewed. The prior finding (swift/naming-clarity, hasMissedUpdates) is checked.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-02T18:01:09.626430+00:00
+- actor: claude-code
+  id: 01m3ywe3hsttnpg62acrf596pv
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — rename missedUpdates to hasMissedUpdates, 4 files
+    - test: green — swift build --build-tests 0 warnings; swift test 308+107 passed; IntegrationTests 7 passed
+    - commit: 42024c3
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-10-02T18:01:16.089472+00:00
 depends_on:
 - 01M3YQYR2Y867FQBAZJG2MKX79
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9e80'
 title: Buffer session updates that have no subscriber, with an overflow mark
 ---
 ## Problem
