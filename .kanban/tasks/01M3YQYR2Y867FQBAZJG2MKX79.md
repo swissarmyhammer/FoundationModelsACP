@@ -65,8 +65,24 @@ comments:
     - evidence: 2 files — IntegrationTests/Tests/FoundationModelsACPIntegrationTests/TestSupport.swift, Tests/FoundationModelsACPTests/SessionUpdateStreamTests.swift. `swift build --build-tests` 0 warnings; `swift test` 296 + 107 passed; `swift test --package-path IntegrationTests` 7 passed; swiftlint no_magic_numbers 0 findings on both files. Both findings checked.
     - next: /review
   timestamp: 2026-10-02T17:34:13.968052+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m3yv1m6mnd5jd7tcnpfytnr0
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (60e87a7): 0 findings, 0 confirmed, 0 refuted; 7 validator runs, 0 failed. All prior findings (2026-10-02 12:15) are checked.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-02T17:36:58.580380+00:00
+- actor: claude-code
+  id: 01m3yv1vcsxt5s78s3n69xr3z3
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 2 files, 2/2 findings checked
+    - test: green — swift build --build-tests 0 warnings; swift test 107 passed; IntegrationTests 7 passed
+    - commit: 60e87a7
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-10-02T17:37:05.945576+00:00
+position_column: done
+position_ordinal: 9d80
 title: Vendor ACP schema-v2.0.0-alpha.7 and regenerate
 ---
 ## What
