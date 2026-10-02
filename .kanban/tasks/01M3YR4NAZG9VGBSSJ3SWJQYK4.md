@@ -57,10 +57,26 @@ comments:
     - evidence: 4 files — Sources/FoundationModelsACP/Connection/EventBroadcaster.swift (new), Sources/FoundationModelsACP/Connection/SessionUpdateRouter.swift, Sources/FoundationModelsACP/Connection/OutgoingRequestTracker.swift, Tests/FoundationModelsACPTests/EventBroadcasterTests.swift (new); `swift build --build-tests` (scratch build) Build complete, 0 warnings; `swift test` 390 + 110 passed; IntegrationTests (scratch build-it) 7 passed; finding reuse/reuse flipped to [x]
     - next: /review
   timestamp: 2026-10-02T19:34:51.940512+00:00
+- actor: claude-code
+  id: 01m3z216zab11rqs6kdf16mtcr
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (703caee): 0 findings (7 validator runs attempted, 0 failed, 0 skipped). The prior finding (OutgoingRequestTracker reuse) is checked.
+    - next: none. The task is in done.
+  timestamp: 2026-10-02T19:39:05.066579+00:00
+- actor: claude-code
+  id: 01m3z21emksxxqz0thwzdwr6rr
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — 4 files, EventBroadcaster shared by router and tracker
+    - test: green — scratch-path build 0 warnings; swift test 390+110 passed; IntegrationTests 7 passed
+    - commit: 703caee
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-10-02T19:39:12.915039+00:00
 depends_on:
 - 01M3YQYR2Y867FQBAZJG2MKX79
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: a280
 title: Expose outgoing request IDs and their completion on ClientSideConnection
 ---
 ## Problem
