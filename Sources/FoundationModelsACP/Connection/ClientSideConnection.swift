@@ -25,17 +25,21 @@ public final class ClientSideConnection: Sendable {
     ///   - logger: Diagnostic sink; never stdout.
     ///   - requestTimeout: Default outbound request timeout; `nil` waits
     ///     forever.
+    ///   - bufferLimits: The limits on the `session/update` notifications that
+    ///     the connection keeps for sessions with no subscriber. See
+    ///     ``subscribe(to:)``.
     ///   - factory: Builds the client from this connection.
     public init(
         stream: any ACPTransport,
         logger: ACPLogger = .disabled,
         requestTimeout: Duration? = nil,
+        bufferLimits: SessionUpdateBufferLimits = .default,
         _ factory: @Sendable (ClientSideConnection) -> any Client
     ) async {
         // The router is captured by the notification dispatcher and by the
         // connection's close handler rather than `self`, preserving the
         // initialization-cycle break the core relies on.
-        let router = SessionUpdateRouter()
+        let router = SessionUpdateRouter(limits: bufferLimits, logger: logger)
         core = await RoleConnectionCore(
             stream: stream,
             logger: logger,
@@ -56,21 +60,51 @@ public final class ClientSideConnection: Sendable {
 
     // MARK: - Session update streams
 
-    /// Returns a stream of `session/update` notifications for one session.
+    /// Subscribes to the `session/update` notifications of one session.
     ///
     /// The read loop routes every notification to its session by `sessionId`,
     /// so interleaved sessions demultiplex to their own streams. A stream's
     /// lifetime runs from this call until the connection closes, deliberately
     /// independent of any prompt turn: a `tool_call_update` arriving after the
     /// prompt acknowledgement or after a `session/cancel` is still delivered,
-    /// and the stream finishes only when the connection dies. Subscribe before
-    /// driving a turn — updates for a session with no active subscriber are
-    /// dropped.
+    /// and the stream finishes only when the connection dies.
+    ///
+    /// The connection keeps the updates of a session that has no subscriber,
+    /// up to the `bufferLimits` given to the initializer. The first
+    /// subscription to the session gets these kept updates first, in order,
+    /// and then the live updates. A subsequent subscription gets only the live
+    /// updates. Thus an update that the agent sends before the `session/new`
+    /// response is not lost: subscribe when the response gives the session ID.
+    ///
+    /// When a limit makes the connection discard kept updates, the connection
+    /// logs a warning and marks the session. The first subscription reads the
+    /// mark in ``SessionUpdateSubscription/missedUpdates``. The connection
+    /// discards the kept updates and the mark of a session when
+    /// ``closeSession(_:)`` closes it, and discards all of them when the
+    /// connection closes.
+    ///
+    /// To resume a session, subscribe before you call ``resumeSession(_:)``:
+    /// the session ID is known, and the replayed updates then go to your
+    /// subscription in order.
+    ///
+    /// - Parameter sessionId: The session whose updates to observe.
+    /// - Returns: The subscription: the stream of the session's updates, and
+    ///   the mark that tells if updates were discarded before it.
+    public func subscribe(to sessionId: SessionId) -> SessionUpdateSubscription {
+        router.subscribe(to: sessionId)
+    }
+
+    /// Returns a stream of `session/update` notifications for one session.
+    ///
+    /// This is ``subscribe(to:)`` without the overflow mark: it takes the kept
+    /// updates of the session, and it discards the mark. Subscribe before you
+    /// call ``resumeSession(_:)``.
     ///
     /// - Parameter sessionId: The session whose updates to observe.
     /// - Returns: A stream of that session's updates.
+    @available(*, deprecated, message: "Use subscribe(to:), which also gives the missedUpdates mark.")
     public func updates(for sessionId: SessionId) -> AsyncStream<SessionUpdate> {
-        router.updates(for: sessionId)
+        subscribe(to: sessionId).updates
     }
 
     // MARK: - Inbound dispatch (Agent → Client)
@@ -201,18 +235,24 @@ public final class ClientSideConnection: Sendable {
 
     /// Closes a session on the agent.
     ///
+    /// When the call completes, with or without an error, the connection
+    /// discards the `session/update` notifications that it kept for the
+    /// session and the overflow mark of the session. Subscriptions to the
+    /// session stay open.
+    ///
     /// - Parameter params: The close-session request.
     /// - Returns: The close-session response.
     /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
     ///   disconnect.
     public func closeSession(_ params: CloseSessionRequest) async throws -> CloseSessionResponse {
-        try await core.call("closeSession", params, returning: CloseSessionResponse.self)
+        defer { router.discardPendingUpdates(for: params.sessionId) }
+        return try await core.call("closeSession", params, returning: CloseSessionResponse.self)
     }
 
     /// Runs one prompt turn on the agent.
     ///
     /// Acknowledges immediately; the turn's progress and completion arrive
-    /// separately, as `state_update` notifications on `updates(for:)` or the
+    /// separately, as `state_update` notifications on `subscribe(to:)` or the
     /// `Client`'s own `sessionUpdate` handler — not as this call's return
     /// value.
     ///

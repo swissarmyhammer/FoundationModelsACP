@@ -1,23 +1,9 @@
 import Foundation
-import Synchronization
 import Testing
 
 import FoundationModelsACP
 
 // MARK: - Helpers
-
-/// Thread-safe sink capturing codec diagnostics for assertions.
-private final class LogCapture: Sendable {
-    private let entries = Mutex<[String]>([])
-
-    /// Every message logged so far, in order.
-    var messages: [String] { entries.withLock { $0 } }
-
-    /// A logger that appends each message to this capture.
-    var logger: ACPLogger {
-        ACPLogger { message in self.entries.withLock { $0.append(message) } }
-    }
-}
 
 /// Builds an already-finished byte stream yielding the given chunks in order.
 private func chunkStream(_ chunks: [Data]) -> AsyncThrowingStream<Data, any Error> {

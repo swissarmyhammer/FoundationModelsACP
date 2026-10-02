@@ -227,7 +227,7 @@ private final class PromptLifecycleAgent: Agent {
 // MARK: - Clients
 
 /// A client used only to open the connection; every test observes updates
-/// through `ClientSideConnection.updates(for:)` instead of this handler, and
+/// through `ClientSideConnection.subscribe(to:)` instead of this handler, and
 /// answers no permission request.
 private struct PassiveClient: Client {
     func sessionUpdate(_ notification: UpdateSessionNotification) async {}
@@ -425,7 +425,7 @@ private let standardTestTimeout = 1  // minute
             // measurement window below starts clean at the prompt itself.
             await log.reset()
 
-            var updates = client.updates(for: session).makeAsyncIterator()
+            var updates = client.subscribe(to: session).updates.makeAsyncIterator()
             _ = try await client.prompt(PromptRequest(prompt: [.text(TextContent(text: "go"))], sessionId: session))
             // Waiting for the first delivered update guarantees the agent has
             // by now written it — so the log below already holds both frames
@@ -446,7 +446,7 @@ private let standardTestTimeout = 1  // minute
     @Test(.timeLimit(.minutes(standardTestTimeout)))
     func aFullTurnProducesRunningThenIdleWithAStopReason() async throws {
         let (agentConn, client, session) = try await makeSessionPair(script: .completesImmediately, stopReason: .maxTokens)
-        var updates = client.updates(for: session).makeAsyncIterator()
+        var updates = client.subscribe(to: session).updates.makeAsyncIterator()
 
         let response = try await client.prompt(PromptRequest(prompt: [.text(TextContent(text: "go"))], sessionId: session))
 
@@ -465,7 +465,7 @@ private let standardTestTimeout = 1  // minute
     @Test(.timeLimit(.minutes(standardTestTimeout)))
     func acceptingAPromptEmitsUserMessageChunksSharingTheMessageIdThatTheResponseReturns() async throws {
         let (agentConn, client, session) = try await makeSessionPair(script: .completesImmediately)
-        var updates = client.updates(for: session).makeAsyncIterator()
+        var updates = client.subscribe(to: session).updates.makeAsyncIterator()
 
         let response = try await client.prompt(
             PromptRequest(
@@ -511,7 +511,7 @@ private let standardTestTimeout = 1  // minute
             script: .requiresPermissionThenCompletes,
             clientFactory: { _ in PermissionAnsweringClient(outcome: selected) }
         )
-        var updates = client.updates(for: session).makeAsyncIterator()
+        var updates = client.subscribe(to: session).updates.makeAsyncIterator()
 
         _ = try await client.prompt(PromptRequest(prompt: [.text(TextContent(text: "go"))], sessionId: session))
 
@@ -536,7 +536,7 @@ private let standardTestTimeout = 1  // minute
     @Test(.timeLimit(.minutes(standardTestTimeout)))
     func sessionCancelMidTurnYieldsIdleAndCancelled() async throws {
         let (agentConn, client, session) = try await makeSessionPair(script: .runsUntilCancelled)
-        var updates = client.updates(for: session).makeAsyncIterator()
+        var updates = client.subscribe(to: session).updates.makeAsyncIterator()
 
         _ = try await client.prompt(PromptRequest(prompt: [.text(TextContent(text: "go"))], sessionId: session))
 

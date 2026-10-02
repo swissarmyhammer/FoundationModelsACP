@@ -184,7 +184,7 @@ import Testing
         let client = await ClientSideConnection(stream: clientEnd) { _ in
             GatedPermissionClient(entered: entered.continuation, gate: gate.stream)
         }
-        var updates = client.updates(for: session).makeAsyncIterator()
+        var updates = client.subscribe(to: session).updates.makeAsyncIterator()
 
         // Fires `session/request_permission`; the client's handler suspends on
         // the gate rather than answering, so this stays pending for the rest

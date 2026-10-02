@@ -229,7 +229,7 @@ private let standardTestTimeout = 1  // minute
         let agentConn = await AgentSideConnection(stream: capture) { conn in GoldenSessionAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in GoldenSessionClient() }
 
-        var updates = client.updates(for: Self.sessionId).makeAsyncIterator()
+        var updates = client.subscribe(to: Self.sessionId).updates.makeAsyncIterator()
 
         let initResponse = try await client.initialize(
             InitializeRequest(info: Implementation(name: "golden-client", version: "1.0.0"), protocolVersion: .v2)

@@ -329,7 +329,7 @@ private struct SessionBaselineOnlyAgent: Agent {
 // MARK: - A client that only observes
 
 /// A `Client` used only to open the connection; every test observes updates
-/// through `ClientSideConnection.updates(for:)` instead of this handler.
+/// through `ClientSideConnection.subscribe(to:)` instead of this handler.
 private struct PassiveClient: Client {
     func sessionUpdate(_ notification: UpdateSessionNotification) async {}
 
@@ -459,9 +459,10 @@ private let selectConfigOption = SessionConfigOption(
         let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
 
-        // Two config changes happen before anyone subscribes, so they land
-        // only in the agent's own history — proving replay reconstructs it
-        // rather than merely re-broadcasting a live stream.
+        // Two config changes happen before anyone subscribes. The connection
+        // keeps their updates for the first subscriber, so the test reads
+        // them before the resume. The updates that come after the resume are
+        // then only the replay of the agent's own history.
         _ = try await client.setSessionConfigOption(
             SetSessionConfigOptionRequest(configId: primaryConfigOption.configId, sessionId: session, value: .boolean(true))
         )
@@ -469,7 +470,9 @@ private let selectConfigOption = SessionConfigOption(
             SetSessionConfigOptionRequest(configId: primaryConfigOption.configId, sessionId: session, value: .boolean(false))
         )
 
-        var updates = client.updates(for: session).makeAsyncIterator()
+        var updates = client.subscribe(to: session).updates.makeAsyncIterator()
+        _ = try #require(await updates.next())  // kept: true
+        _ = try #require(await updates.next())  // kept: false
         _ = try await client.resumeSession(
             ResumeSessionRequest(cwd: cwd, sessionId: session, replayFrom: .start(ReplayFromStart()))
         )
@@ -504,12 +507,15 @@ private let selectConfigOption = SessionConfigOption(
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
 
         // A history entry exists before anyone subscribes, so there is
-        // something a buggy resume *could* replay.
+        // something a buggy resume *could* replay. The connection keeps its
+        // update for the first subscriber, so the test reads it before the
+        // resume.
         _ = try await client.setSessionConfigOption(
             SetSessionConfigOptionRequest(configId: primaryConfigOption.configId, sessionId: session, value: .boolean(true))
         )
 
-        var updates = client.updates(for: session).makeAsyncIterator()
+        var updates = client.subscribe(to: session).updates.makeAsyncIterator()
+        _ = try #require(await updates.next())  // kept: true
         _ = try await client.resumeSession(ResumeSessionRequest(cwd: cwd, sessionId: session))
 
         // Nothing replayed by the omitted-`replayFrom` resume: the very next
@@ -584,7 +590,7 @@ private let selectConfigOption = SessionConfigOption(
         let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
 
-        var updates = client.updates(for: session).makeAsyncIterator()
+        var updates = client.subscribe(to: session).updates.makeAsyncIterator()
         _ = try await client.prompt(PromptRequest(prompt: [.text(TextContent(text: "go"))], sessionId: session))
 
         _ = try await client.closeSession(CloseSessionRequest(sessionId: session))
@@ -616,7 +622,7 @@ private let selectConfigOption = SessionConfigOption(
         let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
 
-        var updates = client.updates(for: session).makeAsyncIterator()
+        var updates = client.subscribe(to: session).updates.makeAsyncIterator()
         _ = try await client.closeSession(CloseSessionRequest(sessionId: session))
 
         // No cancellation confirmation, because there was nothing to cancel —
@@ -707,7 +713,7 @@ private let selectConfigOption = SessionConfigOption(
 
         let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
-        var updates = client.updates(for: session).makeAsyncIterator()
+        var updates = client.subscribe(to: session).updates.makeAsyncIterator()
 
         for option in fourCategoryConfigOptions {
             let response = try await client.setSessionConfigOption(
@@ -744,7 +750,7 @@ private let selectConfigOption = SessionConfigOption(
 
         let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
-        var updates = client.updates(for: session).makeAsyncIterator()
+        var updates = client.subscribe(to: session).updates.makeAsyncIterator()
 
         guard case .select(let originalSelect) = selectConfigOption.type else {
             Issue.record("fixture is not a select option")

@@ -1,6 +1,23 @@
 import Foundation
+import Synchronization
 
 import FoundationModelsACP
+
+// MARK: - Diagnostic capture
+
+/// A thread-safe sink that keeps diagnostics for assertions.
+final class LogCapture: Sendable {
+    /// The logged messages, guarded for the logging tasks.
+    private let entries = Mutex<[String]>([])
+
+    /// Every message logged so far, in order.
+    var messages: [String] { entries.withLock { $0 } }
+
+    /// A logger that appends each message to this capture.
+    var logger: ACPLogger {
+        ACPLogger { message in self.entries.withLock { $0.append(message) } }
+    }
+}
 
 // MARK: - Raw-wire helpers shared by ConnectionTests and DisconnectTests
 
