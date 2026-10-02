@@ -17,6 +17,36 @@ comments:
     - evidence: 3 files — Sources/FoundationModelsACP/Connection/Connection.swift, Sources/FoundationModelsACP/Connection/AgentSideConnection.swift, Tests/FoundationModelsACPTests/ResponseHooksTests.swift (new). `swift build --build-tests`: 0 warnings. `swift test`: 372 tests in 35 suites and 110 tests in 14 suites passed, 0 failures.
     - next: /test, then /review. After push, send the commit to session foundationmodelsacpagent-bb.
   timestamp: 2026-10-02T19:01:03.539806+00:00
+- actor: claude-code
+  id: 01m3z043c29kkqbsvjd7ngcc92
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (edacf69); 1 finding (1 confirmed, 0 refuted) — Tests/FoundationModelsACPTests/ResponseHooksTests.swift:56 code-hygiene/magic-numbers-swift
+    - next: implement the open finding. Replace each magic number in ResponseHooksTests.swift with a named constant, then run test, commit and review again.
+  timestamp: 2026-10-02T19:05:42.530618+00:00
+- actor: claude-code
+  id: 01m3z04bqv0fajx8nkb71jqjc9
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 3 files, runAll take-and-clear, discardAll, late append dropped with warning, 6 weak-reference tests
+    - test: green — swift build --build-tests 0 warnings; swift test 372+110 passed; IntegrationTests 7 passed
+    - commit: edacf69
+    - review: findings — Tests/FoundationModelsACPTests/ResponseHooksTests.swift:56
+  timestamp: 2026-10-02T19:05:51.099103+00:00
+- actor: claude-code
+  id: 01m3z0bn80tpm6ar5fadfaw8z8
+  text: |-
+    Finding code-hygiene/magic-numbers-swift corrected in the whole of ResponseHooksTests.swift. swiftlint no_magic_numbers (allowed_numbers [0, 1, -1, 100]) flagged only `.seconds(5)` in `releaseTimeout`. The integer now has its own constant `releaseTimeoutSeconds`, and `releaseTimeout` is `.seconds(releaseTimeoutSeconds)`. The two `log.messages.count == 1` checks now use the named constant `dropWarningCount`. The other literals were already in named constants (`unitRequestId`, `hooksTestTimeout`). swiftlint with the rule config now reports 0 findings for the file.
+
+    Discovery: the `.build` folder of the workspace is in a bad state. `.build/workspace-state.json` does not list `swift-docc-plugin`, so `swift build` tries to remove `.build/checkouts/swift-docc-plugin` and clone it again. The sandbox stops the removal (EPERM, NSCocoaErrorDomain 513), and the build fails before it compiles. `--skip-update` does not help. `swift package reset` was not run (forbidden). The build and the tests ran with `--scratch-path` in the session scratchpad. A person must remove `.build/checkouts/swift-docc-plugin` (or the full `.build`) outside the sandbox before the next build in `.build`.
+  timestamp: 2026-10-02T19:09:50.208486+00:00
+- actor: claude-code
+  id: 01m3z0bqxjgec905ngq6tjtgey
+  text: |-
+    ### implement — changed
+    - evidence: 1 file — Tests/FoundationModelsACPTests/ResponseHooksTests.swift. swiftlint no_magic_numbers: 0 findings. `swift build --build-tests --scratch-path <scratchpad>/build`: Build complete, 0 warnings. `swift test --filter "ResponseHooksTests|DeferredWorkLifetimeTests"`: 6 tests in 2 suites passed, 0 failures. Finding flipped to [x].
+    - next: /test (use a clean scratch path, or remove .build/checkouts/swift-docc-plugin outside the sandbox first), then /commit, then /review.
+  timestamp: 2026-10-02T19:09:52.946626+00:00
 position_column: doing
 position_ordinal: '80'
 title: ResponseHooks keeps deferred closures after they run; child tasks keep them alive
@@ -54,3 +84,12 @@ Second problem, same cause: when such a task calls `AgentSideConnection.afterRes
 - Test: a closure registered from a child task after the response follows the documented behavior (runs, or is dropped with a warning), and is not kept.
 - `swift build --build-tests` has 0 warnings. `swift test` passes.
 - When pushed, send the commit to the session `foundationmodelsacpagent-bb`.
+
+## Review Findings (2026-10-02 14:02)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 3 file(s) reviewed, 2 not reviewed.
+
+> 2 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 2 file(s)
+
+- [x] `Tests/FoundationModelsACPTests/ResponseHooksTests.swift:56` `code-hygiene/magic-numbers-swift` — Magic numbers should be replaced by named constants.

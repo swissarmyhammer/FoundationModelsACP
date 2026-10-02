@@ -52,8 +52,15 @@ private final class RunRecord: Sendable {
 /// effect.
 private let unitRequestId: RequestId = .number(1)
 
+/// The longest time that a test waits for a released closure, in seconds.
+private let releaseTimeoutSeconds = 5
+
 /// The longest time that a test waits for a released closure.
-private let releaseTimeout: Duration = .seconds(5)
+private let releaseTimeout: Duration = .seconds(releaseTimeoutSeconds)
+
+/// The number of warnings that `ResponseHooks` logs when it drops one late
+/// closure.
+private let dropWarningCount = 1
 
 /// The time limit of each test in this suite, in minutes.
 private let hooksTestTimeout = 1
@@ -235,7 +242,7 @@ private struct QuietClient: Client {
 
         #expect(!reference.isAlive)
         #expect(!run.didRun)
-        #expect(log.messages.count == 1)
+        #expect(log.messages.count == dropWarningCount)
         #expect(log.messages.first?.contains("dropped") == true)
     }
 
@@ -266,7 +273,7 @@ private struct QuietClient: Client {
 
         #expect(!reference.isAlive)
         #expect(!run.didRun)
-        #expect(log.messages.count == 1)
+        #expect(log.messages.count == dropWarningCount)
         #expect(log.messages.first?.contains("dropped") == true)
     }
 
