@@ -39,7 +39,7 @@ extension AccumulatedTerminal {
     /// snapshot", not a patch.
     ///
     /// - Parameter update: The received terminal update.
-    mutating func apply(_ update: TerminalUpdate) {
+    internal mutating func apply(_ update: TerminalUpdate) {
         command = update.command.folded(onto: command)
         cwd = update.cwd.folded(onto: cwd)
         exitStatus = update.exitStatus.folded(onto: exitStatus)
@@ -64,7 +64,7 @@ extension AccumulatedTerminal {
     /// output.
     ///
     /// - Parameter base64: The base64 text of the chunk.
-    mutating func appendOutput(base64: String) {
+    internal mutating func appendOutput(base64: String) {
         guard let bytes = Data(base64Encoded: base64) else { return }
         output.append(bytes)
     }
@@ -78,7 +78,7 @@ extension AccumulatedTerminal {
     ///
     /// - Parameter terminalId: The identifier of the terminal.
     /// - Returns: The terminal update.
-    func replayUpdate(terminalId: TerminalId) -> TerminalUpdate {
+    internal func replayUpdate(terminalId: TerminalId) -> TerminalUpdate {
         TerminalUpdate(
             terminalId: terminalId,
             command: command,

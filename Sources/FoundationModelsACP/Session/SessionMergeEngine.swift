@@ -415,7 +415,7 @@ private enum MessageRole {
     ///
     /// - Parameter messageId: The identifier of the message.
     /// - Returns: The entry identifier.
-    func entryID(_ messageId: MessageId) -> SessionEntry.ID {
+    fileprivate func entryID(_ messageId: MessageId) -> SessionEntry.ID {
         switch self {
         case .user: .userMessage(messageId)
         case .agent: .agentMessage(messageId)
@@ -427,7 +427,7 @@ private enum MessageRole {
     ///
     /// - Parameter message: The merged message.
     /// - Returns: The entry kind.
-    func kind(_ message: SessionEntry.Message) -> SessionEntry.Kind {
+    fileprivate func kind(_ message: SessionEntry.Message) -> SessionEntry.Kind {
         switch self {
         case .user: .userMessage(message)
         case .agent: .agentMessage(message)

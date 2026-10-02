@@ -89,7 +89,7 @@ public struct SessionEntry: Hashable, Sendable, Identifiable {
 extension SessionEntry.Kind {
     /// The message, when this entry is a user message, an agent message, or
     /// a thought.
-    var message: SessionEntry.Message? {
+    internal var message: SessionEntry.Message? {
         switch self {
         case .userMessage(let message), .agentMessage(let message), .agentThought(let message): message
         case .toolCall, .terminal, .plan, .unknown: nil
@@ -97,7 +97,7 @@ extension SessionEntry.Kind {
     }
 
     /// The tool call, when this entry is a tool call.
-    var toolCall: ToolCallUpdate? {
+    internal var toolCall: ToolCallUpdate? {
         switch self {
         case .toolCall(let toolCall): toolCall
         case .userMessage, .agentMessage, .agentThought, .terminal, .plan, .unknown: nil
@@ -105,7 +105,7 @@ extension SessionEntry.Kind {
     }
 
     /// The terminal state, when this entry is a terminal.
-    var terminal: AccumulatedTerminal? {
+    internal var terminal: AccumulatedTerminal? {
         switch self {
         case .terminal(_, let terminal): terminal
         case .userMessage, .agentMessage, .agentThought, .toolCall, .plan, .unknown: nil
@@ -113,7 +113,7 @@ extension SessionEntry.Kind {
     }
 
     /// The plan update, when this entry is a plan.
-    var plan: PlanUpdate? {
+    internal var plan: PlanUpdate? {
         switch self {
         case .plan(let plan): plan
         case .userMessage, .agentMessage, .agentThought, .toolCall, .terminal, .unknown: nil
@@ -124,7 +124,7 @@ extension SessionEntry.Kind {
 extension SessionEntry {
     /// The one session update that makes this entry in an empty engine, with
     /// the same identifier and the same state.
-    var replayUpdate: SessionUpdate {
+    internal var replayUpdate: SessionUpdate {
         switch kind {
         case .userMessage(let message):
             .userMessage(UserMessage(messageId: message.messageId, content: .value(message.content), meta: message.meta))
@@ -149,7 +149,7 @@ extension SessionEntry.Message {
     /// `_meta` of the message.
     ///
     /// - Parameter chunk: The streamed content chunk.
-    mutating func append(_ chunk: ContentChunk) {
+    internal mutating func append(_ chunk: ContentChunk) {
         content.append(chunk.content)
         meta = PatchField(optional: chunk.meta).folded(onto: meta)
     }
@@ -159,7 +159,7 @@ extension SessionEntry.Message {
     /// - Parameters:
     ///   - newContent: The `content` field of the update.
     ///   - newMeta: The `_meta` field of the update.
-    mutating func apply(content newContent: PatchField<[ContentBlock]>, meta newMeta: PatchField<JSONValue>) {
+    internal mutating func apply(content newContent: PatchField<[ContentBlock]>, meta newMeta: PatchField<JSONValue>) {
         content = newContent.resolved(onto: content)
         meta = newMeta.folded(onto: meta)
     }
@@ -174,7 +174,7 @@ extension ToolCallUpdate {
     /// replacement.
     ///
     /// - Parameter item: The streamed content item.
-    mutating func appendContent(_ item: ToolCallContent) {
+    internal mutating func appendContent(_ item: ToolCallContent) {
         content = .value(content.resolved(onto: []) + [item])
     }
 }
@@ -184,7 +184,7 @@ extension PlanUpdate {
     ///
     /// Known content holds the `planId`. For unknown content, the identifier
     /// comes from a `planId` string in the raw payload, when there is one.
-    var planId: PlanId? {
+    internal var planId: PlanId? {
         switch plan {
         case .items(let items):
             return items.planId

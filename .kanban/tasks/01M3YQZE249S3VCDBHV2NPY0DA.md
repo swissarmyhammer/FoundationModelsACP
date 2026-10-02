@@ -46,6 +46,41 @@ comments:
     - evidence: `swift test` 349 + 110 tests pass, 0 warnings (rebuild of all touched files); `swift package generate-documentation --target FoundationModelsACP --warnings-as-errors` exit 0. 17 files: Sources/ACPGenerateCore/Emitter.swift, Sources/FoundationModelsACP/Core/PatchField.swift, Sources/FoundationModelsACP/Generated/Models{,2,3,7,8,9}.generated.swift, Sources/FoundationModelsACP/Session/{SessionMergeEngine,SessionEntry,AccumulatedTerminal,SessionUpdateAggregator}.swift, Tests/ACPGenerateTests/{PatchSemanticsTests,VendoredSchemaTests}.swift, Tests/FoundationModelsACPTests/{SessionMergeEngineTests,SessionUpdateAggregatorTests,OutOfOrderConvergenceTests,GoldenSessionEndToEndTests}.swift
     - next: /review
   timestamp: 2026-10-02T18:16:07.443735+00:00
+- actor: claude-code
+  id: 01m3yy3m38njxm655a5c1en1cd
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (248b889). 3 findings (3 confirmed, 0 refuted): Sources/FoundationModelsACP/Core/PatchField.swift:138, Sources/FoundationModelsACP/Core/PatchField.swift:152, Sources/FoundationModelsACP/Session/SessionMergeEngine.swift:196
+    - next: implement the 3 open items in the "Review Findings (2026-10-02 13:17)" section. The task stays in review.
+  timestamp: 2026-10-02T18:30:29.736109+00:00
+- actor: claude-code
+  id: 01m3yy43ka55rkxnttp4vkajah
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 21 files, SessionMergeEngine, SessionEntry, generated folded(onto:), deprecated aggregator
+    - test: green — swift build --build-tests 0 warnings (forced rebuild); swift test 349+110 passed; IntegrationTests 7 passed
+    - commit: 248b889
+    - review: findings — Sources/FoundationModelsACP/Core/PatchField.swift:138, Sources/FoundationModelsACP/Core/PatchField.swift:152, Sources/FoundationModelsACP/Session/SessionMergeEngine.swift:196
+  timestamp: 2026-10-02T18:30:45.610108+00:00
+- actor: claude-code
+  id: 01m3yybwx8myp313tkrfr2pqym
+  text: |-
+    Fix of the 3 findings in "Review Findings (2026-10-02 13:17)".
+
+    - Findings 1 and 2 (swift/access-control): `PatchField.init(optional:)` and `PatchField.resolved(onto:)` are now `public`. The same cause is removed from the files that this task added or changed. Each API-shaping declaration now spells its access modifier: PatchField.swift (`decodePatchField`, `forgivingDecodePatchField`, `forgivingDecodePatchArray`, `folded(onto:)`, `encodePatch` are `internal`), SessionEntry.swift (`Kind.message/toolCall/terminal/plan`, `replayUpdate`, `Message.append`, `Message.apply(content:meta:)`, `ToolCallUpdate.appendContent`, `PlanUpdate.planId` are `internal`), AccumulatedTerminal.swift (`apply`, `appendOutput`, `replayUpdate` are `internal`), SessionMergeEngine.swift (`MessageRole.entryID` and `MessageRole.kind` are `fileprivate`). The Emitter fold method and the aggregator helpers already had explicit modifiers.
+    - Note: before this change, no file in Sources spelled `internal`. These files are now the first ones that do. There is no swiftformat `redundantInternal` configuration in the repository, so nothing conflicts.
+    - Finding 3 (inverse-operation-coverage): `SessionMergeEngineReplayTests.aReplayAppliedToANewEngineGivesTheSameState` now reads `transcriptUpdates` and `stateUpdates`, applies them to a new engine, and checks entries, availableCommands, configOptions, usage, agentState and sessionInfo one by one (and the full engine). It requires a value in each original field, so a check cannot pass as `nil == nil`. The fixture now uses non-empty commands and config options. `listCommand` and `configOption` moved to `SessionMergeEngineFixtures`, so the State and Replay suites do not copy them.
+    - Mutation check: `transcriptUpdates` dropped the last entry and `stateUpdates` dropped `usage`. The test failed at `replayed.entries == original.entries` and at `replayed.usage == usage`. Then the change was reverted (git diff of SessionMergeEngine.swift shows only the two `fileprivate` lines).
+    - Did not work: `#expect(x == (try #require(y)))` gives a "#require is redundant" warning. Each `#require` is now a separate `let`.
+    - Tool note: `files edit file` with `replace_all: true` replaced only one place for each call.
+  timestamp: 2026-10-02T18:35:00.904507+00:00
+- actor: claude-code
+  id: 01m3yybzzswsjw4wmf7gcqdhxt
+  text: |-
+    ### implement — changed
+    - evidence: `swift build --build-tests` after touch of all Sources/Tests Swift files: 0 warnings, 0 errors. `swift test`: 349 tests in 31 suites and 110 tests in 14 suites pass. `swift package generate-documentation --target FoundationModelsACP --warnings-as-errors`: exit 0. Replay test failed once with the replay broken, then passed after the revert. 5 files: Sources/FoundationModelsACP/Core/PatchField.swift, Sources/FoundationModelsACP/Session/SessionEntry.swift, Sources/FoundationModelsACP/Session/AccumulatedTerminal.swift, Sources/FoundationModelsACP/Session/SessionMergeEngine.swift, Tests/FoundationModelsACPTests/SessionMergeEngineTests.swift. Not committed.
+    - next: /review
+  timestamp: 2026-10-02T18:35:04.057065+00:00
 depends_on:
 - 01M3YQYR2Y867FQBAZJG2MKX79
 position_column: doing
@@ -89,3 +124,14 @@ This package does NOT add Observation or `@MainActor`.
 - Tests for each update kind, including the order of entries, the plan position, the `sessionInfo` patch fold, the `availableCommands` nil / `[]` difference, the unknown entry, and the tool-call `name` fold.
 - A test that a replay of the transcript, applied to a new engine, gives the same state.
 - DocC for the public API. `swift test` passes with no warnings.
+
+## Review Findings (2026-10-02 13:17)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 18 file(s) reviewed, 2 not reviewed.
+
+> 2 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 2 file(s)
+
+- [x] `Sources/FoundationModelsACP/Core/PatchField.swift:138` `swift/access-control` — Library code should spell access modifiers explicitly on API-shaping declarations rather than relying on implicit `internal` default. This initializer is thoroughly documented as part of PatchField's public API (explaining that it 'makes the patch state of a plain optional wire field'), suggesting it is intended for external use. Add explicit `public` modifier: `public init(optional value: Wrapped?)`.
+- [x] `Sources/FoundationModelsACP/Core/PatchField.swift:152` `swift/access-control` — Library code should spell access modifiers explicitly on API-shaping declarations rather than relying on implicit `internal` default. This function is thoroughly documented as part of PatchField's public API (explaining patch application semantics for collections), suggesting it is intended for external use. Add explicit `public` modifier: `public func resolved(onto current: Wrapped) -> Wrapped`.
+- [x] `Sources/FoundationModelsACP/Session/SessionMergeEngine.swift:196` `completeness/inverse-operation-coverage` — SessionMergeEngine.apply() is tested but transcriptUpdates and stateUpdates properties (inverse operations) are not exercised in any round-trip test in the provided files, despite the public documentation explicitly stating they enable session replay. Add a test that (1) creates an engine, (2) applies updates, (3) retrieves transcriptUpdates and stateUpdates, (4) creates a new engine, (5) applies the replay updates, and (6) verifies the second engine's entries, availableCommands, configOptions, usage, agentState, and sessionInfo match the first.

@@ -44,7 +44,7 @@ extension KeyedDecodingContainer {
     /// - Returns: The field's patch state.
     /// - Throws: `DecodingError` when the key is present, non-null, and the
     ///   value does not decode as `Wrapped`.
-    func decodePatchField<T: Decodable>(_ type: T.Type, forKey key: Key) throws -> PatchField<T> {
+    internal func decodePatchField<T: Decodable>(_ type: T.Type, forKey key: Key) throws -> PatchField<T> {
         guard contains(key) else { return .unchanged }
         if try decodeNil(forKey: key) {
             return .cleared
@@ -86,7 +86,7 @@ extension KeyedDecodingContainer {
     ///   - type: The wrapped value type to decode.
     ///   - key: The field's coding key.
     /// - Returns: The field's patch state.
-    func forgivingDecodePatchField<T: Decodable>(_ type: T.Type, forKey key: Key) -> PatchField<T> {
+    internal func forgivingDecodePatchField<T: Decodable>(_ type: T.Type, forKey key: Key) -> PatchField<T> {
         forgivingDecodePatch(forKey: key) { try? decode(T.self, forKey: key) }
     }
 
@@ -98,7 +98,7 @@ extension KeyedDecodingContainer {
     ///   - elementType: The array element type.
     ///   - key: The field's coding key.
     /// - Returns: The field's patch state.
-    func forgivingDecodePatchArray<Element: Decodable>(
+    internal func forgivingDecodePatchArray<Element: Decodable>(
         of elementType: Element.Type,
         forKey key: Key
     ) -> PatchField<[Element]> {
@@ -121,7 +121,7 @@ extension PatchField {
     ///
     /// - Parameter previous: The field's previously accumulated state.
     /// - Returns: The field's newly accumulated state.
-    func folded(onto previous: PatchField<Wrapped>) -> PatchField<Wrapped> {
+    internal func folded(onto previous: PatchField<Wrapped>) -> PatchField<Wrapped> {
         switch self {
         case .unchanged: previous
         case .cleared, .value: self
@@ -135,7 +135,7 @@ extension PatchField {
     /// the stored value.
     ///
     /// - Parameter value: The decoded optional field.
-    init(optional value: Wrapped?) {
+    public init(optional value: Wrapped?) {
         self = value.map(PatchField.value) ?? .unchanged
     }
 }
@@ -149,7 +149,7 @@ extension PatchField where Wrapped: RangeReplaceableCollection {
     ///
     /// - Parameter current: The current collection.
     /// - Returns: The collection after this patch.
-    func resolved(onto current: Wrapped) -> Wrapped {
+    public func resolved(onto current: Wrapped) -> Wrapped {
         switch self {
         case .unchanged: current
         case .cleared: Wrapped()
@@ -167,7 +167,7 @@ extension KeyedEncodingContainer {
     ///   - field: The field's patch state.
     ///   - key: The field's coding key.
     /// - Throws: Rethrows any error from the underlying encoder.
-    mutating func encodePatch<T: Encodable>(_ field: PatchField<T>, forKey key: Key) throws {
+    internal mutating func encodePatch<T: Encodable>(_ field: PatchField<T>, forKey key: Key) throws {
         switch field {
         case .unchanged:
             break

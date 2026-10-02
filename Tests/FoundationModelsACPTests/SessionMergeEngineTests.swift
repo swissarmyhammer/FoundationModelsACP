@@ -12,6 +12,12 @@ enum SessionMergeEngineFixtures {
     static let planId = PlanId(rawValue: "plan-1")
     static let traceMeta = JSONValue.object(["trace": .string("abc")])
     static let otherMeta = JSONValue.object(["trace": .string("def")])
+    static let listCommand = AvailableCommand(description: "List files", name: "ls")
+    static let configOption = SessionConfigOption(
+        configId: SessionConfigId(rawValue: "fast"),
+        name: "Fast mode",
+        type: .boolean(SessionConfigBoolean(currentValue: true))
+    )
 
     /// Makes a text content block.
     ///
@@ -389,12 +395,7 @@ enum SessionMergeEngineFixtures {
 /// The last-value state of `SessionMergeEngine`: commands, configuration
 /// options, usage, agent state, and session information.
 @Suite struct SessionMergeEngineStateTests {
-    private static let listCommand = AvailableCommand(description: "List files", name: "ls")
-    private static let configOption = SessionConfigOption(
-        configId: SessionConfigId(rawValue: "fast"),
-        name: "Fast mode",
-        type: .boolean(SessionConfigBoolean(currentValue: true))
-    )
+    private typealias Fixtures = SessionMergeEngineFixtures
 
     @Test func availableCommandsAreNilBeforeAReport() {
         #expect(SessionMergeEngine().availableCommands == nil)
@@ -409,7 +410,7 @@ enum SessionMergeEngineFixtures {
 
     @Test func anAvailableCommandsUpdateReplacesTheSeed() {
         var engine = SessionMergeEngine()
-        engine.seed(from: NewSessionResponse(sessionId: SessionId(rawValue: "s"), availableCommands: [Self.listCommand]))
+        engine.seed(from: NewSessionResponse(sessionId: SessionId(rawValue: "s"), availableCommands: [Fixtures.listCommand]))
         engine.apply(.availableCommandsUpdate(AvailableCommandsUpdate(availableCommands: [])))
         #expect(engine.availableCommands == [])
     }
@@ -428,25 +429,29 @@ enum SessionMergeEngineFixtures {
         let changes = engine.seed(
             from: NewSessionResponse(
                 sessionId: SessionId(rawValue: "s"),
-                availableCommands: [Self.listCommand],
-                configOptions: [Self.configOption]
+                availableCommands: [Fixtures.listCommand],
+                configOptions: [Fixtures.configOption]
             )
         )
-        #expect(engine.availableCommands == [Self.listCommand])
-        #expect(engine.configOptions == [Self.configOption])
-        #expect(changes == [.availableCommandsChanged([Self.listCommand]), .configOptionsChanged([Self.configOption])])
+        #expect(engine.availableCommands == [Fixtures.listCommand])
+        #expect(engine.configOptions == [Fixtures.configOption])
+        #expect(
+            changes == [.availableCommandsChanged([Fixtures.listCommand]), .configOptionsChanged([Fixtures.configOption])]
+        )
     }
 
     @Test func aSeedFromAResumeSessionResponseSetsCommandsAndConfigOptions() {
         var engine = SessionMergeEngine()
-        engine.seed(from: ResumeSessionResponse(availableCommands: [Self.listCommand], configOptions: [Self.configOption]))
-        #expect(engine.availableCommands == [Self.listCommand])
-        #expect(engine.configOptions == [Self.configOption])
+        engine.seed(
+            from: ResumeSessionResponse(availableCommands: [Fixtures.listCommand], configOptions: [Fixtures.configOption])
+        )
+        #expect(engine.availableCommands == [Fixtures.listCommand])
+        #expect(engine.configOptions == [Fixtures.configOption])
     }
 
     @Test func aConfigOptionUpdateReplacesTheConfigOptions() {
         var engine = SessionMergeEngine()
-        engine.seed(from: ResumeSessionResponse(configOptions: [Self.configOption]))
+        engine.seed(from: ResumeSessionResponse(configOptions: [Fixtures.configOption]))
         let change = engine.apply(.configOptionUpdate(ConfigOptionUpdate(configOptions: [])))
         #expect(engine.configOptions == [])
         #expect(change == .configOptionsChanged([]))
@@ -517,8 +522,8 @@ enum SessionMergeEngineFixtures {
             Fixtures.planUpdate([Fixtures.planEntry("step")]),
             .planUpdate(PlanUpdate(plan: .unknown("_vendor_outline", .object([:])))),
             .unknown("_vendor_event", .object(["value": .string("x")])),
-            .availableCommandsUpdate(AvailableCommandsUpdate(availableCommands: [])),
-            .configOptionUpdate(ConfigOptionUpdate(configOptions: [])),
+            .availableCommandsUpdate(AvailableCommandsUpdate(availableCommands: [Fixtures.listCommand])),
+            .configOptionUpdate(ConfigOptionUpdate(configOptions: [Fixtures.configOption])),
             .usageUpdate(UsageUpdate(size: windowSize, used: tokensUsed)),
             .stateUpdate(.idle(IdleStateUpdate(stopReason: .endTurn))),
             .sessionInfoUpdate(SessionInfoUpdate(title: .value("Session"), updatedAt: .cleared)),
@@ -530,12 +535,28 @@ enum SessionMergeEngineFixtures {
         return engine
     }
 
-    @Test func aReplayAppliedToANewEngineGivesTheSameState() {
+    @Test func aReplayAppliedToANewEngineGivesTheSameState() throws {
         let original = Self.populatedEngine()
+        let transcriptUpdates = original.transcriptUpdates
+        let stateUpdates = original.stateUpdates
         var replayed = SessionMergeEngine()
-        for update in original.transcriptUpdates + original.stateUpdates {
+        for update in transcriptUpdates + stateUpdates {
             replayed.apply(update)
         }
+        // Each original field has a value. Thus, a replay that drops a field
+        // cannot pass as `nil == nil` or as an empty transcript.
+        let commands = try #require(original.availableCommands)
+        let options = try #require(original.configOptions)
+        let usage = try #require(original.usage)
+        let agentState = try #require(original.agentState)
+        #expect(!original.entries.isEmpty)
+        #expect(original.sessionInfo != SessionInfoUpdate())
+        #expect(replayed.entries == original.entries)
+        #expect(replayed.availableCommands == commands)
+        #expect(replayed.configOptions == options)
+        #expect(replayed.usage == usage)
+        #expect(replayed.agentState == agentState)
+        #expect(replayed.sessionInfo == original.sessionInfo)
         #expect(replayed == original)
     }
 
