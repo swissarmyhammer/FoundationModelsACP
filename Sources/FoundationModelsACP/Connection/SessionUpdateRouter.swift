@@ -1,5 +1,4 @@
 import Foundation
-import Synchronization
 
 /// Fans `session/update` notifications out to per-session update streams.
 ///
@@ -25,26 +24,14 @@ import Synchronization
 /// router discards kept updates because of a limit, it marks the session and
 /// logs a warning; the first subscriber reads the mark as
 /// `SessionUpdateSubscription.hasMissedUpdates`.
+///
+/// The subscribers of each session and the kept updates are in one
+/// `EventBroadcaster`, keyed by session, so one lock guards both.
 final class SessionUpdateRouter: Sendable {
-    /// The subscriber registry, guarded for the read loop and subscribers.
-    private struct Registry {
-        /// Live subscriber continuations, keyed by session then by a token
-        /// that distinguishes one session's concurrent subscribers.
-        var subscribers: [SessionId: [Int: AsyncStream<SessionUpdate>.Continuation]] = [:]
-
-        /// Monotonic token distinguishing one session's subscribers.
-        var nextToken = 0
-
-        /// Set once the connection closes; later subscriptions finish at once.
-        var isFinished = false
-
-        /// The updates kept for sessions that have no subscriber.
-        var pending: PendingSessionUpdates
-    }
-
-    /// The registry, guarded so delivery, subscription, and shutdown are safe
-    /// across the read loop and subscribing tasks.
-    private let registry: Mutex<Registry>
+    /// The subscribers of each session, and the kept updates as the context,
+    /// guarded so delivery, subscription, and shutdown are safe across the
+    /// read loop and subscribing tasks.
+    private let broadcaster: EventBroadcaster<SessionId, SessionUpdate, PendingSessionUpdates>
 
     /// The limits on the updates kept for sessions with no subscriber.
     private let limits: SessionUpdateBufferLimits
@@ -63,7 +50,7 @@ final class SessionUpdateRouter: Sendable {
     init(limits: SessionUpdateBufferLimits = .default, logger: ACPLogger = .disabled) {
         self.limits = limits
         self.logger = logger
-        registry = Mutex(Registry(pending: PendingSessionUpdates(limits: limits)))
+        broadcaster = EventBroadcaster(context: PendingSessionUpdates(limits: limits))
     }
 
     /// Attaches a new subscriber to one session.
@@ -78,15 +65,14 @@ final class SessionUpdateRouter: Sendable {
     /// - Returns: The subscription. Its stream finishes when the connection
     ///   closes.
     func subscribe(to sessionId: SessionId) -> SessionUpdateSubscription {
-        let (stream, continuation) = AsyncStream.makeStream(of: SessionUpdate.self)
-        guard let attachment = attach(continuation, to: sessionId) else {
-            continuation.finish()
-            return SessionUpdateSubscription(updates: stream, hasMissedUpdates: false)
+        let subscription = broadcaster.subscribe(to: sessionId) { pending in
+            let kept = pending.take(for: sessionId)
+            return (kept.updates, kept.hasMissedUpdates)
         }
-        continuation.onTermination = { [weak self] _ in
-            self?.removeSubscriber(sessionId: sessionId, token: attachment.token)
-        }
-        return SessionUpdateSubscription(updates: stream, hasMissedUpdates: attachment.hasMissedUpdates)
+        return SessionUpdateSubscription(
+            updates: subscription.events,
+            hasMissedUpdates: subscription.attachment ?? false
+        )
     }
 
     /// Delivers one notification to every subscriber of its session.
@@ -97,15 +83,10 @@ final class SessionUpdateRouter: Sendable {
     ///
     /// - Parameter notification: The session update to route.
     func deliver(_ notification: UpdateSessionNotification) {
-        let overflow = registry.withLock { registry -> PendingSessionUpdates.Overflow? in
-            guard !registry.isFinished else { return nil }
-            guard let subscribers = registry.subscribers[notification.sessionId] else {
-                return registry.pending.keep(notification.update, for: notification.sessionId)
-            }
-            for continuation in subscribers.values {
-                continuation.yield(notification.update)
-            }
-            return nil
+        let overflow = broadcaster.withState { state -> PendingSessionUpdates.Overflow? in
+            guard !state.isFinished else { return nil }
+            guard !state.publish(notification.update, to: notification.sessionId) else { return nil }
+            return state.context.keep(notification.update, for: notification.sessionId)
         }
         if let overflow {
             logger.log(overflow.warning(limits: limits))
@@ -119,8 +100,8 @@ final class SessionUpdateRouter: Sendable {
     ///
     /// - Parameter sessionId: The session whose kept updates to discard.
     func discardPendingUpdates(for sessionId: SessionId) {
-        registry.withLock { registry in
-            registry.pending.discard(for: sessionId)
+        broadcaster.withState { state in
+            state.context.discard(for: sessionId)
         }
     }
 
@@ -129,60 +110,9 @@ final class SessionUpdateRouter: Sendable {
     ///
     /// Called once when the connection closes (EOF, stream failure, or an
     /// explicit close), which is the signal that no further updates can arrive.
-    /// Continuations are collected under the lock and finished outside it, so a
-    /// synchronous `onTermination` callback never re-enters the registry lock.
     func finishAll() {
-        let orphaned = registry.withLock { registry -> [AsyncStream<SessionUpdate>.Continuation] in
-            registry.isFinished = true
-            registry.pending.removeAll()
-            let continuations = registry.subscribers.values.flatMap { $0.values }
-            registry.subscribers.removeAll()
-            return continuations
-        }
-        for continuation in orphaned {
-            continuation.finish()
-        }
-    }
-
-    /// Registers a subscriber and replays the kept updates of its session
-    /// into it.
-    ///
-    /// The replay runs under the same lock as `deliver(_:)`, so no live update
-    /// can come before a kept update.
-    ///
-    /// - Parameters:
-    ///   - continuation: The continuation of the subscriber's stream.
-    ///   - sessionId: The session to subscribe to.
-    /// - Returns: The subscriber's registry token and the overflow mark of the
-    ///   session, or `nil` when the router has finished.
-    private func attach(
-        _ continuation: AsyncStream<SessionUpdate>.Continuation,
-        to sessionId: SessionId
-    ) -> (token: Int, hasMissedUpdates: Bool)? {
-        registry.withLock { registry in
-            guard !registry.isFinished else { return nil }
-            let token = registry.nextToken
-            registry.nextToken += 1
-            registry.subscribers[sessionId, default: [:]][token] = continuation
-            let kept = registry.pending.take(for: sessionId)
-            for update in kept.updates {
-                continuation.yield(update)
-            }
-            return (token, kept.hasMissedUpdates)
-        }
-    }
-
-    /// Drops one subscriber when its consumer stops iterating.
-    ///
-    /// - Parameters:
-    ///   - sessionId: The session the subscriber belonged to.
-    ///   - token: The subscriber's registry token.
-    private func removeSubscriber(sessionId: SessionId, token: Int) {
-        registry.withLock { registry in
-            registry.subscribers[sessionId]?.removeValue(forKey: token)
-            if registry.subscribers[sessionId]?.isEmpty == true {
-                registry.subscribers.removeValue(forKey: sessionId)
-            }
+        broadcaster.finishAll { state in
+            state.context.removeAll()
         }
     }
 }
