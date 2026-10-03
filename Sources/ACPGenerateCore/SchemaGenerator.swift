@@ -72,6 +72,7 @@ public struct SchemaGenerator: Sendable {
     ///   - namespace: An enclosing namespace enum to nest every emitted type
     ///     in, and a prefix on every generated file name; `nil` emits the
     ///     types at the top level (the layout for the primary schema set).
+    ///     The files extend the enum, so another source must declare it.
     /// - Returns: The generated Swift files.
     /// - Throws: `GeneratorError` when an input cannot be parsed, the schema
     ///   contains a shape the generator does not understand, or the routing
@@ -93,6 +94,7 @@ public struct SchemaGenerator: Sendable {
             throw GeneratorError.invalidSchema("missing top-level \(Self.defsKey) object")
         }
         try validatePatchSemanticsFields(definitions: definitions)
+        let emittedDefinitions = try emittedDefinitionNames(of: definitions)
 
         var identifiers: [String] = []
         var structModels: [StructModel] = []
@@ -100,7 +102,7 @@ public struct SchemaGenerator: Sendable {
         var unions: [String] = []
         var placeholders: [String] = []
 
-        for (name, fragment) in Self.orderedEntries(of: definitions) {
+        for (name, fragment) in Self.orderedEntries(of: definitions) where emittedDefinitions.contains(name) {
             let documentation = description(of: fragment)
             switch try classify(name: name, fragment: fragment) {
             case .handwritten:
@@ -199,6 +201,11 @@ public struct SchemaGenerator: Sendable {
     /// exceeds the budget; the vendored-output byte test guards the real
     /// schema against that.
     ///
+    /// The top-level set always writes each base file, also when its list is
+    /// empty, so its file names stay the same from run to run. A namespaced
+    /// set writes no file for an empty list: it emits a subset of a document,
+    /// and an empty namespace extension adds nothing to the module.
+    ///
     /// - Parameters:
     ///   - baseName: The base file name, without the `.generated.swift` suffix.
     ///   - declarations: Rendered type declarations, already sorted.
@@ -210,6 +217,7 @@ public struct SchemaGenerator: Sendable {
         declarations: [String],
         namespace: String?
     ) -> [GeneratedFile] {
+        guard namespace == nil || !declarations.isEmpty else { return [] }
         var shards: [[String]] = []
         var current: [String] = []
         for declaration in declarations {
@@ -1742,6 +1750,105 @@ public struct SchemaGenerator: Sendable {
                     "patch semantics config names \"\(key)\", which is not a field the schema declares"
                 )
             }
+        }
+    }
+
+    // MARK: - Reachable subset
+
+    /// The names of the definitions this run classifies and emits.
+    ///
+    /// With no `GeneratorConfig.rootDefinitions`, that is every definition.
+    /// With roots, it is the definitions the roots reach through `$ref`.
+    /// Either way, the `GeneratorConfig.sharedDefinitions` are removed: another
+    /// set emits them.
+    ///
+    /// - Parameter definitions: The schema's top-level `$defs` object.
+    /// - Returns: The definition names to emit.
+    /// - Throws: `GeneratorError.invalidSchema` for a root or shared entry
+    ///   that names no definition, or a shared entry that no root reaches;
+    ///   `GeneratorError.unsupportedShape` for a `$ref` that does not point
+    ///   into `$defs`.
+    private func emittedDefinitionNames(of definitions: [String: JSONValue]) throws -> Set<String> {
+        try validateSubsetEntries(config.rootDefinitions, role: "root", definitions: definitions)
+        try validateSubsetEntries(config.sharedDefinitions, role: "shared", definitions: definitions)
+        let reached = config.rootDefinitions.isEmpty
+            ? Set(definitions.keys)
+            : try reachableDefinitionNames(in: definitions)
+        for name in config.sharedDefinitions.sorted() where !reached.contains(name) {
+            throw GeneratorError.invalidSchema(
+                "shared definition \"\(name)\" is not reached from the root definitions"
+            )
+        }
+        return reached.subtracting(config.sharedDefinitions)
+    }
+
+    /// Makes sure that each entry of a subset configuration names a
+    /// definition of the schema.
+    ///
+    /// - Parameters:
+    ///   - entries: The configured definition names.
+    ///   - role: What the entries are (`root`/`shared`), for the message.
+    ///   - definitions: The schema's top-level `$defs` object.
+    /// - Throws: `GeneratorError.invalidSchema` for the first entry, in name
+    ///   order, that names no definition.
+    private func validateSubsetEntries(
+        _ entries: Set<String>,
+        role: String,
+        definitions: [String: JSONValue]
+    ) throws {
+        for name in entries.sorted() where definitions[name] == nil {
+            throw GeneratorError.invalidSchema(
+                "\(role) definition \"\(name)\" is not a definition the schema declares"
+            )
+        }
+    }
+
+    /// The definitions that the root definitions reach through `$ref`.
+    ///
+    /// The walk includes each root and each definition it finds. It includes
+    /// a shared definition, but it does not walk into it.
+    ///
+    /// - Parameter definitions: The schema's top-level `$defs` object.
+    /// - Returns: The reached definition names.
+    /// - Throws: `GeneratorError.unsupportedShape` for a `$ref` that does not
+    ///   point into `$defs`.
+    private func reachableDefinitionNames(in definitions: [String: JSONValue]) throws -> Set<String> {
+        var reached: Set<String> = []
+        var pending = config.rootDefinitions.sorted()
+        while let name = pending.popLast() {
+            guard reached.insert(name).inserted,
+                !config.sharedDefinitions.contains(name),
+                let fragment = definitions[name]
+            else {
+                continue
+            }
+            pending += try referencedDefinitionNames(in: fragment, context: name)
+        }
+        return reached
+    }
+
+    /// Every definition name that a `$ref` anywhere inside a fragment
+    /// points at.
+    ///
+    /// - Parameters:
+    ///   - fragment: The schema fragment to search.
+    ///   - context: The enclosing definition, for error messages.
+    /// - Returns: The referenced definition names, with repeats.
+    /// - Throws: `GeneratorError.unsupportedShape` for a `$ref` that does not
+    ///   point into `$defs`.
+    private func referencedDefinitionNames(in fragment: JSONValue, context: String) throws -> [String] {
+        switch fragment {
+        case .object(let members):
+            return try members.flatMap { key, value -> [String] in
+                guard key == Self.refKey, let reference = value.stringValue else {
+                    return try referencedDefinitionNames(in: value, context: context)
+                }
+                return [try referencedDefinitionName(reference: reference, context: context)]
+            }
+        case .array(let elements):
+            return try elements.flatMap { try referencedDefinitionNames(in: $0, context: context) }
+        case .null, .bool, .number, .string:
+            return []
         }
     }
 

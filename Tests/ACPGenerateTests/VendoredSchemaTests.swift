@@ -27,40 +27,46 @@ import FoundationModelsACP
         .deletingLastPathComponent()  // package root
 
     /// The tree-relative directory holding the checked-in generated output.
-    private static let generatedDirectory = "Sources/FoundationModelsACP/Generated"
+    static let generatedDirectory = "Sources/FoundationModelsACP/Generated"
 
     /// Reads a tree-relative file from the package.
     ///
     /// - Parameter treeRelativePath: The path relative to the package root.
     /// - Returns: The file's bytes.
     /// - Throws: An error when the file cannot be read.
-    private static func packageFile(_ treeRelativePath: String) throws -> Data {
+    static func packageFile(_ treeRelativePath: String) throws -> Data {
         try Data(contentsOf: packageRoot.appendingPathComponent(treeRelativePath))
     }
 
     /// The vendored set under test — the primary set, emitted at the top level.
-    private static let set = SchemaSet.acpV2
+    static let set = SchemaSet.acpV2
 
     /// Generates from the vendored artifacts exactly as `acp-generate` does.
     ///
-    /// - Parameter reorderingMembers: When `true`, each artifact is
-    ///   re-serialized with its JSON object members in ascending key order
-    ///   before generation. The document's *value* is unchanged — JSON objects
-    ///   are unordered — but the generator's maps are then built by a different
-    ///   insertion sequence.
+    /// - Parameters:
+    ///   - schemaSet: The vendored set to generate. The default is the
+    ///     primary set.
+    ///   - reorderingMembers: When `true`, each artifact is
+    ///     re-serialized with its JSON object members in ascending key order
+    ///     before generation. The document's *value* is unchanged — JSON objects
+    ///     are unordered — but the generator's maps are then built by a different
+    ///     insertion sequence.
     /// - Returns: The generated files, keyed by file name.
     /// - Throws: `GeneratorError` when generation fails, or an error when an
     ///   artifact cannot be read.
-    private static func generateFromVendoredArtifacts(reorderingMembers: Bool = false) throws -> [String: String] {
+    static func generateFromVendoredArtifacts(
+        of schemaSet: SchemaSet = set,
+        reorderingMembers: Bool = false
+    ) throws -> [String: String] {
         func artifact(_ treeRelativePath: String) throws -> Data {
             let bytes = try packageFile(treeRelativePath)
             return reorderingMembers ? try memberSorted(bytes) : bytes
         }
-        let files = try SchemaGenerator(config: set.config).generate(
-            schemaJSON: try artifact(set.schemaPath),
-            metaJSON: try artifact(#require(set.metaPath)),
-            unstableMetaJSON: try artifact(#require(set.unstableMetaPath)),
-            namespace: set.outputNamespace
+        let files = try SchemaGenerator(config: schemaSet.config).generate(
+            schemaJSON: try artifact(schemaSet.schemaPath),
+            metaJSON: try schemaSet.metaPath.map(artifact),
+            unstableMetaJSON: try schemaSet.unstableMetaPath.map(artifact),
+            namespace: schemaSet.outputNamespace
         )
         return Dictionary(uniqueKeysWithValues: files.map { ($0.name, $0.contents) })
     }
@@ -176,15 +182,24 @@ import FoundationModelsACP
         #expect(Self.set.schemaPath == "Schema/acp-v2.json")
         #expect(Self.set.metaPath == "Schema/acp-v2.meta.json")
         #expect(Self.set.unstableMetaPath == "Schema/acp-v2.meta.unstable.json")
-        #expect(SchemaSet.all.map(\.versionLabel) == ["v2"])
-        // Every declared artifact is actually vendored.
-        for path in [Self.set.schemaPath, Self.set.metaPath, Self.set.unstableMetaPath].compactMap({ $0 }) {
-            #expect(throws: Never.self) { try Self.packageFile(path) }
+        #expect(SchemaSet.all.map(\.versionLabel) == ["v2", "v2-unstable"])
+        // Every declared artifact of every set is actually vendored.
+        for schemaSet in SchemaSet.all {
+            for path in [schemaSet.schemaPath, schemaSet.metaPath, schemaSet.unstableMetaPath].compactMap({ $0 }) {
+                #expect(throws: Never.self) { try Self.packageFile(path) }
+            }
         }
     }
 
     @Test func checkedInOutputMatchesAFreshRun() throws {
-        let generated = try Self.generateFromVendoredArtifacts()
+        // Every set writes into the same directory, so the check covers the
+        // files of every set together.
+        var generated: [String: String] = [:]
+        for schemaSet in SchemaSet.all {
+            let setFiles = try Self.generateFromVendoredArtifacts(of: schemaSet)
+            #expect(Set(generated.keys).isDisjoint(with: setFiles.keys), "\(schemaSet.versionLabel) reuses a file name")
+            generated.merge(setFiles) { first, _ in first }
+        }
         for (name, contents) in generated.sorted(by: { $0.key < $1.key }) {
             let checkedIn = try String(
                 decoding: Self.packageFile("\(Self.generatedDirectory)/\(name)"),
@@ -206,17 +221,19 @@ import FoundationModelsACP
         )
     }
 
-    @Test func checkedInStampMatchesTheVendoredArtifactHash() throws {
-        let stampName = SchemaGenerator.stampFileName(namespace: Self.set.outputNamespace)
+    @Test(arguments: SchemaSet.all.map(\.versionLabel))
+    func checkedInStampMatchesTheVendoredArtifactHash(versionLabel: String) throws {
+        let schemaSet = try #require(SchemaSet.all.first { $0.versionLabel == versionLabel })
+        let stampName = SchemaGenerator.stampFileName(namespace: schemaSet.outputNamespace)
         let recorded = try String(
             decoding: Self.packageFile("\(Self.generatedDirectory)/\(stampName)"),
             as: UTF8.self
         ).trimmingCharacters(in: .whitespacesAndNewlines)
-        let outcome = try SchemaGenerator(config: Self.set.config).generateIfChanged(
-            schemaJSON: try Self.packageFile(Self.set.schemaPath),
-            metaJSON: try Self.packageFile(#require(Self.set.metaPath)),
-            unstableMetaJSON: try Self.packageFile(#require(Self.set.unstableMetaPath)),
-            namespace: Self.set.outputNamespace,
+        let outcome = try SchemaGenerator(config: schemaSet.config).generateIfChanged(
+            schemaJSON: try Self.packageFile(schemaSet.schemaPath),
+            metaJSON: try schemaSet.metaPath.map(Self.packageFile),
+            unstableMetaJSON: try schemaSet.unstableMetaPath.map(Self.packageFile),
+            namespace: schemaSet.outputNamespace,
             previousHash: recorded
         )
         #expect(outcome == .unchanged(hash: recorded))
@@ -764,7 +781,7 @@ import FoundationModelsACP
     ///
     /// - Parameter source: The generated file's source text.
     /// - Returns: The declared names.
-    private static func declaredTypeNames(in source: String) -> [String] {
+    static func declaredTypeNames(in source: String) -> [String] {
         source.split(separator: "\n", omittingEmptySubsequences: false).compactMap(declaredTypeName(on:))
     }
 

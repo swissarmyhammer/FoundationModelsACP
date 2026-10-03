@@ -1,8 +1,41 @@
 ---
 assignees:
 - claude-code
-position_column: todo
-position_ordinal: '8680'
+comments:
+- actor: claude-code
+  id: 01m40t55qeezzhb1przqvnfg1g
+  text: |-
+    Research done.
+    - Digest check: `gh api .../releases/tags/schema-v2.0.0-alpha.7` gives schema.unstable.json sha256:75b2aa359dd26cd9d0468674be96482b14a2d181bc8e3ea8c91a8e598f63e3b5 (432210 bytes). The scratch copy matches.
+    - Reachable closure of CompactionUpdate, CompactionSummaryChunk, Notice in the unstable schema = the six listed types + ContentBlock (and its closure). The unstable ContentBlock closure differs from the stable one ONLY in description text (doc links). So ContentBlock must resolve to the stable top-level type, not be emitted again.
+    - The generator already supports a namespaced SchemaSet, but `Emitter.file` wraps each file in `public enum <Namespace> {`. With more than one file (Identifiers, Models, Unions, Unresolved) that declares the enum more than once and cannot compile. Also `public enum Unstable` already exists in MethodTable.generated.swift. Plan: namespaced files use `extension <Namespace> {`, and an empty declaration list emits no file.
+    - Plan for config: `GeneratorConfig.rootDefinitions` (emit only the reachable closure) and `sharedDefinitions` (resolve to the primary set's type, never emit, do not walk into). Stale entries fail generation.
+    - Patch types already get `folded(onto:)` from the emitter when a field is in `patchSemanticsFields`.
+    - `SessionUpdate.unknown(type, payload)`: payload excludes the `sessionUpdate` member. The internal helpers `JSONValue.decoded(as:)` and `JSONValue.encode(result:)` do the transcode.
+    - VendoredSchemaTests.checkedInOutputMatchesAFreshRun requires the Generated directory to hold exactly the primary set's files; it must learn about all sets.
+  timestamp: 2026-10-03T11:59:55.118476+00:00
+- actor: claude-code
+  id: 01m40tq1n8qwtfe3z02fmn84nz
+  text: |-
+    Implementation landed (not committed).
+    - Vendored Schema/acp-v2.unstable.json (sha256 75b2aa35…e3b5, same as the release asset). Schema/README.md: table row added, the "deliberately not vendored" paragraph replaced by "The unstable schema document"; bump steps now name schema.unstable.json. CONTRIBUTING.md artifact list updated.
+    - Generator: `GeneratorConfig.rootDefinitions` + `sharedDefinitions` (stale entries fail generation); `GeneratorConfig.acpV2Unstable`; `SchemaSet.acpV2Unstable` (label "v2-unstable", namespace "Unstable", no manifests); `SchemaSet.all = [.acpV2, .acpV2Unstable]`.
+    - Namespaced files now open `extension <Namespace> {` (the old `public enum <Namespace> {` cannot compile with more than one file). A namespaced set emits no file for an empty declaration list. The top-level set still emits all four base files: 11 existing generator tests depend on that (first attempt skipped empty lists for every set and broke them; reverted to namespaced-only).
+    - Generated: Unstable.Identifiers/Models/Unions.generated.swift + .Unstable.schema-hash. Six types only; ContentBlock resolves to the stable type.
+    - Hand-written Sources/FoundationModelsACP/Session/UnstableSessionUpdate.swift: `Unstable.SessionUpdate` and `SessionUpdate.init(_ update: Unstable.SessionUpdate) throws`.
+    - CI codegen gate now drops every stamp (`.schema-hash` and `.*.schema-hash`), else the unstable set short-circuits.
+    - VendoredSchemaTests: checked-in output and stamp checks now cover every set.
+    - Verified: build --build-tests 0 warnings; swift test 426 + 128 tests pass; generate-documentation --target FoundationModelsACP --warnings-as-errors passes; IntegrationTests 7 tests pass.
+  timestamp: 2026-10-03T12:09:40.776697+00:00
+- actor: claude-code
+  id: 01m40tq6cj92n0kss0ed3sce0y
+  text: |-
+    ### implement — changed
+    - evidence: 21 files — Schema/acp-v2.unstable.json, Schema/README.md, CONTRIBUTING.md, .github/workflows/ci.yml, Sources/ACPGenerateCore/{Emitter,GeneratorConfig,SchemaGenerator,SchemaSet}.swift, Sources/FoundationModelsACP/Generated/{Unstable.Identifiers,Unstable.Models,Unstable.Unions}.generated.swift + .Unstable.schema-hash, Sources/FoundationModelsACP/Session/UnstableSessionUpdate.swift, Tests/ACPGenerateTests/{ReachableSubsetTests,UnstableVendoredSchemaTests,VendoredSchemaTests,SchemaSetTests}.swift, Tests/FoundationModelsACPTests/{UnstableSessionUpdateTests,UnstableCompactionNoticeRoundTripTests}.swift. swift build --build-tests: 0 warnings; swift test: 426 + 128 pass; DocC --warnings-as-errors: pass; IntegrationTests: 7 pass.
+    - next: /review
+  timestamp: 2026-10-03T12:09:45.618093+00:00
+position_column: doing
+position_ordinal: '80'
 title: Vendor schema.unstable.json and generate unstable compaction and notice session updates
 ---
 ## What

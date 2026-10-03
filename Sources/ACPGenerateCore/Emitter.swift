@@ -123,6 +123,11 @@ enum Emitter {
 
     /// Assembles a generated file from rendered declarations.
     ///
+    /// A namespaced file extends the namespace enum and does not declare it.
+    /// A set writes more than one file, and each file would otherwise declare
+    /// the same enum again. Some other source must declare the enum: for the
+    /// `Unstable` namespace, the method table of the primary set declares it.
+    ///
     /// - Parameters:
     ///   - declarations: Rendered type declarations, already sorted.
     ///   - namespace: An enclosing namespace enum to nest the declarations in,
@@ -133,7 +138,7 @@ enum Emitter {
             return ([header] + declarations).joined(separator: declarationSeparator) + "\n"
         }
         let nested = declarations.map(indented(declaration:)).joined(separator: declarationSeparator)
-        let wrapped = "public enum \(namespace) {\n\(nested)\n}"
+        let wrapped = "extension \(namespace) {\n\(nested)\n}"
         return ([header, wrapped]).joined(separator: declarationSeparator) + "\n"
     }
 

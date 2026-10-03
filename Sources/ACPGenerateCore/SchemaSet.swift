@@ -69,10 +69,29 @@ public struct SchemaSet: Sendable {
         config: .acpV2
     )
 
+    /// The vendored ACP v2 unstable schema set, emitted into the `Unstable`
+    /// namespace.
+    ///
+    /// Upstream publishes the unstable surface as a second, full schema
+    /// document. This package does not serve that whole surface: the set
+    /// emits only the types that the unstable session updates
+    /// `compaction_update`, `compaction_summary_chunk` and `notice` reach. The
+    /// set routes no methods, because the primary set already routes the
+    /// unstable methods by name. The primary set's method table declares the
+    /// `Unstable` enum, and this set's files extend it.
+    public static let acpV2Unstable = SchemaSet(
+        versionLabel: "v2-unstable",
+        outputNamespace: "Unstable",
+        schemaPath: "Schema/acp-v2.unstable.json",
+        metaPath: nil,
+        unstableMetaPath: nil,
+        config: .acpV2Unstable
+    )
+
     /// Every vendored schema set the generator emits, in output order.
     ///
     /// Vendoring a second protocol version is an append here plus its schema
     /// artifacts under `Schema/`; the generator and CLI iterate this list
     /// without change.
-    public static let all: [SchemaSet] = [.acpV2]
+    public static let all: [SchemaSet] = [.acpV2, .acpV2Unstable]
 }

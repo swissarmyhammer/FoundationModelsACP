@@ -24,7 +24,9 @@ import Testing
     @Test func namespacedSetNestsTypesAndPrefixesFileNames() throws {
         let files = try toyGenerator.generate(schemaJSON: Self.toySchema, namespace: "ToyV2")
         let models = try #require(files.first { $0.name == "ToyV2.Models.generated.swift" })
-        #expect(models.contents.contains("public enum ToyV2 {"))
+        // Each file extends the namespace enum, so a set with more than one
+        // file never declares the enum twice.
+        #expect(models.contents.contains("extension ToyV2 {"))
         // The struct is nested one level inside the namespace enum.
         #expect(models.contents.contains("    public struct ToyThing: Codable, Hashable, Sendable {"))
     }

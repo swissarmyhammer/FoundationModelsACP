@@ -83,6 +83,26 @@ public struct GeneratorConfig: Sendable {
     /// generation rather than being parsed hopefully.
     public var manifestVersion: Int
 
+    /// The definitions that start the emitted subset of the schema document.
+    ///
+    /// When this set is empty, the generator emits every definition. When it
+    /// is not empty, the generator emits only the definitions that these
+    /// roots reach through `$ref`, the roots included. The generator does not
+    /// classify a definition that no root reaches, so a shape it cannot model
+    /// in an unused part of the document does not stop generation. Each entry
+    /// must name a definition of the schema, or generation fails.
+    public var rootDefinitions: Set<String>
+
+    /// The definitions that another schema set already emits at the top
+    /// level.
+    ///
+    /// The generator does not emit a shared definition, and it does not walk
+    /// into it to find more definitions. A `$ref` to it resolves to its
+    /// emitted name, which inside a namespace finds the top-level type. Each
+    /// entry must name a definition of the schema that a root reaches, or
+    /// generation fails, so a stale entry cannot stay after a re-vendor.
+    public var sharedDefinitions: Set<String>
+
     /// Creates a configuration.
     ///
     /// - Parameters:
@@ -93,6 +113,9 @@ public struct GeneratorConfig: Sendable {
     ///   - deprecatedMethods: Wire method → deprecation message markers.
     ///   - patchSemanticsFields: Fields with three-state patch semantics.
     ///   - manifestVersion: The version the routing manifests must declare.
+    ///   - rootDefinitions: The definitions that start the emitted subset, or
+    ///     an empty set to emit every definition.
+    ///   - sharedDefinitions: The definitions that another set emits.
     public init(
         wireInvariantFields: [String: InvariantType] = [:],
         typeRenames: [String: String] = [:],
@@ -100,7 +123,9 @@ public struct GeneratorConfig: Sendable {
         handwrittenDefinitions: Set<String> = [],
         deprecatedMethods: [String: String] = [:],
         patchSemanticsFields: Set<String> = [],
-        manifestVersion: Int = 1
+        manifestVersion: Int = 1,
+        rootDefinitions: Set<String> = [],
+        sharedDefinitions: Set<String> = []
     ) {
         self.wireInvariantFields = wireInvariantFields
         self.typeRenames = typeRenames
@@ -109,6 +134,8 @@ public struct GeneratorConfig: Sendable {
         self.deprecatedMethods = deprecatedMethods
         self.patchSemanticsFields = patchSemanticsFields
         self.manifestVersion = manifestVersion
+        self.rootDefinitions = rootDefinitions
+        self.sharedDefinitions = sharedDefinitions
     }
 
     /// Configuration for the vendored `Schema/acp-v2.json` document.
@@ -168,5 +195,31 @@ public struct GeneratorConfig: Sendable {
             "ToolCallUpdate.rawOutput", "ToolCallUpdate._meta",
         ],
         manifestVersion: 2
+    )
+
+    /// Configuration for the vendored `Schema/acp-v2.unstable.json` document.
+    ///
+    /// The roots are the payloads of the unstable session updates
+    /// `compaction_update`, `compaction_summary_chunk` and `notice`. The
+    /// stable set already emits `ContentBlock`, so it is shared: a reference
+    /// to it resolves to the stable type. The renames, acronyms and
+    /// hand-written definitions are the same as in `acpV2`, so that a name
+    /// resolves to the same Swift type in both sets.
+    ///
+    /// The `CompactionUpdate` description states the patch rule for its
+    /// fields: "`summary`, `error`, and `_meta` have patch semantics:
+    /// omission leaves the stored value unchanged, `null` clears it, and a
+    /// concrete value replaces it." `CompactionSummaryChunk._meta` and
+    /// `Notice._meta` say that omission and `null` both mean absent, so they
+    /// stay plain optionals.
+    public static let acpV2Unstable = GeneratorConfig(
+        typeRenames: acpV2.typeRenames,
+        knownAcronyms: acpV2.knownAcronyms,
+        handwrittenDefinitions: acpV2.handwrittenDefinitions,
+        patchSemanticsFields: [
+            "CompactionUpdate.summary", "CompactionUpdate.error", "CompactionUpdate._meta",
+        ],
+        rootDefinitions: ["CompactionUpdate", "CompactionSummaryChunk", "Notice"],
+        sharedDefinitions: ["ContentBlock"]
     )
 }
