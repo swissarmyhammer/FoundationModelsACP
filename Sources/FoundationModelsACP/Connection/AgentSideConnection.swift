@@ -181,8 +181,44 @@ public final class AgentSideConnection: Sendable {
     }
 
     /// Shuts the connection down, rejecting every pending request.
+    ///
+    /// When the connection is open, the close reason becomes
+    /// ``ConnectionCloseReason/closedLocally``. When it already closed, the
+    /// call has no effect, and ``closed`` keeps the first reason.
     public func close() async {
         await core.close()
+    }
+
+    /// Waits until the connection closed, and gives the reason.
+    ///
+    /// Use this value to release the state of the agent when the client goes
+    /// away without `session/close`. For example, the client closes the
+    /// standard input of a stdio agent, and the value is
+    /// ``ConnectionCloseReason/endOfInput``:
+    ///
+    /// ```swift
+    /// Task {
+    ///     let reason = await connection.closed
+    ///     // Log the reason. Finish the streams, stop the tools, and save
+    ///     // the sessions.
+    /// }
+    /// ```
+    ///
+    /// The value comes one time for each connection, and each waiter gets
+    /// the same reason. A waiter that starts after the close gets the reason
+    /// at once. The first event that closes the connection sets the reason:
+    /// the end of input, a failure of the input stream, or ``close()``.
+    ///
+    /// The value comes only after each inbound handler of the agent ended,
+    /// finished or cancelled. This includes the work that a handler deferred
+    /// with ``afterRespondingToCurrentRequest(_:)``. Thus the agent can
+    /// release its state with no race against a handler that still runs.
+    ///
+    /// Do not wait for this value in an agent method: the value waits for
+    /// that method to end. The wait does not stop when the waiting task is
+    /// cancelled.
+    public var closed: ConnectionCloseReason {
+        get async { await core.closed }
     }
 
     // MARK: - Deferred post-response work

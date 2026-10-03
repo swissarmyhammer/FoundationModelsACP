@@ -43,6 +43,20 @@ func sendRawLine(_ line: String, over transport: some ACPTransport) async throws
     try await transport.write(Data((line + "\n").utf8))
 }
 
+/// Transport stub whose incoming stream and outgoing writes are both driven
+/// by the test: feed `bytes` via its continuation, observe writes on `written`.
+struct ScriptedTransport: ACPTransport {
+    let bytes: AsyncThrowingStream<Data, any Error>
+    let written: AsyncStream<Data>.Continuation
+
+    /// Records the outgoing chunk for the test to observe; never fails.
+    ///
+    /// - Parameter data: The framed bytes the connection wrote.
+    func write(_ data: Data) async throws {
+        written.yield(data)
+    }
+}
+
 /// Steps through framed messages arriving at a raw transport end, one call
 /// at a time, retaining stream position between calls. Malformed frames are
 /// skipped — tests that care about them read `NDJSONCodec.frames` directly.

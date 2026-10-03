@@ -3,22 +3,6 @@ import Testing
 
 import FoundationModelsACP
 
-// MARK: - Helpers
-
-/// Transport stub whose incoming stream and outgoing writes are both driven
-/// by the test: feed `bytes` via its continuation, observe writes on `written`.
-private struct ScriptedTransport: ACPTransport {
-    let bytes: AsyncThrowingStream<Data, any Error>
-    let written: AsyncStream<Data>.Continuation
-
-    /// Records the outgoing chunk for the test to observe; never fails.
-    ///
-    /// - Parameter data: The framed bytes the connection wrote.
-    func write(_ data: Data) async throws {
-        written.yield(data)
-    }
-}
-
 // MARK: - Fail loud on disconnect
 
 @Test(.timeLimit(.minutes(1))) func eofRejectsEveryPendingRequest() async throws {

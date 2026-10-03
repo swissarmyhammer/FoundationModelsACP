@@ -188,6 +188,8 @@ public enum ConnectionError: Error, Hashable, Sendable {
 ///
 /// Fail loud on disconnect: on EOF or stream error every pending continuation
 /// is rejected with `ConnectionError.closed` — callers are never left hung.
+/// After that, and after each inbound handler ended, `closed` gives the
+/// close reason to each task that waits for it.
 public actor Connection {
     /// Handles one inbound request; the returned value becomes the response's
     /// `result`. Throw a `RequestError` to answer with a specific JSON-RPC
@@ -300,13 +302,26 @@ public actor Connection {
     /// id — the same id a `$/cancel_request` names — and cancelled on
     /// disconnect.
     private var inboundTasks: [RequestId: Task<Void, Never>] = [:]
+    /// Each inbound request task that did not end, keyed by a monotonic
+    /// token local to this connection. A task stays here until its last
+    /// step, also after `inboundTasks` dropped it to write its response and
+    /// to run its deferred work. The read loop waits for these tasks before
+    /// `closed` gives its reason.
+    private var liveInboundTasks: [Int: Task<Void, Never>] = [:]
+    /// Monotonic key for `liveInboundTasks` entries.
+    private var nextInboundToken = 0
     /// In-flight batch calls awaiting their owed responses, keyed by a
     /// monotonic token local to this connection.
     private var batches: [Int: BatchState] = [:]
     /// Monotonic key for `batches` entries.
     private var nextBatchToken = 0
-    /// Set exactly once, by `shutDown()`, before pending requests are rejected.
-    private var isClosed = false
+    /// Why the connection closed, or `nil` while it is open. Set exactly
+    /// once, by `shutDown(reason:)`, before pending requests are rejected.
+    private var closeReason: ConnectionCloseReason?
+    /// `true` after `shutDown(reason:)` ran.
+    private var isClosed: Bool { closeReason != nil }
+    /// Gives the close reason to each task that waits on `closed`.
+    private nonisolated let closeSignal = ConnectionCloseSignal()
     /// The read loop; cancelled by `close()`.
     private var readTask: Task<Void, Never>?
 
@@ -440,15 +455,73 @@ public actor Connection {
     /// Shuts the connection down: rejects every pending request with
     /// `ConnectionError.closed`, cancels in-flight inbound handlers, and
     /// stops the read loop. Idempotent.
+    ///
+    /// When the connection is open, the close reason becomes
+    /// `ConnectionCloseReason.closedLocally`. When it already closed, the
+    /// call has no effect, and `closed` keeps the first reason.
     public func close() {
-        shutDown()
+        shutDown(reason: .closedLocally)
+    }
+
+    /// Waits until the connection closed, and gives the reason.
+    ///
+    /// The value comes one time for each connection, and each waiter gets
+    /// the same reason. A waiter that starts after the close gets the reason
+    /// at once. The first event that closes the connection sets the reason:
+    /// the end of input, a failure of the input stream, or `close()`.
+    ///
+    /// The value comes only after each inbound handler ended, finished or
+    /// cancelled. This includes the work that a request handler deferred
+    /// until after its response. Thus the owner can release the state that
+    /// the handlers use, with no race against a handler that still runs.
+    ///
+    /// Do not wait for this value in an inbound handler: the value waits for
+    /// that handler to end. The wait does not stop when the waiting task is
+    /// cancelled.
+    public nonisolated var closed: ConnectionCloseReason {
+        get async { await closeSignal.wait() }
     }
 
     // MARK: - Read loop
 
     /// Consumes the transport's framed lines until EOF or stream failure,
-    /// then fails loud: `shutDown()` rejects everything still pending.
+    /// then fails loud: `shutDown(reason:)` rejects everything still pending.
+    ///
+    /// The loop also ends when `close()` cancels it. In each case, the loop
+    /// then waits for each inbound request task to end, and only then gives
+    /// the close reason to `closed`. A notification handler runs on this
+    /// loop, so it ended too.
     private func readLoop() async {
+        let reason = shutDown(reason: await readFrames())
+        await waitForLiveInboundTasks()
+        closeSignal.fire(reason)
+    }
+
+    /// Waits until each inbound request task ended, finished or cancelled.
+    ///
+    /// Call only after `shutDown(reason:)`: after the close, no new inbound
+    /// request task starts, so this wait sees each task that can still run.
+    private func waitForLiveInboundTasks() async {
+        let running = liveInboundTasks.values
+        liveInboundTasks = [:]
+        for task in running {
+            await task.value
+        }
+    }
+
+    /// Forgets one inbound request task at its last step.
+    ///
+    /// - Parameter token: The `liveInboundTasks` key of the task.
+    private func retireInboundTask(token: Int) {
+        liveInboundTasks.removeValue(forKey: token)
+    }
+
+    /// Dispatches each framed line of the transport until the input stream
+    /// ends.
+    ///
+    /// - Returns: Why the input stream ended: `endOfInput` when it finished,
+    ///   or `transportFailed` with the error of the stream.
+    private func readFrames() async -> ConnectionCloseReason {
         do {
             for try await frame in NDJSONCodec.frames(from: transport.bytes, logger: logger) {
                 switch frame {
@@ -462,10 +535,11 @@ public actor Connection {
                     await respondParseError()
                 }
             }
+            return .endOfInput
         } catch {
             log("transport stream failed: \(error)")
+            return .transportFailed(error)
         }
-        shutDown()
     }
 
     /// Routes one decoded line: a single envelope, or a batch array of them.
@@ -670,12 +744,21 @@ public actor Connection {
     ///   - batchToken: The enclosing batch's collector, or `nil` when this
     ///     request arrived on its own.
     private func dispatchRequest(id: RequestId, method: String, params: JSONValue?, batchToken: Int?) async {
+        // A batch can still dispatch items after `close()`. A handler that
+        // starts now cannot write a response, and `closed` could give its
+        // reason while that handler runs; thus it does not start.
+        guard !isClosed else {
+            log("dropping request with id \(id): the connection is closed")
+            return
+        }
         if inboundTasks[id] != nil {
             log("rejecting request with id \(id): a request with this id is already in flight")
             await respond(id: id, outcome: .failure(.invalidRequest), batchToken: batchToken)
             return
         }
         let handler = requestHandler
+        let token = nextInboundToken
+        nextInboundToken += 1
         let task = Task {
             // Bound around the handler call so `afterRespondingToCurrentRequest`
             // finds the right collector no matter how deep the handler's own
@@ -699,8 +782,10 @@ public actor Connection {
             } else {
                 hooks.discardAll()
             }
+            self.retireInboundTask(token: token)
         }
         inboundTasks[id] = task
+        liveInboundTasks[token] = task
     }
 
     /// Computes the outcome of invoking `handler` with `method`/`params`,
@@ -955,10 +1040,21 @@ public actor Connection {
     /// in-flight inbound
     /// handlers, stops the read loop, and fires the close handler last so
     /// upper layers finish derived streams only after callers are unblocked.
-    /// Idempotent.
-    private func shutDown() {
-        guard !isClosed else { return }
-        isClosed = true
+    /// Idempotent: the first call sets the close reason, and a later call
+    /// changes nothing.
+    ///
+    /// The read loop gives the reason to `closed` later, after each inbound
+    /// task ended (see `readLoop()`).
+    ///
+    /// - Parameter reason: Why the connection closes.
+    /// - Returns: The close reason of the connection: `reason` on the first
+    ///   call, and the reason of the first call after that.
+    @discardableResult
+    private func shutDown(reason: ConnectionCloseReason) -> ConnectionCloseReason {
+        if let closeReason {
+            return closeReason
+        }
+        closeReason = reason
         readTask?.cancel()
         readTask = nil
         let rejected = pending
@@ -978,5 +1074,6 @@ public actor Connection {
         // leave dead state behind.
         batches = [:]
         onClose?()
+        return reason
     }
 }

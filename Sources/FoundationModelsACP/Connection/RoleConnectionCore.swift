@@ -124,6 +124,12 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
     func close() async {
         await connection.close()
     }
+
+    /// Waits until the connection closed, and gives the reason. See
+    /// `Connection.closed`.
+    var closed: ConnectionCloseReason {
+        get async { await connection.closed }
+    }
 }
 
 // MARK: - Role holder

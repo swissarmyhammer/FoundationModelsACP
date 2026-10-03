@@ -366,7 +366,36 @@ public final class ClientSideConnection: Sendable {
     }
 
     /// Shuts the connection down, rejecting every pending request.
+    ///
+    /// When the connection is open, the close reason becomes
+    /// ``ConnectionCloseReason/closedLocally``. When it already closed, the
+    /// call has no effect, and ``closed`` keeps the first reason.
     public func close() async {
         await core.close()
+    }
+
+    /// Waits until the connection closed, and gives the reason.
+    ///
+    /// Use this value to show the state of the connection. For example, the
+    /// agent process stops, and the value is
+    /// ``ConnectionCloseReason/endOfInput``, or the read from the agent
+    /// fails, and the value is ``ConnectionCloseReason/transportFailed(_:)``
+    /// with the error.
+    ///
+    /// The value comes one time for each connection, and each waiter gets
+    /// the same reason. A waiter that starts after the close gets the reason
+    /// at once. The first event that closes the connection sets the reason:
+    /// the end of input, a failure of the input stream, or ``close()``.
+    ///
+    /// The value comes only after each inbound handler of the client ended,
+    /// finished or cancelled, and after the session update streams finished.
+    /// Thus the client can release its state with no race against a handler
+    /// that still runs.
+    ///
+    /// Do not wait for this value in a client method: the value waits for
+    /// that method to end. The wait does not stop when the waiting task is
+    /// cancelled.
+    public var closed: ConnectionCloseReason {
+        get async { await core.closed }
     }
 }
