@@ -50,10 +50,26 @@ comments:
     - evidence: Sources/FoundationModelsACP/Session/SessionEntry.swift, Tests/FoundationModelsACPTests/SessionMergeEngineCompactionTests.swift, Tests/FoundationModelsACPTests/SessionMergeEngineTests.swift. `swift build --build-tests`: 0 warnings, 0 errors. Affected tests (SessionMergeEngine, UnstableSessionUpdate, UnstableCompactionNotice filters): 82 + 2 pass. DocC with `--warnings-as-errors`: passes.
     - next: /test
   timestamp: 2026-10-03T12:26:13.211665+00:00
+- actor: claude-code
+  id: 01m40vxhx7r07at1dwj6vm60ff
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (081cad7). 0 findings (attempted 7, failed 0, skipped 0). 4 files reviewed. 2 .kanban files not reviewed because of .reviewignore.
+    - next: The task is in done. Send the new names to foundationmodelsacpclient-ae and foundationmodelsacpagent-bb, as the acceptance criteria tell.
+  timestamp: 2026-10-03T12:30:42.599100+00:00
+- actor: claude-code
+  id: 01m40vxsf4kycgm7y2r1jpb303
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 4 files, compaction entries, Change.notice, _unreported extension status
+    - test: green — scratch-path build 0 warnings; swift test 440+128 passed; IntegrationTests 7 passed
+    - commit: 081cad7
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-10-03T12:30:50.340308+00:00
 depends_on:
 - 01M3Z6RMQ8PXEGNY5VAK55FG8A
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: a580
 title: 'Merge engine: compaction entries and live notices'
 ---
 ## What
