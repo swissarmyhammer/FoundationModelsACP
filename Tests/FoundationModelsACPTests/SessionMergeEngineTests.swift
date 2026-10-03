@@ -500,14 +500,42 @@ enum SessionMergeEngineFixtures {
 @Suite struct SessionMergeEngineReplayTests {
     private typealias Fixtures = SessionMergeEngineFixtures
 
+    /// A compaction that has a status, an error, and `_meta`.
+    private static let reportedCompactionId = Unstable.CompactionId(rawValue: "compaction-1")
+
+    /// A compaction that has only a summary chunk, and no status yet.
+    private static let unreportedCompactionId = Unstable.CompactionId(rawValue: "compaction-2")
+
+    /// The unstable updates that make the two compaction entries.
+    ///
+    /// - Returns: The stable session updates that carry them.
+    /// - Throws: An error when a payload does not encode.
+    private static func compactionUpdates() throws -> [SessionUpdate] {
+        let reported = Unstable.CompactionUpdate(
+            compactionId: reportedCompactionId,
+            status: .failed,
+            error: .value("Model refused"),
+            meta: .value(Fixtures.traceMeta)
+        )
+        let chunk = Unstable.CompactionSummaryChunk(
+            compactionId: unreportedCompactionId,
+            content: Fixtures.text("early")
+        )
+        return [
+            try SessionUpdate(.compactionUpdate(reported)),
+            try SessionUpdate(.compactionSummaryChunk(chunk)),
+        ]
+    }
+
     /// Makes an engine that holds one entry of each kind and a value for
     /// each state field.
     ///
     /// - Returns: The engine.
-    private static func populatedEngine() -> SessionMergeEngine {
+    /// - Throws: An error when a compaction payload does not encode.
+    private static func populatedEngine() throws -> SessionMergeEngine {
         let windowSize = 1000
         let tokensUsed = 10
-        let updates: [SessionUpdate] = [
+        let updates: [SessionUpdate] = try compactionUpdates() + [
             .userMessage(UserMessage(messageId: Fixtures.messageId, content: .value([Fixtures.text("hi")]))),
             .agentThoughtChunk(ContentChunk(content: Fixtures.text("plan"), messageId: Fixtures.otherMessageId)),
             .agentMessageChunk(
@@ -536,7 +564,7 @@ enum SessionMergeEngineFixtures {
     }
 
     @Test func aReplayAppliedToANewEngineGivesTheSameState() throws {
-        let original = Self.populatedEngine()
+        let original = try Self.populatedEngine()
         let transcriptUpdates = original.transcriptUpdates
         let stateUpdates = original.stateUpdates
         var replayed = SessionMergeEngine()
@@ -550,8 +578,12 @@ enum SessionMergeEngineFixtures {
         let usage = try #require(original.usage)
         let agentState = try #require(original.agentState)
         #expect(!original.entries.isEmpty)
+        #expect(original.entry(withID: .compaction(Self.reportedCompactionId))?.kind.compaction != nil)
+        #expect(original.entry(withID: .compaction(Self.unreportedCompactionId))?.kind.compaction != nil)
         #expect(original.sessionInfo != SessionInfoUpdate())
         #expect(replayed.entries == original.entries)
+        let unreported = replayed.entry(withID: .compaction(Self.unreportedCompactionId))?.kind.compaction
+        #expect(unreported?.status == .unknown("_unreported"))
         #expect(replayed.availableCommands == commands)
         #expect(replayed.configOptions == options)
         #expect(replayed.usage == usage)
@@ -560,8 +592,8 @@ enum SessionMergeEngineFixtures {
         #expect(replayed == original)
     }
 
-    @Test func aReplayedEntryKeepsItsIdentifier() {
-        let original = Self.populatedEngine()
+    @Test func aReplayedEntryKeepsItsIdentifier() throws {
+        let original = try Self.populatedEngine()
         var replayed = SessionMergeEngine()
         for update in original.transcriptUpdates {
             replayed.apply(update)
@@ -569,8 +601,8 @@ enum SessionMergeEngineFixtures {
         #expect(replayed.entries.map(\.id) == original.entries.map(\.id))
     }
 
-    @Test func theTranscriptUpdatesHoldNoStateUpdate() {
-        let transcript = Self.populatedEngine().transcriptUpdates
+    @Test func theTranscriptUpdatesHoldNoStateUpdate() throws {
+        let transcript = try Self.populatedEngine().transcriptUpdates
         let hasStateUpdate = transcript.contains { update in
             if case .stateUpdate = update { return true }
             return false
@@ -592,8 +624,8 @@ enum SessionMergeEngineFixtures {
         #expect(message.content == [Fixtures.text("a")])
     }
 
-    @Test func resetReturnsTheEngineToItsInitialState() {
-        var engine = Self.populatedEngine()
+    @Test func resetReturnsTheEngineToItsInitialState() throws {
+        var engine = try Self.populatedEngine()
         engine.reset()
         #expect(engine == SessionMergeEngine())
     }

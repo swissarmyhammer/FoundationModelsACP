@@ -16,8 +16,18 @@ import Foundation
 /// - A terminal chunk appends decoded bytes, and an `output` snapshot replaces
 ///   them.
 /// - A plan update replaces the plan with the same `planId`.
-/// - An unknown update becomes an unknown entry. The engine never drops an
-///   update.
+/// - **UNSTABLE:** A `compaction_update` adds a compaction entry, or folds
+///   onto it with `Unstable.CompactionUpdate.folded(onto:)`. A
+///   `compaction_summary_chunk` appends to the summary of that entry. A
+///   compaction changes only the model context of the agent. The transcript
+///   keeps the full history: the engine never removes or changes an earlier
+///   entry because of a compaction.
+/// - **UNSTABLE:** A `notice` is a live event. The engine does not keep it
+///   and does not replay it. ``apply(_:)`` returns it as
+///   ``SessionMergeEngine/Change/notice(_:)``.
+/// - An unknown update becomes an unknown entry. A known unstable update
+///   whose payload does not decode also becomes an unknown entry. The engine
+///   never drops an update.
 /// - The last-value fields (``availableCommands``, ``configOptions``,
 ///   ``usage``, ``agentState``) take the value of the last update.
 ///   ``sessionInfo`` folds as a patch: an omitted field does not change, and
@@ -56,6 +66,13 @@ public struct SessionMergeEngine: Hashable, Sendable {
 
         /// The session information changed to this folded value.
         case sessionInfoChanged(SessionInfoUpdate)
+
+        /// **UNSTABLE**
+        ///
+        /// The agent sent this notice for the user. A notice is a live
+        /// event, not session history, so the engine does not keep it and
+        /// does not replay it. Nothing in the engine changed.
+        case notice(Unstable.Notice)
     }
 
     /// The transcript, in the order of first appearance.
@@ -126,7 +143,7 @@ public struct SessionMergeEngine: Hashable, Sendable {
         case .planUpdate(let plan):
             updatePlan(plan)
         case .unknown(let type, let payload):
-            appendEntry(SessionEntry(id: nextUnidentifiedID, kind: .unknown(type: type, payload: payload)))
+            applyUnknown(update, type: type, payload: payload)
         case .stateUpdate(let state):
             setAgentState(state)
         case .availableCommandsUpdate(let commands):
@@ -289,6 +306,56 @@ public struct SessionMergeEngine: Hashable, Sendable {
         ) { plan in
             plan = PlanUpdate(plan: incoming.plan, meta: incoming.meta ?? plan.meta)
         }
+    }
+
+    /// Merges an update that the stable schema does not know.
+    ///
+    /// An unstable compaction update or summary chunk changes a compaction
+    /// entry. A notice changes nothing and comes back as
+    /// ``Change/notice(_:)``. Each other update becomes an unknown entry.
+    /// A known unstable type whose payload does not decode also becomes an
+    /// unknown entry, the same as each other update that the engine cannot
+    /// read. The engine never drops it.
+    ///
+    /// - Parameters:
+    ///   - update: The stable update, which is the `.unknown` case.
+    ///   - type: The `sessionUpdate` wire value.
+    ///   - payload: The raw payload.
+    /// - Returns: What changed.
+    private mutating func applyUnknown(_ update: SessionUpdate, type: String, payload: JSONValue) -> Change {
+        guard let unstable = try? Unstable.SessionUpdate(update) else {
+            return appendEntry(SessionEntry(id: nextUnidentifiedID, kind: .unknown(type: type, payload: payload)))
+        }
+        switch unstable {
+        case .compactionUpdate(let compaction):
+            return updateCompaction(compaction.compactionId) { $0.apply(compaction) }
+        case .compactionSummaryChunk(let chunk):
+            return updateCompaction(chunk.compactionId) { $0.append(chunk) }
+        case .notice(let notice):
+            return .notice(notice)
+        }
+    }
+
+    /// Changes a compaction entry, and adds the entry when it is new.
+    ///
+    /// A compaction is one more entry. It never removes or changes an
+    /// earlier entry.
+    ///
+    /// - Parameters:
+    ///   - compactionId: The identifier of the compaction.
+    ///   - change: Changes the compaction.
+    /// - Returns: What changed.
+    private mutating func updateCompaction(
+        _ compactionId: Unstable.CompactionId,
+        change: (inout SessionEntry.Compaction) -> Void
+    ) -> Change {
+        upsert(
+            .compaction(compactionId),
+            initial: SessionEntry.Compaction(compactionId: compactionId),
+            extract: \.compaction,
+            embed: SessionEntry.Kind.compaction,
+            change: change
+        )
     }
 
     /// Changes the payload of an entry, and adds the entry when it is new.
