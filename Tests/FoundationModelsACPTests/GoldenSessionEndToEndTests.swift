@@ -229,7 +229,7 @@ private let standardTestTimeout = 1  // minute
         let agentConn = await AgentSideConnection(stream: capture) { conn in GoldenSessionAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in GoldenSessionClient() }
 
-        var updates = client.subscribe(to: Self.sessionId).updates.makeAsyncIterator()
+        let subscription = client.subscribe(to: Self.sessionId)
 
         let initResponse = try await client.initialize(
             InitializeRequest(info: Implementation(name: "golden-client", version: "1.0.0"), protocolVersion: .v2)
@@ -247,11 +247,13 @@ private let standardTestTimeout = 1  // minute
 
         // Drain the session's updates through the closing idle, applying
         // each to a merge engine so the test asserts accumulated *state*, not
-        // only that some bytes happened to match.
+        // only that some bytes happened to match. The loop takes only the
+        // updates, and skips each request-finished marker (for example, the
+        // marker of the `session/prompt` request).
         var engine = SessionMergeEngine()
         var sawRequiresAction = false
         var stopReason: StopReason?
-        while let update = await updates.nextUpdate() {
+        for await case .update(let update) in subscription.updates {
             engine.apply(update)
             if case .stateUpdate(.requiresAction) = update {
                 sawRequiresAction = true

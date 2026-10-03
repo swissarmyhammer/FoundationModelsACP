@@ -306,9 +306,10 @@ func connectionEOFFinishesAllSessionStreams() async throws {
     let secondStream = client.subscribe(to: sessionTwo).updates
 
     // Each collector drains its stream to completion, so it returns only once
-    // the stream finishes.
-    let firstCollector = Task { var count = 0; for await _ in firstStream { count += 1 }; return count }
-    let secondCollector = Task { var count = 0; for await _ in secondStream { count += 1 }; return count }
+    // the stream finishes. It counts the updates, and skips each
+    // request-finished marker.
+    let firstCollector = Task { var count = 0; for await case .update in firstStream { count += 1 }; return count }
+    let secondCollector = Task { var count = 0; for await case .update in secondStream { count += 1 }; return count }
 
     // One update reaches the first session, then the peer closes: EOF must
     // finish both streams so neither collector hangs past the buffered update.
@@ -596,9 +597,12 @@ private let resumeWireMethod = RoleRouting.wireMethod(for: "resumeSession", on: 
 /// The wire method of `session/prompt`, from the routing table.
 private let promptWireMethod = RoleRouting.wireMethod(for: "prompt", on: .agent)
 
+/// The timeout, in milliseconds, of the request in the timeout test.
+private let shortRequestTimeoutMilliseconds = 50
+
 /// The timeout of the request in the timeout test. The raw agent end never
 /// answers that request.
-private let shortRequestTimeout: Duration = .milliseconds(50)
+private let shortRequestTimeout: Duration = .milliseconds(shortRequestTimeoutMilliseconds)
 
 /// Frames a JSON-RPC error response keyed to a request id.
 ///
