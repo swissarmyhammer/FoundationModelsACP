@@ -34,8 +34,24 @@ comments:
     - evidence: 21 files — Schema/acp-v2.unstable.json, Schema/README.md, CONTRIBUTING.md, .github/workflows/ci.yml, Sources/ACPGenerateCore/{Emitter,GeneratorConfig,SchemaGenerator,SchemaSet}.swift, Sources/FoundationModelsACP/Generated/{Unstable.Identifiers,Unstable.Models,Unstable.Unions}.generated.swift + .Unstable.schema-hash, Sources/FoundationModelsACP/Session/UnstableSessionUpdate.swift, Tests/ACPGenerateTests/{ReachableSubsetTests,UnstableVendoredSchemaTests,VendoredSchemaTests,SchemaSetTests}.swift, Tests/FoundationModelsACPTests/{UnstableSessionUpdateTests,UnstableCompactionNoticeRoundTripTests}.swift. swift build --build-tests: 0 warnings; swift test: 426 + 128 pass; DocC --warnings-as-errors: pass; IntegrationTests: 7 pass.
     - next: /review
   timestamp: 2026-10-03T12:09:45.618093+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m40v4hka38jc1gnzgj497748
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (10df3da). 0 findings, 0 confirmed, 0 refuted. 14 validator runs attempted, 0 failed, 0 skipped. 15 files reviewed. 6 files not reviewed: 2 files are excluded by .reviewignore (.kanban/), and no validator matches 4 files (CONTRIBUTING.md, Schema/README.md, Schema/acp-v2.unstable.json, Sources/FoundationModelsACP/Generated/.Unstable.schema-hash).
+    - next: The task is in done. No prior findings sections are open.
+  timestamp: 2026-10-03T12:17:03.082237+00:00
+- actor: claude-code
+  id: 01m40v4snx1ceg0ndc083m4eg1
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — 21 files, vendored unstable schema, Unstable types, Unstable.SessionUpdate view
+    - test: green — scratch-path build 0 warnings; swift test 426+128 passed; IntegrationTests 7 passed
+    - commit: 10df3da
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-10-03T12:17:11.357615+00:00
+position_column: done
+position_ordinal: a480
 title: Vendor schema.unstable.json and generate unstable compaction and notice session updates
 ---
 ## What
