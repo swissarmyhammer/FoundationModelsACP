@@ -41,6 +41,35 @@ comments:
     - evidence: 9 files — Sources/FoundationModelsACP/Connection/{ConnectionCloseReason.swift (new), ConnectionCloseSignal.swift (new), Connection.swift, RoleConnectionCore.swift, AgentSideConnection.swift, ClientSideConnection.swift}, Tests/FoundationModelsACPTests/{ConnectionClosedSignalTests.swift (new), WireTestSupport.swift, DisconnectTests.swift}. `swift build --build-tests`: 0 warnings. `swift test`: 399 + 110 tests passed. `swift package generate-documentation --target FoundationModelsACP --warnings-as-errors`: passed. `swift test --package-path IntegrationTests`: 7 tests passed.
     - next: /review
   timestamp: 2026-10-03T11:40:09.618639+00:00
+- actor: claude-code
+  id: 01m40sjrm55x8hjx2mr9qtqnd1
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (e7c3a7d); 2 findings (2 confirmed, 0 refuted) — Tests/FoundationModelsACPTests/ConnectionClosedSignalTests.swift:14, Tests/FoundationModelsACPTests/ConnectionClosedSignalTests.swift:18 (code-hygiene/magic-numbers-swift)
+    - next: Replace the magic numbers in ConnectionClosedSignalTests.swift with named constants. Remove this cause from the full file. Then review again.
+  timestamp: 2026-10-03T11:49:51.877935+00:00
+- actor: claude-code
+  id: 01m40sk10xe08e1j5patgjzsyt
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — 9 files, ConnectionCloseReason, public closed signal on both sides
+    - test: green — scratch-path build 0 warnings; swift test 399+110 passed; IntegrationTests 7 passed
+    - commit: e7c3a7d
+    - review: findings — Tests/FoundationModelsACPTests/ConnectionClosedSignalTests.swift:14, Tests/FoundationModelsACPTests/ConnectionClosedSignalTests.swift:18
+  timestamp: 2026-10-03T11:50:00.477203+00:00
+- actor: claude-code
+  id: 01m40snrwz26t4en2gtxshnb7q
+  text: |-
+    Magic numbers fixed in ConnectionClosedSignalTests.swift. The integer literals in `.seconds(3600)` and `.milliseconds(200)` now have their own named constants: `secondsPerHour = 3600` and `handlerWorkAfterCancellationMilliseconds = 200`. A literal in a call argument is reported by swiftlint `no_magic_numbers`; a literal in a plain `let` declaration is not reported.
+    Check: swiftlint with only `no_magic_numbers` and `allowed_numbers: [0, 1, -1, 100]` (config in the scratchpad) found 2 violations before (lines 14 and 18 only) and 0 after. The same check on WireTestSupport.swift and DisconnectTests.swift found 0 violations. The lines this task added in those two files (`ScriptedTransport`) have no numeric literals.
+  timestamp: 2026-10-03T11:51:30.463449+00:00
+- actor: claude-code
+  id: 01m40snv1gtbxtpjqz73pg96df
+  text: |-
+    ### implement — changed
+    - evidence: 1 file — Tests/FoundationModelsACPTests/ConnectionClosedSignalTests.swift. swiftlint no_magic_numbers: 0 violations in the 3 test files. `swift build --build-tests --scratch-path <scratchpad>/build`: 0 warnings. `swift test --filter 'ClosedSignalTests|Disconnect'`: 21 tests passed. Both findings flipped to [x].
+    - next: /review
+  timestamp: 2026-10-03T11:51:32.656385+00:00
 position_column: doing
 position_ordinal: '80'
 title: Public connection-closed signal with a reason on both connection sides
@@ -79,3 +108,13 @@ Rules:
 - Test: a handler that is still running when the connection closes has ended before the signal fires.
 - `swift build --build-tests` has 0 warnings; `swift test` passes; DocC with `--warnings-as-errors` passes.
 - When pushed, send the commit and the final names to `foundationmodelsacpagent-bb` and `foundationmodelsacpclient-ae`.
+
+## Review Findings (2026-10-03 06:41)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 9 file(s) reviewed, 6 not reviewed.
+
+> 6 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 6 file(s)
+
+- [x] `Tests/FoundationModelsACPTests/ConnectionClosedSignalTests.swift:14` `code-hygiene/magic-numbers-swift` — Magic numbers should be replaced by named constants.
+- [x] `Tests/FoundationModelsACPTests/ConnectionClosedSignalTests.swift:18` `code-hygiene/magic-numbers-swift` — Magic numbers should be replaced by named constants.

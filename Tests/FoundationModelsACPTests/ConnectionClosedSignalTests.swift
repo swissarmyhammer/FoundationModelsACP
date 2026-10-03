@@ -9,13 +9,21 @@ import FoundationModelsACP
 /// The time limit of each test in this suite, in minutes.
 private let closedSignalTestTimeout = 1
 
+/// The number of seconds in one hour.
+private let secondsPerHour = 3600
+
 /// How long a test request handler waits for its cancellation. The value is
 /// much longer than any test, so only the cancellation ends the wait.
-private let handlerWaitForCancellation: Duration = .seconds(3600)
+private let handlerWaitForCancellation: Duration = .seconds(secondsPerHour)
+
+/// The number of milliseconds that a test request handler continues to work
+/// after its cancellation.
+private let handlerWorkAfterCancellationMilliseconds = 200
 
 /// How long a test request handler continues to work after its
 /// cancellation. The signal must wait for this work to end.
-private let handlerWorkAfterCancellation: Duration = .milliseconds(200)
+private let handlerWorkAfterCancellation: Duration =
+    .milliseconds(handlerWorkAfterCancellationMilliseconds)
 
 /// The error that the scripted input stream fails with.
 private struct WireFailure: Error {}
