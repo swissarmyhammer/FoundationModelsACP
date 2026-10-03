@@ -70,8 +70,24 @@ comments:
     - evidence: 1 file — Tests/FoundationModelsACPTests/ConnectionClosedSignalTests.swift. swiftlint no_magic_numbers: 0 violations in the 3 test files. `swift build --build-tests --scratch-path <scratchpad>/build`: 0 warnings. `swift test --filter 'ClosedSignalTests|Disconnect'`: 21 tests passed. Both findings flipped to [x].
     - next: /review
   timestamp: 2026-10-03T11:51:32.656385+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m40ssznxmbq35bqtm2y7ascy
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (24e0be0): 0 findings, 7 validators attempted, 0 failed. The 2 prior findings are checked.
+    - next: Task moved to done. Send the commit and the final names to foundationmodelsacpagent-bb and foundationmodelsacpclient-ae when pushed.
+  timestamp: 2026-10-03T11:53:48.477151+00:00
+- actor: claude-code
+  id: 01m40st6ws6n9qyyn33hftsrff
+  text: |-
+    ### finish iteration 2 — clean
+    - implement: changed — named constants in ConnectionClosedSignalTests.swift
+    - test: green — scratch-path build 0 warnings; swift test 399+110 passed; IntegrationTests 7 passed
+    - commit: 24e0be0
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-10-03T11:53:55.865604+00:00
+position_column: done
+position_ordinal: a380
 title: Public connection-closed signal with a reason on both connection sides
 ---
 ## Problem
