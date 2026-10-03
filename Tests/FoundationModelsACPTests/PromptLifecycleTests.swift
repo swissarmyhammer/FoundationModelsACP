@@ -362,7 +362,7 @@ private let standardTestTimeout = 1  // minute
             // Waiting for the first delivered update guarantees the agent has
             // by now written it — so the log below already holds both frames
             // in the literal order the agent wrote them to the wire.
-            #expect(await updates.next() == .stateUpdate(.running(RunningStateUpdate())))
+            #expect(await updates.nextUpdate() == .stateUpdate(.running(RunningStateUpdate())))
 
             let events = await log.events
             #expect(events.first == "response", "wire order was \(events), expected the response written first")
@@ -382,11 +382,11 @@ private let standardTestTimeout = 1  // minute
 
         let response = try await client.prompt(PromptRequest(prompt: [.text(TextContent(text: "go"))], sessionId: session))
 
-        #expect(await updates.next() == .stateUpdate(.running(RunningStateUpdate())))
+        #expect(await updates.nextUpdate() == .stateUpdate(.running(RunningStateUpdate())))
         // The echo names the same user message that the response names.
         let echo = ContentChunk(content: .text(TextContent(text: "go")), messageId: response.messageId)
-        #expect(await updates.next() == .userMessageChunk(echo))
-        #expect(await updates.next() == .stateUpdate(.idle(IdleStateUpdate(stopReason: .maxTokens))))
+        #expect(await updates.nextUpdate() == .userMessageChunk(echo))
+        #expect(await updates.nextUpdate() == .stateUpdate(.idle(IdleStateUpdate(stopReason: .maxTokens))))
 
         await agentConn.close()
         await client.close()
@@ -406,9 +406,9 @@ private let standardTestTimeout = 1  // minute
             )
         )
 
-        _ = try #require(await updates.next())  // running
-        let firstUpdate = try #require(await updates.next())
-        let secondUpdate = try #require(await updates.next())
+        _ = try #require(await updates.nextUpdate())  // running
+        let firstUpdate = try #require(await updates.nextUpdate())
+        let secondUpdate = try #require(await updates.nextUpdate())
         guard
             case .userMessageChunk(let first) = firstUpdate,
             case .userMessageChunk(let second) = secondUpdate
@@ -426,7 +426,7 @@ private let standardTestTimeout = 1  // minute
         #expect(first.content == .text(TextContent(text: "first")))
         #expect(second.content == .text(TextContent(text: "second")))
 
-        _ = try #require(await updates.next())  // idle
+        _ = try #require(await updates.nextUpdate())  // idle
 
         await agentConn.close()
         await client.close()
@@ -447,17 +447,17 @@ private let standardTestTimeout = 1  // minute
 
         _ = try await client.prompt(PromptRequest(prompt: [.text(TextContent(text: "go"))], sessionId: session))
 
-        #expect(await updates.next() == .stateUpdate(.running(RunningStateUpdate())))
-        let echoed = try #require(await updates.next())
+        #expect(await updates.nextUpdate() == .stateUpdate(.running(RunningStateUpdate())))
+        let echoed = try #require(await updates.nextUpdate())
         guard case .userMessageChunk = echoed else {
             Issue.record("expected a user_message_chunk, got \(echoed)")
             return
         }
-        #expect(await updates.next() == .stateUpdate(.requiresAction(RequiresActionStateUpdate())))
+        #expect(await updates.nextUpdate() == .stateUpdate(.requiresAction(RequiresActionStateUpdate())))
         // Resumed to running only once the permission request was answered —
         // not before, since the agent awaits it in between.
-        #expect(await updates.next() == .stateUpdate(.running(RunningStateUpdate())))
-        #expect(await updates.next() == .stateUpdate(.idle(IdleStateUpdate(stopReason: .endTurn))))
+        #expect(await updates.nextUpdate() == .stateUpdate(.running(RunningStateUpdate())))
+        #expect(await updates.nextUpdate() == .stateUpdate(.idle(IdleStateUpdate(stopReason: .endTurn))))
 
         await agentConn.close()
         await client.close()
@@ -472,8 +472,8 @@ private let standardTestTimeout = 1  // minute
 
         _ = try await client.prompt(PromptRequest(prompt: [.text(TextContent(text: "go"))], sessionId: session))
 
-        #expect(await updates.next() == .stateUpdate(.running(RunningStateUpdate())))
-        let echoed = try #require(await updates.next())
+        #expect(await updates.nextUpdate() == .stateUpdate(.running(RunningStateUpdate())))
+        let echoed = try #require(await updates.nextUpdate())
         guard case .userMessageChunk = echoed else {
             Issue.record("expected a user_message_chunk, got \(echoed)")
             return
@@ -481,7 +481,7 @@ private let standardTestTimeout = 1  // minute
 
         // A notification, not a request: nothing here waits on the agent.
         try await client.sessionCancel(CancelSessionNotification(sessionId: session))
-        #expect(await updates.next() == .stateUpdate(.idle(IdleStateUpdate(stopReason: .cancelled))))
+        #expect(await updates.nextUpdate() == .stateUpdate(.idle(IdleStateUpdate(stopReason: .cancelled))))
 
         await agentConn.close()
         await client.close()

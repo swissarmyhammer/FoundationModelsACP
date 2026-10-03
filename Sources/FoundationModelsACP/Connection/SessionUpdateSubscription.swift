@@ -1,18 +1,26 @@
 /// A subscription to the `session/update` notifications of one session.
 ///
-/// `ClientSideConnection.subscribe(to:)` makes a subscription. The first
-/// subscription to a session gets the updates that the connection kept for
-/// that session before a subscriber was attached, in order, and then the live
-/// updates. A subsequent subscription gets only the live updates.
+/// `ClientSideConnection.subscribe(to:)` makes a subscription. The stream of
+/// the subscription holds ``SessionStreamEvent`` values: the updates of the
+/// session, and a ``SessionStreamEvent/requestFinished(id:method:outcome:)``
+/// marker for each request that the client sent for the session.
 ///
-/// The connection keeps the updates of a session only up to the limits in
-/// ``SessionUpdateBufferLimits``. When the connection discards kept updates,
+/// The first subscription to a session gets the events that the connection
+/// kept for that session before a subscriber was attached, in order, and then
+/// the live events. A subsequent subscription gets only the live events.
+///
+/// The connection keeps the events of a session only up to the limits in
+/// ``SessionUpdateBufferLimits``. When the connection discards kept events,
 /// it marks the session. The first subscription reads that mark in
 /// ``hasMissedUpdates``, and then the connection clears the mark.
 public struct SessionUpdateSubscription: Sendable {
-    /// The updates of the session: first the kept updates, then the live
-    /// updates. The stream finishes when the connection closes.
-    public let updates: AsyncStream<SessionUpdate>
+    /// The events of the session: first the kept events, then the live
+    /// events, in wire order. The stream finishes when the connection closes.
+    /// When the connection closes, the stream first gets a
+    /// ``SessionStreamEvent/requestFinished(id:method:outcome:)`` marker with
+    /// ``OutgoingRequestOutcome/failed`` for each request of the session that
+    /// did not finish, and then it finishes.
+    public let updates: AsyncStream<SessionStreamEvent>
 
     /// Whether the connection discarded updates of this session before this
     /// subscription was attached.
@@ -30,6 +38,11 @@ public struct SessionUpdateSubscription: Sendable {
 /// to that session. For example, it sends `available_commands_update` before
 /// the `session/new` response that gives the session ID. The connection keeps
 /// these updates until the first subscriber is attached.
+///
+/// The connection also keeps the
+/// ``SessionStreamEvent/requestFinished(id:method:outcome:)`` markers of a
+/// session that has no subscriber, in order with its updates. Each marker
+/// counts as one update toward ``maximumUpdatesPerSession``.
 ///
 /// When a session has more updates than ``maximumUpdatesPerSession``, the
 /// connection discards all of the kept updates of that session. When more

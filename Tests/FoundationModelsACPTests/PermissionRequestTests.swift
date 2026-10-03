@@ -214,7 +214,7 @@ import Testing
         try await agentConn.sessionUpdate(
             UpdateSessionNotification(sessionId: session, update: .stateUpdate(.running(RunningStateUpdate())))
         )
-        #expect(await updates.next() == .stateUpdate(.running(RunningStateUpdate())))
+        #expect(await updates.nextUpdate() == .stateUpdate(.running(RunningStateUpdate())))
 
         // Only now release the gate — the assertion above already proved the
         // request was genuinely still pending, not merely fast.

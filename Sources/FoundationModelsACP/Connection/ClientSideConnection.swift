@@ -40,6 +40,9 @@ public final class ClientSideConnection: Sendable {
         // connection's close handler rather than `self`, preserving the
         // initialization-cycle break the core relies on.
         let router = SessionUpdateRouter(limits: bufferLimits, logger: logger)
+        // The tracker gives each finished session request to the router at
+        // the wire position of its response, before the caller resumes.
+        let outgoingRequests = OutgoingRequestTracker { finished in router.deliver(finished) }
         core = await RoleConnectionCore(
             stream: stream,
             logger: logger,
@@ -52,7 +55,8 @@ public final class ClientSideConnection: Sendable {
             dispatchNotification: { handler, params, client in
                 await Self.serveNotification(handler, params: params, to: client, router: router)
             },
-            onClose: { router.finishAll() }
+            onClose: { router.finishAll() },
+            outgoingRequests: outgoingRequests
         )
         self.router = router
         core.setRole(factory(self))
@@ -83,28 +87,49 @@ public final class ClientSideConnection: Sendable {
     /// ``closeSession(_:)`` closes it, and discards all of them when the
     /// connection closes.
     ///
+    /// The stream also gets one
+    /// ``SessionStreamEvent/requestFinished(id:method:outcome:)`` marker for
+    /// each request of this connection whose params name the session, at the
+    /// wire position of the response. The connection yields the marker before
+    /// the call returns or throws. A failed request (an error response, a
+    /// cancelled call, a timeout, a failed write, or connection close) gives
+    /// a marker with ``OutgoingRequestOutcome/failed``.
+    ///
     /// To resume a session, subscribe before you call ``resumeSession(_:)``:
     /// the session ID is known, and the replayed updates then go to your
-    /// subscription in order.
+    /// subscription in order. The `session/resume` marker comes after the
+    /// last replayed update. Thus, when your task reads that marker, it
+    /// applied all of the replay.
     ///
     /// - Parameter sessionId: The session whose updates to observe.
-    /// - Returns: The subscription: the stream of the session's updates, and
-    ///   the mark that tells if updates were discarded before it.
+    /// - Returns: The subscription: the stream of the session's updates and
+    ///   request markers, and the mark that tells if updates were discarded
+    ///   before it.
     public func subscribe(to sessionId: SessionId) -> SessionUpdateSubscription {
         router.subscribe(to: sessionId)
     }
 
     /// Returns a stream of `session/update` notifications for one session.
     ///
-    /// This is ``subscribe(to:)`` without the overflow mark: it takes the kept
-    /// updates of the session, and it discards the mark. Subscribe before you
-    /// call ``resumeSession(_:)``.
+    /// This is ``subscribe(to:)`` without the overflow mark and without the
+    /// ``SessionStreamEvent/requestFinished(id:method:outcome:)`` markers: it
+    /// takes the kept updates of the session, and it discards the mark and
+    /// the markers. Subscribe before you call ``resumeSession(_:)``.
     ///
     /// - Parameter sessionId: The session whose updates to observe.
     /// - Returns: A stream of that session's updates.
     @available(*, deprecated, message: "Use subscribe(to:), which also gives the hasMissedUpdates mark.")
     public func updates(for sessionId: SessionId) -> AsyncStream<SessionUpdate> {
-        subscribe(to: sessionId).updates
+        let events = subscribe(to: sessionId).updates
+        let (updates, continuation) = AsyncStream.makeStream(of: SessionUpdate.self)
+        let forwarder = Task {
+            for await case .update(let update) in events {
+                continuation.yield(update)
+            }
+            continuation.finish()
+        }
+        continuation.onTermination = { _ in forwarder.cancel() }
+        return updates
     }
 
     // MARK: - Outgoing requests

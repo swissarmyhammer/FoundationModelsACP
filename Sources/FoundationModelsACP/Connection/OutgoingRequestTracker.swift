@@ -1,3 +1,20 @@
+/// One outgoing request whose params name a session, and that finished.
+///
+/// `OutgoingRequestTracker` gives this value to its session observer.
+struct FinishedSessionRequest: Hashable, Sendable {
+    /// The wire ID of the request.
+    let id: RequestId
+
+    /// The wire method of the request.
+    let method: String
+
+    /// The session that the params of the request name.
+    let sessionId: SessionId
+
+    /// How the request finished.
+    let outcome: OutgoingRequestOutcome
+}
+
 /// Records the outgoing requests of one `Connection` that wait for a
 /// response, and sends an `OutgoingRequestEvent` to each subscriber when a
 /// request starts or finishes.
@@ -9,9 +26,18 @@
 /// there would let a subscriber see a response before the start of its
 /// request.
 ///
-/// `Connection` calls `start(id:method:)` and `finish(id:)` only while it is
-/// open, and calls `finishAll()` one time when it closes.
+/// The tracker also calls one optional session observer, synchronously, for
+/// each finished request whose params name a `sessionId`. `Connection`
+/// records the finish before it resumes the caller, and, for a response from
+/// the wire, in the read loop. Thus the observer runs at the position of the
+/// response on the wire, before the caller continues.
+///
+/// `Connection` calls `start(id:method:params:)` and `finish(id:outcome:)`
+/// only while it is open, and calls `finishAll()` one time when it closes.
 final class OutgoingRequestTracker: Sendable {
+    /// Receives each finished request whose params name a session.
+    typealias SessionObserver = @Sendable (FinishedSessionRequest) -> Void
+
     /// The one topic of the tracker: each subscriber gets each event.
     private enum Topic {
         /// The events of all outgoing requests.
@@ -22,6 +48,10 @@ final class OutgoingRequestTracker: Sendable {
     private struct InFlightRequest {
         /// The wire method of the request.
         let method: String
+
+        /// The session that the params of the request name, or `nil` when
+        /// they name no session.
+        let sessionId: SessionId?
 
         /// The start order of the request, so a new subscriber gets the
         /// in-flight requests in the order that they started.
@@ -36,11 +66,16 @@ final class OutgoingRequestTracker: Sendable {
         /// The sequence of the next request that starts.
         var nextSequence = 0
 
-        /// The start event of each request, in start order.
-        var startEvents: [OutgoingRequestEvent] {
+        /// The requests with their wire IDs, in start order.
+        var inStartOrder: [(id: RequestId, request: InFlightRequest)] {
             requests
                 .sorted { $0.value.sequence < $1.value.sequence }
-                .map { .started(id: $0.key, method: $0.value.method) }
+                .map { (id: $0.key, request: $0.value) }
+        }
+
+        /// The start event of each request, in start order.
+        var startEvents: [OutgoingRequestEvent] {
+            inStartOrder.map { .started(id: $0.id, method: $0.request.method) }
         }
 
         /// Adds one request.
@@ -48,47 +83,81 @@ final class OutgoingRequestTracker: Sendable {
         /// - Parameters:
         ///   - id: The wire ID of the request.
         ///   - method: The wire method of the request.
-        mutating func add(id: RequestId, method: String) {
-            requests[id] = InFlightRequest(method: method, sequence: nextSequence)
+        ///   - sessionId: The session that the params of the request name.
+        mutating func add(id: RequestId, method: String, sessionId: SessionId?) {
+            requests[id] = InFlightRequest(method: method, sessionId: sessionId, sequence: nextSequence)
             nextSequence += 1
         }
     }
+
+    /// The params member that names the session of a request.
+    private static let sessionIdKey = "sessionId"
 
     /// The in-flight requests and the subscribers.
     private let broadcaster = EventBroadcaster<Topic, OutgoingRequestEvent, InFlightRequests>(
         context: InFlightRequests()
     )
 
+    /// Receives each finished request whose params name a session, or `nil`
+    /// when no part of the connection needs them.
+    private let sessionObserver: SessionObserver?
+
+    /// Creates a tracker with no in-flight requests and no subscribers.
+    ///
+    /// - Parameter sessionObserver: Receives each finished request whose
+    ///   params name a session. The tracker calls it synchronously, outside
+    ///   its lock, before `finish(id:outcome:)` or `finishAll()` returns.
+    init(sessionObserver: SessionObserver? = nil) {
+        self.sessionObserver = sessionObserver
+    }
+
     /// Records that a request started, and tells each subscriber.
     ///
     /// - Parameters:
     ///   - id: The wire ID of the request.
     ///   - method: The wire method of the request.
-    func start(id: RequestId, method: String) {
+    ///   - params: The params of the request. When they are an object with a
+    ///     string `sessionId` member, the tracker gives the finish of the
+    ///     request to the session observer.
+    func start(id: RequestId, method: String, params: JSONValue?) {
+        let sessionId = Self.sessionId(namedIn: params)
         broadcaster.withState { state in
-            state.context.add(id: id, method: method)
+            state.context.add(id: id, method: method, sessionId: sessionId)
             state.broadcast(.started(id: id, method: method))
         }
     }
 
     /// Records that a request finished, and tells each subscriber.
     ///
-    /// - Parameter id: The wire ID of the request.
-    func finish(id: RequestId) {
-        broadcaster.withState { state in
-            guard state.context.requests.removeValue(forKey: id) != nil else { return }
+    /// - Parameters:
+    ///   - id: The wire ID of the request.
+    ///   - outcome: How the request finished.
+    func finish(id: RequestId, outcome: OutgoingRequestOutcome) {
+        let finished = broadcaster.withState { state -> InFlightRequest? in
+            guard let request = state.context.requests.removeValue(forKey: id) else { return nil }
             state.broadcast(.finished(id: id))
+            return request
         }
+        guard let finished else { return }
+        report(finished, id: id, outcome: outcome)
     }
 
     /// Finishes each in-flight request, tells each subscriber, and then
     /// finishes each subscriber stream. Later subscriptions finish at once.
+    ///
+    /// The session observer gets each finished session request, in start
+    /// order, with ``OutgoingRequestOutcome/failed``.
     func finishAll() {
+        var finished: [(id: RequestId, request: InFlightRequest)] = []
         broadcaster.finishAll { state in
-            for case .started(let id, _) in state.context.startEvents {
-                state.broadcast(.finished(id: id))
+            finished = state.context.inStartOrder
+            for request in finished {
+                state.broadcast(.finished(id: request.id))
             }
             state.context.requests.removeAll()
+        }
+        for request in finished {
+            report(request.request, id: request.id, outcome: .failed)
         }
     }
 
@@ -105,15 +174,42 @@ final class OutgoingRequestTracker: Sendable {
     ///
     /// The stream first gets one `started` event for each request that is in
     /// flight, in start order, and then the live events. The replay runs
-    /// under the same lock as `start(id:method:)` and `finish(id:)`, so no
-    /// live event can come before a replayed one. The stream finishes when
-    /// the connection closes. A subscription made after the connection
-    /// closed gets a stream that is already finished.
+    /// under the same lock as `start(id:method:params:)` and
+    /// `finish(id:outcome:)`, so no live event can come before a replayed
+    /// one. The stream finishes when the connection closes. A subscription
+    /// made after the connection closed gets a stream that is already
+    /// finished.
     ///
     /// - Returns: The stream of events.
     func subscribe() -> AsyncStream<OutgoingRequestEvent> {
         broadcaster.subscribe(to: .allRequests) { inFlight in
             (inFlight.startEvents, ())
         }.events
+    }
+
+    /// Gives one finished request to the session observer when the params of
+    /// the request name a session.
+    ///
+    /// Call it outside the lock, so the observer can take a lock of its own.
+    ///
+    /// - Parameters:
+    ///   - request: The finished request.
+    ///   - id: The wire ID of the request.
+    ///   - outcome: How the request finished.
+    private func report(_ request: InFlightRequest, id: RequestId, outcome: OutgoingRequestOutcome) {
+        guard let sessionObserver, let sessionId = request.sessionId else { return }
+        sessionObserver(FinishedSessionRequest(id: id, method: request.method, sessionId: sessionId, outcome: outcome))
+    }
+
+    /// The session that the params of a request name.
+    ///
+    /// - Parameter params: The params of the request.
+    /// - Returns: The session, or `nil` when the params are not an object
+    ///   with a string `sessionId` member.
+    private static func sessionId(namedIn params: JSONValue?) -> SessionId? {
+        guard case .object(let members) = params, case .string(let rawValue) = members[sessionIdKey] else {
+            return nil
+        }
+        return SessionId(rawValue: rawValue)
     }
 }

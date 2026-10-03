@@ -251,7 +251,7 @@ private let standardTestTimeout = 1  // minute
         var engine = SessionMergeEngine()
         var sawRequiresAction = false
         var stopReason: StopReason?
-        while let update = await updates.next() {
+        while let update = await updates.nextUpdate() {
             engine.apply(update)
             if case .stateUpdate(.requiresAction) = update {
                 sawRequiresAction = true

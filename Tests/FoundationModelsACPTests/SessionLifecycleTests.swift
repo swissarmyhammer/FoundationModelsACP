@@ -471,20 +471,20 @@ private let selectConfigOption = SessionConfigOption(
         )
 
         var updates = client.subscribe(to: session).updates.makeAsyncIterator()
-        _ = try #require(await updates.next())  // kept: true
-        _ = try #require(await updates.next())  // kept: false
+        _ = try #require(await updates.nextUpdate())  // kept: true
+        _ = try #require(await updates.nextUpdate())  // kept: false
         _ = try await client.resumeSession(
             ResumeSessionRequest(cwd: cwd, sessionId: session, replayFrom: .start(ReplayFromStart()))
         )
 
-        let first = try #require(await updates.next())
+        let first = try #require(await updates.nextUpdate())
         guard case .configOptionUpdate(let firstUpdate) = first else {
             Issue.record("expected the first historical config_option_update, got \(first)")
             return
         }
         #expect(firstUpdate.configOptions.first?.type == .boolean(SessionConfigBoolean(currentValue: true)))
 
-        let second = try #require(await updates.next())
+        let second = try #require(await updates.nextUpdate())
         guard case .configOptionUpdate(let secondUpdate) = second else {
             Issue.record("expected the second historical config_option_update, got \(second)")
             return
@@ -515,7 +515,7 @@ private let selectConfigOption = SessionConfigOption(
         )
 
         var updates = client.subscribe(to: session).updates.makeAsyncIterator()
-        _ = try #require(await updates.next())  // kept: true
+        _ = try #require(await updates.nextUpdate())  // kept: true
         _ = try await client.resumeSession(ResumeSessionRequest(cwd: cwd, sessionId: session))
 
         // Nothing replayed by the omitted-`replayFrom` resume: the very next
@@ -524,7 +524,7 @@ private let selectConfigOption = SessionConfigOption(
         _ = try await client.setSessionConfigOption(
             SetSessionConfigOptionRequest(configId: primaryConfigOption.configId, sessionId: session, value: .boolean(false))
         )
-        let onlyUpdate = try #require(await updates.next())
+        let onlyUpdate = try #require(await updates.nextUpdate())
         guard case .configOptionUpdate(let update) = onlyUpdate else {
             Issue.record("expected the post-resume config_option_update, got \(onlyUpdate)")
             return
@@ -599,7 +599,7 @@ private let selectConfigOption = SessionConfigOption(
         // idle/cancelled confirmation a real cancel would send, proving the
         // in-flight work was actually stopped and its slot freed rather than
         // merely forgotten.
-        let update = try #require(await updates.next())
+        let update = try #require(await updates.nextUpdate())
         #expect(update == .stateUpdate(.idle(IdleStateUpdate(stopReason: .cancelled))))
 
         // Close is not delete: the session survives in a later listing.
@@ -631,7 +631,7 @@ private let selectConfigOption = SessionConfigOption(
         // triggered afterward, not a spurious idle/cancelled.
         _ = try await client.prompt(PromptRequest(prompt: [.text(TextContent(text: "go"))], sessionId: session))
         _ = try await client.closeSession(CloseSessionRequest(sessionId: session))
-        let update = try #require(await updates.next())
+        let update = try #require(await updates.nextUpdate())
         #expect(update == .stateUpdate(.idle(IdleStateUpdate(stopReason: .cancelled))))
 
         let listed = try await client.listSessions(ListSessionsRequest())
@@ -723,7 +723,7 @@ private let selectConfigOption = SessionConfigOption(
             #expect(updatedEntry.type == .boolean(SessionConfigBoolean(currentValue: true)))
             #expect(updatedEntry.category == option.category)
 
-            let update = try #require(await updates.next())
+            let update = try #require(await updates.nextUpdate())
             guard case .configOptionUpdate(let configUpdate) = update else {
                 Issue.record("expected a config_option_update, got \(update)")
                 continue
@@ -773,7 +773,7 @@ private let selectConfigOption = SessionConfigOption(
         #expect(updatedSelect.options == originalSelect.options)
         #expect(updatedEntry.category == selectConfigOption.category)
 
-        let update = try #require(await updates.next())
+        let update = try #require(await updates.nextUpdate())
         guard case .configOptionUpdate(let configUpdate) = update else {
             Issue.record("expected a config_option_update, got \(update)")
             return

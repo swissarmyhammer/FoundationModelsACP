@@ -44,6 +44,9 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
     ///     handler.
     ///   - onClose: Invoked once when the connection shuts down; lets the owner
     ///     finish streams it derives from the connection.
+    ///   - outgoingRequests: The tracker that records the start and the finish
+    ///     of each outbound request. The owner gives a tracker with a session
+    ///     observer when it needs the finish of each session request.
     init(
         stream: any ACPTransport,
         logger: ACPLogger,
@@ -52,7 +55,8 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
         peerSide: MethodSide,
         dispatchRequest: @escaping RequestDispatch,
         dispatchNotification: @escaping NotificationDispatch,
-        onClose: Connection.CloseHandler? = nil
+        onClose: Connection.CloseHandler? = nil,
+        outgoingRequests: OutgoingRequestTracker = OutgoingRequestTracker()
     ) async {
         self.peerSide = peerSide
         let holder = RoleHolder<Role>()
@@ -73,7 +77,8 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
                 }
                 await dispatchNotification(info.handlerName, params, role)
             },
-            onClose: onClose
+            onClose: onClose,
+            outgoingRequests: outgoingRequests
         )
         self.holder = holder
     }

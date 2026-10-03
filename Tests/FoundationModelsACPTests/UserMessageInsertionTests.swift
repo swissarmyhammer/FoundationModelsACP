@@ -179,7 +179,7 @@ private struct ConnectionPair {
 
         #expect(!response.messageId.rawValue.isEmpty)
         let echo = UserMessage(messageId: response.messageId, content: .value(promptContent))
-        #expect(await updates.next() == .userMessage(echo))
+        #expect(await updates.nextUpdate() == .userMessage(echo))
         await pair.close()
     }
 
@@ -203,7 +203,7 @@ private struct ConnectionPair {
         let response = try await pair.client.prompt(insertionPrompt)
 
         #expect(response.messageId == callerId)
-        #expect(await updates.next() == .userMessage(UserMessage(messageId: callerId, content: .value(promptContent))))
+        #expect(await updates.nextUpdate() == .userMessage(UserMessage(messageId: callerId, content: .value(promptContent))))
         await pair.close()
     }
 
@@ -230,7 +230,7 @@ private struct ConnectionPair {
 
             _ = try await pair.client.prompt(insertionPrompt)
             // When the client has the echo, the agent wrote both frames.
-            _ = try #require(await updates.next())
+            _ = try #require(await updates.nextUpdate())
 
             #expect(await log.events == ["response", "update"])
             await pair.close()
@@ -246,7 +246,7 @@ private struct ConnectionPair {
         correlator.addPendingPrompt(localID)
 
         let response = try await pair.client.prompt(insertionPrompt)
-        let echo = try #require(await updates.next())
+        let echo = try #require(await updates.nextUpdate())
 
         #expect(correlator.resolve(localID, with: response) == nil)
         #expect(correlator.observe(echo) == PendingPromptCorrelator<Int>.Link(localID: localID, messageId: response.messageId))

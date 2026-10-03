@@ -297,7 +297,7 @@ public actor Connection {
     /// tell when each one starts and finishes. The connection records a start
     /// before it writes the request, and a finish before it resumes the
     /// caller, so the role connections can give a synchronous lookup.
-    nonisolated let outgoingRequests = OutgoingRequestTracker()
+    nonisolated let outgoingRequests: OutgoingRequestTracker
     /// In-flight inbound request handlers, keyed by the request's own wire
     /// id — the same id a `$/cancel_request` names — and cancelled on
     /// disconnect.
@@ -348,12 +348,54 @@ public actor Connection {
         notificationHandler: NotificationHandler? = nil,
         onClose: CloseHandler? = nil
     ) async {
+        await self.init(
+            transport: transport,
+            logger: logger,
+            requestTimeout: requestTimeout,
+            requestHandler: requestHandler,
+            notificationHandler: notificationHandler,
+            onClose: onClose,
+            outgoingRequests: OutgoingRequestTracker()
+        )
+    }
+
+    /// Creates a connection that records its outgoing requests in a given
+    /// tracker, and starts its read loop.
+    ///
+    /// A role connection gives a tracker with a session observer, so that it
+    /// learns of each finished session request at the position of its
+    /// response on the wire.
+    ///
+    /// - Parameters:
+    ///   - transport: The bidirectional byte transport to run over.
+    ///   - logger: Receives diagnostics for malformed frames and write
+    ///     failures — never stdout.
+    ///   - requestTimeout: Default timeout applied to every outbound request;
+    ///     `nil` means requests wait indefinitely.
+    ///   - requestHandler: Handles inbound requests; when `nil`, every request
+    ///     is answered with `-32601` method-not-found.
+    ///   - notificationHandler: Handles inbound notifications; when `nil`,
+    ///     notifications are dropped.
+    ///   - onClose: Invoked once when the connection shuts down, after pending
+    ///     requests are rejected; when `nil`, shutdown notifies no one.
+    ///   - outgoingRequests: The tracker that records the start and the finish
+    ///     of each outgoing request.
+    init(
+        transport: any ACPTransport,
+        logger: ACPLogger,
+        requestTimeout: Duration?,
+        requestHandler: RequestHandler?,
+        notificationHandler: NotificationHandler?,
+        onClose: CloseHandler?,
+        outgoingRequests: OutgoingRequestTracker
+    ) async {
         self.transport = transport
         self.logger = logger
         self.requestTimeout = requestTimeout
         self.requestHandler = requestHandler
         self.notificationHandler = notificationHandler
         self.onClose = onClose
+        self.outgoingRequests = outgoingRequests
         readTask = Task { await self.readLoop() }
     }
 
@@ -428,7 +470,7 @@ public actor Connection {
                 }
                 let timeoutTask = makeTimeoutTask(for: id, after: limit)
                 pending[id] = PendingRequest(continuation: continuation, timeout: timeoutTask)
-                outgoingRequests.start(id: id, method: method)
+                outgoingRequests.start(id: id, method: method, params: params)
                 // Write only after registering, so a response arriving
                 // immediately always finds its continuation, and a peer
                 // message that names this id always comes after its start
@@ -917,13 +959,14 @@ public actor Connection {
     ///   - id: The response's wire id.
     ///   - fields: The response envelope's members.
     private func resolve(id: JSONValue, fields: [String: JSONValue]) {
-        guard let entry = removePending(id: id) else {
+        // Tolerate peers that emit `"error": null` alongside a result.
+        let error = fields[Self.errorKey].flatMap { $0 == .null ? nil : $0 }
+        guard let entry = removePending(id: id, outcome: error == nil ? .succeeded : .failed) else {
             log("dropping response for unknown id \(id)")
             return
         }
         entry.timeout?.cancel()
-        // Tolerate peers that emit `"error": null` alongside a result.
-        if let error = fields[Self.errorKey], error != .null {
+        if let error {
             entry.continuation.resume(throwing: RequestError(wire: error))
         } else {
             entry.continuation.resume(returning: fields[Self.resultKey, default: .null])
@@ -1001,7 +1044,7 @@ public actor Connection {
     /// - Returns: Whether a pending entry was found and rejected.
     @discardableResult
     private func fail(id: RequestId, with error: any Error) -> Bool {
-        guard let entry = removePending(id: id) else { return false }
+        guard let entry = removePending(id: id, outcome: .failed) else { return false }
         entry.timeout?.cancel()
         entry.continuation.resume(throwing: error)
         return true
@@ -1010,12 +1053,14 @@ public actor Connection {
     /// Removes one pending request and records its finish in
     /// `outgoingRequests`, before the caller resumes the continuation.
     ///
-    /// - Parameter id: The pending entry's wire id.
+    /// - Parameters:
+    ///   - id: The pending entry's wire id.
+    ///   - outcome: How the request finished.
     /// - Returns: The removed entry, or `nil` when no request with this id
     ///   is pending.
-    private func removePending(id: RequestId) -> PendingRequest? {
+    private func removePending(id: RequestId, outcome: OutgoingRequestOutcome) -> PendingRequest? {
         guard let entry = pending.removeValue(forKey: id) else { return nil }
-        outgoingRequests.finish(id: id)
+        outgoingRequests.finish(id: id, outcome: outcome)
         return entry
     }
 

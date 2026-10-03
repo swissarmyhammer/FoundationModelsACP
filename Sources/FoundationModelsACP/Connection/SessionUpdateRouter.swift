@@ -3,10 +3,15 @@ import Foundation
 /// Fans `session/update` notifications out to per-session update streams.
 ///
 /// A `ClientSideConnection` reads one multiplexed wire but exposes each
-/// session's updates as its own `AsyncStream<SessionUpdate>`. This router owns
-/// that demultiplexing: it correlates every notification to its `sessionId`
-/// and delivers the update to every stream currently subscribed to that
-/// session.
+/// session's updates as its own `AsyncStream<SessionStreamEvent>`. This router
+/// owns that demultiplexing: it correlates every notification to its
+/// `sessionId` and delivers the update to every stream currently subscribed
+/// to that session.
+///
+/// The router also delivers a request-finished marker for each request of
+/// the client whose params name a session. `OutgoingRequestTracker` gives the
+/// marker to the router at the wire position of the response, so the marker
+/// is in order with the updates of the session.
 ///
 /// Straggler policy (spec §5). A stream's lifetime runs from subscription
 /// until the connection closes — deliberately *independent* of any prompt
@@ -31,7 +36,7 @@ final class SessionUpdateRouter: Sendable {
     /// The subscribers of each session, and the kept updates as the context,
     /// guarded so delivery, subscription, and shutdown are safe across the
     /// read loop and subscribing tasks.
-    private let broadcaster: EventBroadcaster<SessionId, SessionUpdate, PendingSessionUpdates>
+    private let broadcaster: EventBroadcaster<SessionId, SessionStreamEvent, PendingSessionUpdates>
 
     /// The limits on the updates kept for sessions with no subscriber.
     private let limits: SessionUpdateBufferLimits
@@ -67,7 +72,7 @@ final class SessionUpdateRouter: Sendable {
     func subscribe(to sessionId: SessionId) -> SessionUpdateSubscription {
         let subscription = broadcaster.subscribe(to: sessionId) { pending in
             let kept = pending.take(for: sessionId)
-            return (kept.updates, kept.hasMissedUpdates)
+            return (kept.events, kept.hasMissedUpdates)
         }
         return SessionUpdateSubscription(
             updates: subscription.events,
@@ -83,10 +88,35 @@ final class SessionUpdateRouter: Sendable {
     ///
     /// - Parameter notification: The session update to route.
     func deliver(_ notification: UpdateSessionNotification) {
+        deliver(.update(notification.update), for: notification.sessionId)
+    }
+
+    /// Delivers the marker of one finished session request to every
+    /// subscriber of its session.
+    ///
+    /// A marker for a session with no active subscriber is kept for the first
+    /// subscriber, in order with the kept updates, and counts as one update
+    /// toward the buffer limits.
+    ///
+    /// - Parameter finished: The finished request.
+    func deliver(_ finished: FinishedSessionRequest) {
+        deliver(
+            .requestFinished(id: finished.id, method: finished.method, outcome: finished.outcome),
+            for: finished.sessionId
+        )
+    }
+
+    /// Delivers one event to every subscriber of a session, or keeps it for
+    /// the first subscriber.
+    ///
+    /// - Parameters:
+    ///   - event: The event to deliver.
+    ///   - sessionId: The session of the event.
+    private func deliver(_ event: SessionStreamEvent, for sessionId: SessionId) {
         let overflow = broadcaster.withState { state -> PendingSessionUpdates.Overflow? in
             guard !state.isFinished else { return nil }
-            guard !state.publish(notification.update, to: notification.sessionId) else { return nil }
-            return state.context.keep(notification.update, for: notification.sessionId)
+            guard !state.publish(event, to: sessionId) else { return nil }
+            return state.context.keep(event, for: sessionId)
         }
         if let overflow {
             logger.log(overflow.warning(limits: limits))
@@ -152,8 +182,10 @@ struct PendingSessionUpdates {
     /// The limits on the kept updates.
     private let limits: SessionUpdateBufferLimits
 
-    /// The kept updates of each session, in arrival order.
-    private var buffers: [SessionId: [SessionUpdate]] = [:]
+    /// The kept events of each session, in arrival order. Each event counts
+    /// as one update toward the per-session limit: an update, and also a
+    /// request-finished marker.
+    private var buffers: [SessionId: [SessionStreamEvent]] = [:]
 
     /// The sessions in `buffers`, from the oldest buffer to the newest.
     private var bufferOrder: [SessionId] = []
@@ -168,43 +200,43 @@ struct PendingSessionUpdates {
         self.limits = limits
     }
 
-    /// Keeps one update for a session, and applies the limits.
+    /// Keeps one event for a session, and applies the limits.
     ///
     /// When the buffer of the session is full, the store discards the buffer
-    /// and the new update, and marks the session. When the update needs a new
+    /// and the new event, and marks the session. When the event needs a new
     /// buffer and the session limit is reached, the store first discards the
     /// oldest buffer and marks its session.
     ///
     /// - Parameters:
-    ///   - update: The update to keep.
-    ///   - sessionId: The session of the update.
-    /// - Returns: The overflow that discarded kept updates, or `nil` when
+    ///   - event: The event to keep: an update or a request-finished marker.
+    ///   - sessionId: The session of the event.
+    /// - Returns: The overflow that discarded kept events, or `nil` when
     ///   nothing was discarded.
-    mutating func keep(_ update: SessionUpdate, for sessionId: SessionId) -> Overflow? {
+    mutating func keep(_ event: SessionStreamEvent, for sessionId: SessionId) -> Overflow? {
         if let count = buffers[sessionId]?.count {
             guard count < limits.maximumUpdatesPerSession else {
                 markOverflowed(sessionId)
                 return .sessionFull(sessionId)
             }
-            buffers[sessionId, default: []].append(update)
+            buffers[sessionId, default: []].append(event)
             return nil
         }
         let eviction = evictOldestBufferWhenFull()
-        buffers[sessionId] = [update]
+        buffers[sessionId] = [event]
         bufferOrder.append(sessionId)
         return eviction
     }
 
-    /// Removes and returns the kept updates and the overflow mark of a
+    /// Removes and returns the kept events and the overflow mark of a
     /// session.
     ///
     /// - Parameter sessionId: The session to take.
-    /// - Returns: The kept updates, in order, and whether the session was
+    /// - Returns: The kept events, in order, and whether the session was
     ///   marked.
-    mutating func take(for sessionId: SessionId) -> (updates: [SessionUpdate], hasMissedUpdates: Bool) {
-        let updates = removeBuffer(of: sessionId)
+    mutating func take(for sessionId: SessionId) -> (events: [SessionStreamEvent], hasMissedUpdates: Bool) {
+        let events = removeBuffer(of: sessionId)
         let hasMissedUpdates = overflowed.remove(sessionId) != nil
-        return (updates, hasMissedUpdates)
+        return (events, hasMissedUpdates)
     }
 
     /// Discards the kept updates and the overflow mark of a session.
@@ -243,11 +275,11 @@ struct PendingSessionUpdates {
     /// Removes the buffer of a session.
     ///
     /// - Parameter sessionId: The session whose buffer to remove.
-    /// - Returns: The removed updates, or an empty array when the session had
+    /// - Returns: The removed events, or an empty array when the session had
     ///   no buffer.
-    private mutating func removeBuffer(of sessionId: SessionId) -> [SessionUpdate] {
-        guard let updates = buffers.removeValue(forKey: sessionId) else { return [] }
+    private mutating func removeBuffer(of sessionId: SessionId) -> [SessionStreamEvent] {
+        guard let events = buffers.removeValue(forKey: sessionId) else { return [] }
         bufferOrder.removeAll { $0 == sessionId }
-        return updates
+        return events
     }
 }

@@ -195,9 +195,9 @@ func updatesDemuxAcrossInterleavedSessions() async throws {
     try await send(sessionUpdateEnvelope(notification(for: sessionTwo, messageChunk("b1"))), over: agentEnd)
     try await send(sessionUpdateEnvelope(notification(for: sessionOne, messageChunk("a2"))), over: agentEnd)
 
-    let firstA = await firstUpdates.next()
-    let firstB = await firstUpdates.next()
-    let secondA = await secondUpdates.next()
+    let firstA = await firstUpdates.nextUpdate()
+    let firstB = await firstUpdates.nextUpdate()
+    let secondA = await secondUpdates.nextUpdate()
 
     #expect(firstA == messageChunk("a1"))
     #expect(firstB == messageChunk("a2"))
@@ -231,9 +231,9 @@ func lateToolCallUpdateAfterIdleStateUpdateIsDelivered() async throws {
     // still delivered on the session's stream.
     try await send(sessionUpdateEnvelope(notification(for: sessionOne, toolCallUpdate("call-late"))), over: agentEnd)
 
-    #expect(await updates.next() == messageChunk("mid-turn"))
-    #expect(await updates.next() == idleState(stopReason: .endTurn))
-    #expect(await updates.next() == toolCallUpdate("call-late"))
+    #expect(await updates.nextUpdate() == messageChunk("mid-turn"))
+    #expect(await updates.nextUpdate() == idleState(stopReason: .endTurn))
+    #expect(await updates.nextUpdate() == toolCallUpdate("call-late"))
 
     await client.close()
 }
@@ -268,9 +268,9 @@ func postCancelTrailingUpdatesThenCancelledStopReasonInOrder() async throws {
     )
 
     // The updates are observed on the stream, in wire order.
-    #expect(await updates.next() == toolCallUpdate("call-trailing"))
-    #expect(await updates.next() == messageChunk("winding down"))
-    #expect(await updates.next() == idleState(stopReason: .cancelled))
+    #expect(await updates.nextUpdate() == toolCallUpdate("call-trailing"))
+    #expect(await updates.nextUpdate() == messageChunk("winding down"))
+    #expect(await updates.nextUpdate() == idleState(stopReason: .cancelled))
 
     await client.close()
 }
@@ -290,7 +290,7 @@ func anUpdateForASessionWithNoSubscriberDoesNotStopOtherSessions() async throws 
     try await send(sessionUpdateEnvelope(notification(for: sessionTwo, messageChunk("nobody-listens"))), over: agentEnd)
     try await send(sessionUpdateEnvelope(notification(for: sessionOne, messageChunk("still-here"))), over: agentEnd)
 
-    #expect(await firstUpdates.next() == messageChunk("still-here"))
+    #expect(await firstUpdates.nextUpdate() == messageChunk("still-here"))
 
     await client.close()
 }
@@ -334,14 +334,14 @@ private func makeRouter(
     return (SessionUpdateRouter(limits: limits, logger: log.logger), log)
 }
 
-/// Reads every update of a subscription until its stream finishes.
+/// Reads every event of a subscription until its stream finishes.
 ///
 /// - Parameter subscription: The subscription to drain.
-/// - Returns: The updates, in order.
-private func drain(_ subscription: SessionUpdateSubscription) async -> [SessionUpdate] {
-    var received: [SessionUpdate] = []
-    for await update in subscription.updates {
-        received.append(update)
+/// - Returns: The events, in order.
+private func drain(_ subscription: SessionUpdateSubscription) async -> [SessionStreamEvent] {
+    var received: [SessionStreamEvent] = []
+    for await event in subscription.updates {
+        received.append(event)
     }
     return received
 }
@@ -356,9 +356,9 @@ func routerGivesBufferedUpdatesToTheFirstSubscriberInOrderBeforeLiveUpdates() as
     router.deliver(notification(for: sessionOne, messageChunk("live")))
 
     var updates = subscription.updates.makeAsyncIterator()
-    #expect(await updates.next() == messageChunk("early-1"))
-    #expect(await updates.next() == messageChunk("early-2"))
-    #expect(await updates.next() == messageChunk("live"))
+    #expect(await updates.nextUpdate() == messageChunk("early-1"))
+    #expect(await updates.nextUpdate() == messageChunk("early-2"))
+    #expect(await updates.nextUpdate() == messageChunk("live"))
     #expect(!subscription.hasMissedUpdates)
     #expect(log.messages.isEmpty)
 }
@@ -373,10 +373,10 @@ func routerDoesNotGiveBufferedUpdatesToASecondSubscriber() async {
     router.deliver(notification(for: sessionOne, messageChunk("live")))
 
     var secondUpdates = second.updates.makeAsyncIterator()
-    #expect(await secondUpdates.next() == messageChunk("live"))
+    #expect(await secondUpdates.nextUpdate() == messageChunk("live"))
     var firstUpdates = first.updates.makeAsyncIterator()
-    #expect(await firstUpdates.next() == messageChunk("early"))
-    #expect(await firstUpdates.next() == messageChunk("live"))
+    #expect(await firstUpdates.nextUpdate() == messageChunk("early"))
+    #expect(await firstUpdates.nextUpdate() == messageChunk("live"))
 }
 
 @Test(.timeLimit(.minutes(1)))
@@ -389,7 +389,7 @@ func routerDiscardsAFullSessionBufferMarksTheSessionAndLogsAWarning() async {
     router.deliver(notification(for: sessionOne, messageChunk("live")))
 
     var updates = subscription.updates.makeAsyncIterator()
-    #expect(await updates.next() == messageChunk("live"))
+    #expect(await updates.nextUpdate() == messageChunk("live"))
     #expect(subscription.hasMissedUpdates)
     #expect(log.messages.count == 1)
     #expect(log.messages.first?.contains(sessionOne.rawValue) == true)
@@ -420,17 +420,17 @@ func routerEvictsTheOldestBufferWhenOneSessionTooManyHasABuffer() async {
     let oldest = router.subscribe(to: sessions[0])
     router.deliver(notification(for: sessions[0], messageChunk("live")))
     var oldestUpdates = oldest.updates.makeAsyncIterator()
-    #expect(await oldestUpdates.next() == messageChunk("live"))
+    #expect(await oldestUpdates.nextUpdate() == messageChunk("live"))
     #expect(oldest.hasMissedUpdates)
 
     let secondOldest = router.subscribe(to: sessions[1])
     var secondOldestUpdates = secondOldest.updates.makeAsyncIterator()
-    #expect(await secondOldestUpdates.next() == messageChunk(sessions[1].rawValue))
+    #expect(await secondOldestUpdates.nextUpdate() == messageChunk(sessions[1].rawValue))
     #expect(!secondOldest.hasMissedUpdates)
 
     let newest = router.subscribe(to: sessions[sessionLimit])
     var newestUpdates = newest.updates.makeAsyncIterator()
-    #expect(await newestUpdates.next() == messageChunk(sessions[sessionLimit].rawValue))
+    #expect(await newestUpdates.nextUpdate() == messageChunk(sessions[sessionLimit].rawValue))
     #expect(!newest.hasMissedUpdates)
 
     #expect(log.messages.count == 1)
@@ -449,7 +449,7 @@ func routerDiscardsTheBufferAndTheMarkOfAClosedSession() async {
     router.deliver(notification(for: sessionOne, messageChunk("live")))
 
     var updates = subscription.updates.makeAsyncIterator()
-    #expect(await updates.next() == messageChunk("live"))
+    #expect(await updates.nextUpdate() == messageChunk("live"))
     #expect(!subscription.hasMissedUpdates)
 }
 
@@ -482,8 +482,8 @@ func anUpdateSentBeforeTheNewSessionResponseReachesTheFirstSubscriber() async th
     try await send(sessionUpdateEnvelope(notification(for: session, messageChunk("after-subscribe"))), over: agentEnd)
 
     var updates = subscription.updates.makeAsyncIterator()
-    #expect(await updates.next() == messageChunk("before-response"))
-    #expect(await updates.next() == messageChunk("after-subscribe"))
+    #expect(await updates.nextUpdate() == messageChunk("before-response"))
+    #expect(await updates.nextUpdate() == messageChunk("after-subscribe"))
     #expect(!subscription.hasMissedUpdates)
 
     await client.close()
@@ -526,7 +526,7 @@ func closingASessionDiscardsItsBufferAndItsMark() async throws {
     try await send(sessionUpdateEnvelope(notification(for: session, messageChunk("live"))), over: agentEnd)
 
     var updates = subscription.updates.makeAsyncIterator()
-    #expect(await updates.next() == messageChunk("live"))
+    #expect(await updates.nextUpdate() == messageChunk("live"))
     #expect(!subscription.hasMissedUpdates)
 
     await client.close()
@@ -568,4 +568,224 @@ func deprecatedUpdatesForGivesTheKeptUpdatesFirst() async throws {
     #expect(await updates.next() == messageChunk("before-response"))
 
     await client.close()
+}
+
+@available(*, deprecated, message: "Tests the deprecated updates(for:) wrapper.")
+@Test(.timeLimit(.minutes(1)))
+func deprecatedUpdatesForDropsTheRequestFinishedMarkers() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    let reader = WireReader(agentEnd)
+
+    var updates = client.updates(for: sessionOne).makeAsyncIterator()
+    let (prompt, id) = try await startPrompt(on: client, session: sessionOne, reader: reader)
+    try await send(promptAckEnvelope(id: id, messageId: MessageId(rawValue: "user-msg-dropped")), over: agentEnd)
+    _ = try await prompt.value
+    try await send(sessionUpdateEnvelope(notification(for: sessionOne, messageChunk("after-ack"))), over: agentEnd)
+
+    #expect(await updates.next() == messageChunk("after-ack"))
+
+    await client.close()
+}
+
+// MARK: - Request-finished markers
+
+/// The wire method of `session/resume`, from the routing table.
+private let resumeWireMethod = RoleRouting.wireMethod(for: "resumeSession", on: .agent)
+
+/// The wire method of `session/prompt`, from the routing table.
+private let promptWireMethod = RoleRouting.wireMethod(for: "prompt", on: .agent)
+
+/// The timeout of the request in the timeout test. The raw agent end never
+/// answers that request.
+private let shortRequestTimeout: Duration = .milliseconds(50)
+
+/// Frames a JSON-RPC error response keyed to a request id.
+///
+/// - Parameters:
+///   - id: The request's wire id, echoed on the response.
+///   - error: The error to send.
+/// - Returns: The response envelope ready to write over a transport.
+private func errorEnvelope(id: JSONValue, error: RequestError) -> JSONValue {
+    .object([
+        "jsonrpc": .string("2.0"),
+        "id": id,
+        "error": error.wireValue,
+    ])
+}
+
+/// Starts `session/resume` of `sessionOne` and returns its wire id, so a test
+/// can script the replay and the response by hand.
+///
+/// - Parameters:
+///   - client: The connection that sends `session/resume`.
+///   - reader: The raw agent-end reader that observes the outbound request.
+/// - Returns: The resume task, and the request's wire id.
+/// - Throws: Rethrows any transport read failure.
+private func startResume(
+    on client: ClientSideConnection,
+    reader: WireReader
+) async throws -> (task: Task<ResumeSessionResponse, any Error>, id: JSONValue) {
+    let task = Task {
+        try await client.resumeSession(ResumeSessionRequest(cwd: AbsolutePath(rawValue: "/work"), sessionId: sessionOne))
+    }
+    let id = try #require(requestID(of: try await reader.next()))
+    return (task, id)
+}
+
+/// The marker of one failed `session/prompt` request.
+///
+/// - Parameter id: The wire id of the request.
+/// - Returns: The marker event.
+private func failedPromptMarker(id: JSONValue) -> SessionStreamEvent {
+    .requestFinished(id: id, method: promptWireMethod, outcome: .failed)
+}
+
+@Test(.timeLimit(.minutes(1)))
+func theResumeMarkerComesAfterEveryEarlierUpdateAndBeforeEveryLaterUpdate() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    let reader = WireReader(agentEnd)
+
+    var events = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
+    let (resume, id) = try await startResume(on: client, reader: reader)
+    try await send(sessionUpdateEnvelope(notification(for: sessionOne, messageChunk("replay-1"))), over: agentEnd)
+    try await send(sessionUpdateEnvelope(notification(for: sessionOne, messageChunk("replay-2"))), over: agentEnd)
+    try await send(responseEnvelope(id: id, result: ResumeSessionResponse()), over: agentEnd)
+    _ = try await resume.value
+    try await send(sessionUpdateEnvelope(notification(for: sessionOne, messageChunk("live"))), over: agentEnd)
+
+    #expect(await events.next() == .update(messageChunk("replay-1")))
+    #expect(await events.next() == .update(messageChunk("replay-2")))
+    #expect(await events.next() == .requestFinished(id: id, method: resumeWireMethod, outcome: .succeeded))
+    #expect(await events.next() == .update(messageChunk("live")))
+
+    await client.close()
+}
+
+@Test(.timeLimit(.minutes(1)))
+func anErrorResponseYieldsAFailedMarker() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    let reader = WireReader(agentEnd)
+
+    var events = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
+    let (prompt, id) = try await startPrompt(on: client, session: sessionOne, reader: reader)
+    try await send(errorEnvelope(id: id, error: .invalidParams), over: agentEnd)
+
+    await #expect(throws: RequestError.invalidParams) { try await prompt.value }
+    #expect(await events.next() == failedPromptMarker(id: id))
+
+    await client.close()
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aTimedOutRequestYieldsAFailedMarker() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let client = await ClientSideConnection(stream: clientEnd, requestTimeout: shortRequestTimeout) { _ in
+        MinimalClient()
+    }
+    let reader = WireReader(agentEnd)
+
+    var events = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
+    let (prompt, id) = try await startPrompt(on: client, session: sessionOne, reader: reader)
+
+    await #expect(throws: ConnectionError.timedOut) { try await prompt.value }
+    #expect(await events.next() == failedPromptMarker(id: id))
+
+    await client.close()
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aCancelledRequestYieldsAFailedMarker() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    let reader = WireReader(agentEnd)
+
+    var events = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
+    let (prompt, id) = try await startPrompt(on: client, session: sessionOne, reader: reader)
+    prompt.cancel()
+
+    await #expect(throws: CancellationError.self) { try await prompt.value }
+    #expect(await events.next() == failedPromptMarker(id: id))
+
+    await client.close()
+}
+
+@Test(.timeLimit(.minutes(1)))
+func connectionCloseYieldsAFailedMarkerBeforeTheStreamFinishes() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    let reader = WireReader(agentEnd)
+
+    var events = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
+    let (prompt, id) = try await startPrompt(on: client, session: sessionOne, reader: reader)
+    await client.close()
+
+    await #expect(throws: ConnectionError.closed) { try await prompt.value }
+    #expect(await events.next() == failedPromptMarker(id: id))
+    #expect(await events.next() == nil)
+}
+
+@Test(.timeLimit(.minutes(1)))
+func aRequestWithoutASessionIdYieldsNoMarker() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    let reader = WireReader(agentEnd)
+
+    var events = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
+    let initialize = Task {
+        try await client.initialize(
+            InitializeRequest(info: Implementation(name: "marker-client", version: "0.0.0"), protocolVersion: .v2)
+        )
+    }
+    let id = try #require(requestID(of: try await reader.next()))
+    let response = InitializeResponse(
+        info: Implementation(name: "marker-agent", version: "0.0.0"),
+        protocolVersion: .v2,
+        capabilities: AgentCapabilities(session: SessionCapabilities())
+    )
+    try await send(responseEnvelope(id: id, result: response), over: agentEnd)
+    _ = try await initialize.value
+    try await send(sessionUpdateEnvelope(notification(for: sessionOne, messageChunk("after-initialize"))), over: agentEnd)
+
+    #expect(await events.next() == .update(messageChunk("after-initialize")))
+
+    await client.close()
+}
+
+@Test(.timeLimit(.minutes(1)))
+func keptUpdatesAndAMarkerReachTheFirstSubscriberInOrder() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    let reader = WireReader(agentEnd)
+
+    let (resume, id) = try await startResume(on: client, reader: reader)
+    try await send(sessionUpdateEnvelope(notification(for: sessionOne, messageChunk("kept"))), over: agentEnd)
+    try await send(responseEnvelope(id: id, result: ResumeSessionResponse()), over: agentEnd)
+    _ = try await resume.value
+    let subscription = client.subscribe(to: sessionOne)
+    try await send(sessionUpdateEnvelope(notification(for: sessionOne, messageChunk("live"))), over: agentEnd)
+
+    var events = subscription.updates.makeAsyncIterator()
+    #expect(await events.next() == .update(messageChunk("kept")))
+    #expect(await events.next() == .requestFinished(id: id, method: resumeWireMethod, outcome: .succeeded))
+    #expect(await events.next() == .update(messageChunk("live")))
+    #expect(!subscription.hasMissedUpdates)
+
+    await client.close()
+}
+
+@Test(.timeLimit(.minutes(1)))
+func routerCountsAKeptMarkerTowardTheSessionLimit() {
+    let (router, log) = makeRouter(limits: oneUpdateLimits)
+    router.deliver(notification(for: sessionOne, messageChunk("kept")))
+    router.deliver(
+        FinishedSessionRequest(id: .number(1), method: promptWireMethod, sessionId: sessionOne, outcome: .succeeded)
+    )
+
+    let subscription = router.subscribe(to: sessionOne)
+
+    #expect(subscription.hasMissedUpdates)
+    #expect(log.messages.count == 1)
 }

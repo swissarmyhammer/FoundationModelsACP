@@ -85,6 +85,23 @@ final class WireReader {
     }
 }
 
+// MARK: - Session stream helpers
+
+extension AsyncStream.Iterator where Element == SessionStreamEvent {
+    /// Reads the next update of a session stream, and skips each
+    /// request-finished marker before it.
+    ///
+    /// - Returns: The next update, or `nil` when the stream finished.
+    mutating func nextUpdate() async -> SessionUpdate? {
+        while let event = await next() {
+            if case .update(let update) = event {
+                return update
+            }
+        }
+        return nil
+    }
+}
+
 /// Extracts the `id` field from a JSON-RPC envelope.
 ///
 /// - Parameter message: The envelope to inspect, or `nil`.

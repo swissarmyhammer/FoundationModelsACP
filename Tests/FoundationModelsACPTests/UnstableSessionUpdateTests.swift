@@ -108,7 +108,7 @@ import Testing
         )
         try await agent.notify(method: "session/update", params: try JSONValue.encode(result: notification))
 
-        let received = try #require(await updates.next())
+        let received = try #require(await updates.nextUpdate())
         #expect(try Unstable.SessionUpdate(received) == .compactionUpdate(Self.compaction))
 
         await client.close()
