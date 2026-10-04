@@ -38,11 +38,27 @@ comments:
     - evidence: 7 files — Sources/FoundationModelsACP/Connection/ClientSideConnection.swift, Sources/FoundationModelsACP/Session/SessionUpdateAggregator.swift (deleted), Tests/FoundationModelsACPTests/SessionUpdateAggregatorTests.swift (deleted), Tests/FoundationModelsACPTests/TerminalContentPlacementTests.swift (new), Tests/FoundationModelsACPTests/SessionMergeEngineTests.swift, Tests/FoundationModelsACPTests/SessionUpdateStreamTests.swift, Tests/FoundationModelsACPTests/PatchFieldTests.swift. `swift test --scratch-path …/scratchpad/build`: 435 + 128 tests passed, 0 warnings. `swift build --package-path IntegrationTests --build-tests --scratch-path …/scratchpad/build-it`: build complete. `generate-documentation --target FoundationModelsACP --warnings-as-errors`: clean. rg for SessionUpdateAggregator, updates(for, DeprecatedDeclaration, @available(*, deprecated outside .build and .kanban: 0 hits.
     - next: /review
   timestamp: 2026-10-04T13:47:18.367596+00:00
+- actor: claude-code
+  id: 01m43jvvvtavqjxj76p9xajh81
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (aa1b367). 0 findings, 0 confirmed, 0 refuted. 7 files reviewed. 0 validators failed. 2 .kanban files are excluded by .reviewignore. Some code-hygiene tool rules did not read 2 files, because the commit deletes them.
+    - next: The task is in done. No work is open.
+  timestamp: 2026-10-04T13:50:13.370300+00:00
+- actor: claude-code
+  id: 01m43jw4j2vjpg3a85vpzxh821
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — removed SessionUpdateAggregator and updates(for:), 13 replacement engine tests
+    - test: green — scratch-path build 0 warnings; swift test 435+128 passed; IntegrationTests 7 passed
+    - commit: aa1b367
+    - review: clean — 0 findings; task moved to done
+  timestamp: 2026-10-04T13:50:22.274767+00:00
 depends_on:
 - 01M3YQZE249S3VCDBHV2NPY0DA
 - 01M3YQZ0HNG9KMTZKX51HEG5DF
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: a780
 title: Remove deprecated SessionUpdateAggregator and updates(for:)
 ---
 ## What
