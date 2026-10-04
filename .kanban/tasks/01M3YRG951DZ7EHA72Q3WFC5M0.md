@@ -54,6 +54,12 @@ comments:
     - commit: aa1b367
     - review: clean — 0 findings; task moved to done
   timestamp: 2026-10-04T13:50:22.274767+00:00
+- actor: claude-code
+  id: 01m443vnt9wegg9k88sbj1tsks
+  text: |-
+    ### correction — test count
+    The "Implementation landed." comment says 13 engine tests were added. Commit aa1b367 adds 12 `@Test` functions to Tests/FoundationModelsACPTests/SessionMergeEngineTests.swift (checked with `git show aa1b367 | rg -c '^\+\s*@Test'`). The implementer's own list of behaviors also has 12 items, so no behavior is without a test. Only the number in that comment was wrong.
+  timestamp: 2026-10-04T18:47:12.969254+00:00
 depends_on:
 - 01M3YQZE249S3VCDBHV2NPY0DA
 - 01M3YQZ0HNG9KMTZKX51HEG5DF
