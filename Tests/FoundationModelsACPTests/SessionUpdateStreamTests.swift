@@ -552,43 +552,6 @@ func closingTheConnectionDiscardsEveryBufferAndMark() async throws {
     #expect(!subscription.hasMissedUpdates)
 }
 
-// MARK: - The deprecated stream-only wrapper
-
-@available(*, deprecated, message: "Tests the deprecated updates(for:) wrapper.")
-@Test(.timeLimit(.minutes(1)))
-func deprecatedUpdatesForGivesTheKeptUpdatesFirst() async throws {
-    let (clientEnd, agentEnd) = InMemoryTransport.pair()
-    let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
-    let reader = WireReader(agentEnd)
-
-    let session = try await createSession(
-        on: client, reader: reader, agentEnd: agentEnd, sendingFirst: [messageChunk("before-response")]
-    )
-    var updates = client.updates(for: session).makeAsyncIterator()
-
-    #expect(await updates.next() == messageChunk("before-response"))
-
-    await client.close()
-}
-
-@available(*, deprecated, message: "Tests the deprecated updates(for:) wrapper.")
-@Test(.timeLimit(.minutes(1)))
-func deprecatedUpdatesForDropsTheRequestFinishedMarkers() async throws {
-    let (clientEnd, agentEnd) = InMemoryTransport.pair()
-    let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
-    let reader = WireReader(agentEnd)
-
-    var updates = client.updates(for: sessionOne).makeAsyncIterator()
-    let (prompt, id) = try await startPrompt(on: client, session: sessionOne, reader: reader)
-    try await send(promptAckEnvelope(id: id, messageId: MessageId(rawValue: "user-msg-dropped")), over: agentEnd)
-    _ = try await prompt.value
-    try await send(sessionUpdateEnvelope(notification(for: sessionOne, messageChunk("after-ack"))), over: agentEnd)
-
-    #expect(await updates.next() == messageChunk("after-ack"))
-
-    await client.close()
-}
-
 // MARK: - Request-finished markers
 
 /// The wire method of `session/resume`, from the routing table.

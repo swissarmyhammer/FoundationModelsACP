@@ -139,9 +139,9 @@ import Testing
 
     // MARK: - `folded(onto:)`: an accumulator's upsert-merge rule
 
-    /// `SessionUpdateAggregator` folds each newly received field onto the
-    /// previously accumulated one this way, one field at a time — these
-    /// pin the three self-cases against both possible `previous` values.
+    /// `SessionMergeEngine` folds each field that it gets onto the field that
+    /// it has, one field at a time, with this rule. These tests pin the three
+    /// cases of the new field against each possible earlier field.
     @Test func unchangedFoldsOntoAndPreservesWhateverWasThereBefore() {
         #expect(PatchField<Int>.unchanged.folded(onto: .unchanged) == .unchanged)
         #expect(PatchField<Int>.unchanged.folded(onto: .cleared) == .cleared)

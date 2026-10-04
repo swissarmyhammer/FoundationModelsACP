@@ -47,6 +47,26 @@ enum SessionMergeEngineFixtures {
         .planUpdate(PlanUpdate(plan: .items(PlanItems(entries: entries, planId: planId))))
     }
 
+    /// Makes a terminal output chunk for `terminalId`.
+    ///
+    /// - Parameter data: The base64 text of the chunk.
+    /// - Returns: The session update.
+    static func terminalChunk(base64 data: String) -> SessionUpdate {
+        .terminalOutputChunk(TerminalOutputChunk(data: data, terminalId: terminalId))
+    }
+
+    /// Makes a terminal update for `terminalId` that has an output snapshot.
+    ///
+    /// - Parameters:
+    ///   - data: The base64 text of the snapshot.
+    ///   - command: The command field of the update.
+    /// - Returns: The session update.
+    static func terminalSnapshot(base64 data: String, command: PatchField<String> = .unchanged) -> SessionUpdate {
+        .terminalUpdate(
+            TerminalUpdate(terminalId: terminalId, command: command, output: .value(TerminalOutput(data: data)))
+        )
+    }
+
     /// Finds the entry with an identifier, and records a failure when it is
     /// not in the transcript.
     ///
@@ -98,6 +118,16 @@ enum SessionMergeEngineFixtures {
 /// merge rule for each entry kind.
 @Suite struct SessionMergeEngineTranscriptTests {
     private typealias Fixtures = SessionMergeEngineFixtures
+
+    /// Output bytes that are not valid UTF-8.
+    private static let nonUTF8Bytes: [UInt8] = [0xFF, 0xFE, 0x00, 0x01]
+
+    /// Output bytes of two UTF-16 surrogate halves, which are not valid
+    /// UTF-8 either.
+    private static let surrogateBytes: [UInt8] = [0xD8, 0x00, 0xDC, 0x00]
+
+    /// Text that does not decode as base64.
+    private static let invalidBase64 = "not valid base64!!"
 
     // MARK: - Messages
 
@@ -168,6 +198,23 @@ enum SessionMergeEngineFixtures {
         engine.apply(.agentThought(AgentThought(messageId: Fixtures.messageId, content: .value([Fixtures.text("x")]))))
         engine.apply(.agentThought(AgentThought(messageId: Fixtures.messageId, content: .cleared)))
         let message = try Fixtures.message(.agentThought(Fixtures.messageId), in: engine)
+        #expect(message.content.isEmpty)
+    }
+
+    @Test func anEmptyContentArrayClearsTheMessage() throws {
+        // `[]` and `null` are two different wire values, but each one clears
+        // the content.
+        var engine = SessionMergeEngine()
+        engine.apply(.userMessage(UserMessage(messageId: Fixtures.messageId, content: .value([Fixtures.text("x")]))))
+        engine.apply(.userMessage(UserMessage(messageId: Fixtures.messageId, content: .value([]))))
+        let message = try Fixtures.message(.userMessage(Fixtures.messageId), in: engine)
+        #expect(message.content.isEmpty)
+    }
+
+    @Test func aFirstMessageUpdateThatOmitsTheContentStartsWithNoContent() throws {
+        var engine = SessionMergeEngine()
+        engine.apply(.userMessage(UserMessage(messageId: Fixtures.messageId)))
+        let message = try Fixtures.message(.userMessage(Fixtures.messageId), in: engine)
         #expect(message.content.isEmpty)
     }
 
@@ -290,6 +337,32 @@ enum SessionMergeEngineFixtures {
         #expect(toolCall.meta == .value(Fixtures.traceMeta))
     }
 
+    @Test func aToolCallUpdateWithContentReplacesTheChunksAndLaterChunksAppend() throws {
+        let streamed = ToolCallContent.content(Content(content: Fixtures.text("streamed")))
+        let replacement = ToolCallContent.content(Content(content: Fixtures.text("replacement")))
+        let trailing = ToolCallContent.content(Content(content: Fixtures.text("trailing")))
+        var engine = SessionMergeEngine()
+        engine.apply(.toolCallContentChunk(ToolCallContentChunk(content: streamed, toolCallId: Fixtures.toolCallId)))
+        engine.apply(.toolCallUpdate(ToolCallUpdate(toolCallId: Fixtures.toolCallId, content: .value([replacement]))))
+        engine.apply(.toolCallContentChunk(ToolCallContentChunk(content: trailing, toolCallId: Fixtures.toolCallId)))
+        #expect(try Fixtures.toolCall(Fixtures.toolCallId, in: engine).content == .value([replacement, trailing]))
+    }
+
+    @Test func aToolCallContentChunkAfterANullContentStartsTheContentAgain() throws {
+        let chunkContent = ToolCallContent.content(Content(content: Fixtures.text("after clear")))
+        var engine = SessionMergeEngine()
+        engine.apply(.toolCallUpdate(ToolCallUpdate(toolCallId: Fixtures.toolCallId, content: .cleared)))
+        engine.apply(.toolCallContentChunk(ToolCallContentChunk(content: chunkContent, toolCallId: Fixtures.toolCallId)))
+        #expect(try Fixtures.toolCall(Fixtures.toolCallId, in: engine).content == .value([chunkContent]))
+    }
+
+    @Test func anUnknownToolCallStatusIsKept() throws {
+        let vendorStatus = ToolCallStatus.unknown("_vendor_stalled")
+        var engine = SessionMergeEngine()
+        engine.apply(.toolCallUpdate(ToolCallUpdate(toolCallId: Fixtures.toolCallId, status: .value(vendorStatus))))
+        #expect(try Fixtures.toolCall(Fixtures.toolCallId, in: engine).status == .value(vendorStatus))
+    }
+
     // MARK: - Terminals
 
     @Test func terminalChunksAppendDecodedBytesAndASnapshotReplacesThem() throws {
@@ -338,6 +411,54 @@ enum SessionMergeEngineFixtures {
         #expect(try Fixtures.terminal(Fixtures.terminalId, in: engine).meta == .value(Fixtures.otherMeta))
     }
 
+    @Test func aFirstTerminalUpdateLeavesEachOmittedFieldUnknown() throws {
+        var engine = SessionMergeEngine()
+        engine.apply(.terminalUpdate(TerminalUpdate(terminalId: Fixtures.terminalId, command: .value("ls"))))
+        let terminal = try Fixtures.terminal(Fixtures.terminalId, in: engine)
+        #expect(terminal.command == .value("ls"))
+        #expect(terminal.cwd == .unchanged)
+        #expect(terminal.exitStatus == .unchanged)
+        #expect(terminal.meta == .unchanged)
+        #expect(terminal.output.isEmpty)
+    }
+
+    @Test func terminalChunksKeepTheExactBytesThatAreNotUTF8() throws {
+        let first = Data(Self.nonUTF8Bytes)
+        let second = Data(Self.surrogateBytes)
+        var engine = SessionMergeEngine()
+        engine.apply(Fixtures.terminalChunk(base64: first.base64EncodedString()))
+        engine.apply(Fixtures.terminalChunk(base64: second.base64EncodedString()))
+        #expect(try Fixtures.terminal(Fixtures.terminalId, in: engine).output == first + second)
+    }
+
+    @Test func aTerminalUpdateCanClearAFieldAndReplaceTheOutputTogether() throws {
+        // The fold of the fields and the replacement of the output are two
+        // operations in one update. One operation must not stop the other.
+        let snapshot = Data("resynced\n".utf8)
+        var engine = SessionMergeEngine()
+        engine.apply(.terminalUpdate(TerminalUpdate(terminalId: Fixtures.terminalId, command: .value("ls"))))
+        engine.apply(Fixtures.terminalSnapshot(base64: snapshot.base64EncodedString(), command: .cleared))
+        let terminal = try Fixtures.terminal(Fixtures.terminalId, in: engine)
+        #expect(terminal.command == .cleared)
+        #expect(terminal.output == snapshot)
+    }
+
+    @Test func aTerminalSnapshotThatIsNotBase64IsDropped() throws {
+        let kept = Data("ok\n".utf8)
+        var engine = SessionMergeEngine()
+        engine.apply(Fixtures.terminalChunk(base64: kept.base64EncodedString()))
+        engine.apply(Fixtures.terminalSnapshot(base64: Self.invalidBase64))
+        #expect(try Fixtures.terminal(Fixtures.terminalId, in: engine).output == kept)
+    }
+
+    @Test func aTerminalChunkThatIsNotBase64IsDropped() throws {
+        let kept = Data("ok\n".utf8)
+        var engine = SessionMergeEngine()
+        engine.apply(Fixtures.terminalChunk(base64: kept.base64EncodedString()))
+        engine.apply(Fixtures.terminalChunk(base64: Self.invalidBase64))
+        #expect(try Fixtures.terminal(Fixtures.terminalId, in: engine).output == kept)
+    }
+
     // MARK: - Plans
 
     @Test func aPlanUpdateReplacesThePlanAndKeepsItsFirstPosition() throws {
@@ -371,6 +492,34 @@ enum SessionMergeEngineFixtures {
         engine.apply(.planUpdate(PlanUpdate(plan: unknownContent)))
         let plan = try #require(engine.entries.first?.kind.plan)
         #expect(plan.plan == unknownContent)
+    }
+
+    @Test func planUpdatesWithDifferentPlanIdsAreSeparateEntries() throws {
+        let otherPlanId = PlanId(rawValue: "plan-2")
+        let firstEntries = [Fixtures.planEntry("a")]
+        let otherEntries = [Fixtures.planEntry("b")]
+        var engine = SessionMergeEngine()
+        engine.apply(Fixtures.planUpdate(firstEntries))
+        engine.apply(Fixtures.planUpdate(otherEntries, planId: otherPlanId))
+
+        let first = try #require(try Fixtures.entry(.plan(Fixtures.planId), in: engine).kind.plan)
+        let other = try #require(try Fixtures.entry(.plan(otherPlanId), in: engine).kind.plan)
+        #expect(first.plan == .items(PlanItems(entries: firstEntries, planId: Fixtures.planId)))
+        #expect(other.plan == .items(PlanItems(entries: otherEntries, planId: otherPlanId)))
+    }
+
+    // MARK: - Last-value updates
+
+    @Test func lastValueUpdatesAddNoTranscriptEntry() {
+        let windowSize = 1000
+        let tokensUsed = 10
+        var engine = SessionMergeEngine()
+        engine.apply(.stateUpdate(.idle(IdleStateUpdate())))
+        engine.apply(.usageUpdate(UsageUpdate(size: windowSize, used: tokensUsed)))
+        engine.apply(.availableCommandsUpdate(AvailableCommandsUpdate(availableCommands: [Fixtures.listCommand])))
+        engine.apply(.configOptionUpdate(ConfigOptionUpdate(configOptions: [Fixtures.configOption])))
+        engine.apply(.sessionInfoUpdate(SessionInfoUpdate(title: .value("Session"))))
+        #expect(engine.entries.isEmpty)
     }
 
     // MARK: - Unknown updates

@@ -109,29 +109,6 @@ public final class ClientSideConnection: Sendable {
         router.subscribe(to: sessionId)
     }
 
-    /// Returns a stream of `session/update` notifications for one session.
-    ///
-    /// This is ``subscribe(to:)`` without the overflow mark and without the
-    /// ``SessionStreamEvent/requestFinished(id:method:outcome:)`` markers: it
-    /// takes the kept updates of the session, and it discards the mark and
-    /// the markers. Subscribe before you call ``resumeSession(_:)``.
-    ///
-    /// - Parameter sessionId: The session whose updates to observe.
-    /// - Returns: A stream of that session's updates.
-    @available(*, deprecated, message: "Use subscribe(to:), which also gives the hasMissedUpdates mark.")
-    public func updates(for sessionId: SessionId) -> AsyncStream<SessionUpdate> {
-        let events = subscribe(to: sessionId).updates
-        let (updates, continuation) = AsyncStream.makeStream(of: SessionUpdate.self)
-        let forwarder = Task {
-            for await case .update(let update) in events {
-                continuation.yield(update)
-            }
-            continuation.finish()
-        }
-        continuation.onTermination = { _ in forwarder.cancel() }
-        return updates
-    }
-
     // MARK: - Outgoing requests
 
     /// Subscribes to the start and the finish of each request that this
