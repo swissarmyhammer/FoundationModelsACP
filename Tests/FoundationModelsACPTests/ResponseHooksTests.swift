@@ -78,7 +78,7 @@ private final class DeferralProbe: Sendable {
     let lateCapture = WeakReference()
 
     /// Records if the late closure runs.
-    let lateClosureRun = RunRecord()
+    let lateClosureRun = AtomicFlag()
 
     /// The child task that the handler starts.
     let childTask = Mutex<Task<Void, Never>?>(nil)
@@ -169,7 +169,7 @@ private struct DeferringAgent: Agent {
         let captured = probe.lateCapture.makeObject()
         connection.afterRespondingToCurrentRequest { [probe] in
             withExtendedLifetime(captured) {}
-            probe.lateClosureRun.markRan()
+            probe.lateClosureRun.set()
         }
     }
 }
@@ -197,13 +197,13 @@ private struct QuietClient: Client {
     @Test(.timeLimit(.minutes(hooksTestTimeout)))
     func runAllReleasesEachClosureAfterItRuns() async {
         let reference = WeakReference()
-        let run = RunRecord()
+        let run = AtomicFlag()
         let hooks = ResponseHooks(logger: .disabled, requestId: unitRequestId)
         appendTrackedClosure(to: hooks, reference: reference, run: run)
 
         await hooks.runAll()
 
-        #expect(run.didRun)
+        #expect(run.isSet)
         #expect(!reference.isAlive)
     }
 
@@ -211,7 +211,7 @@ private struct QuietClient: Client {
     func aClosureAppendedAfterRunAllIsDroppedWithAWarning() async {
         let log = LogCapture()
         let reference = WeakReference()
-        let run = RunRecord()
+        let run = AtomicFlag()
         let hooks = ResponseHooks(logger: log.logger, requestId: unitRequestId)
         await hooks.runAll()
 
@@ -219,7 +219,7 @@ private struct QuietClient: Client {
         await hooks.runAll()
 
         #expect(!reference.isAlive)
-        #expect(!run.didRun)
+        #expect(!run.isSet)
         #expect(log.messages.count == dropWarningCount)
         #expect(log.messages.first?.contains("dropped") == true)
     }
@@ -227,7 +227,7 @@ private struct QuietClient: Client {
     @Test(.timeLimit(.minutes(hooksTestTimeout)))
     func discardAllReleasesTheClosuresAndDoesNotRunThem() async {
         let reference = WeakReference()
-        let run = RunRecord()
+        let run = AtomicFlag()
         let hooks = ResponseHooks(logger: .disabled, requestId: unitRequestId)
         appendTrackedClosure(to: hooks, reference: reference, run: run)
 
@@ -235,14 +235,14 @@ private struct QuietClient: Client {
         await hooks.runAll()
 
         #expect(!reference.isAlive)
-        #expect(!run.didRun)
+        #expect(!run.isSet)
     }
 
     @Test(.timeLimit(.minutes(hooksTestTimeout)))
     func aClosureAppendedAfterDiscardAllIsDroppedWithAWarning() async {
         let log = LogCapture()
         let reference = WeakReference()
-        let run = RunRecord()
+        let run = AtomicFlag()
         let hooks = ResponseHooks(logger: log.logger, requestId: unitRequestId)
         hooks.discardAll()
 
@@ -250,7 +250,7 @@ private struct QuietClient: Client {
         await hooks.runAll()
 
         #expect(!reference.isAlive)
-        #expect(!run.didRun)
+        #expect(!run.isSet)
         #expect(log.messages.count == dropWarningCount)
         #expect(log.messages.first?.contains("dropped") == true)
     }
@@ -258,10 +258,10 @@ private struct QuietClient: Client {
     @Test(.timeLimit(.minutes(hooksTestTimeout)))
     func discardAllCallsEachOnDiscardOneTimeInRegistrationOrder() async {
         let order = DiscardOrder()
-        let run = RunRecord()
+        let run = AtomicFlag()
         let hooks = ResponseHooks(logger: .disabled, requestId: unitRequestId)
         for index in 0..<discardOrderEntryCount {
-            hooks.append({ run.markRan() }, onDiscard: { order.record(index) })
+            hooks.append({ run.set() }, onDiscard: { order.record(index) })
         }
 
         hooks.discardAll()
@@ -269,20 +269,20 @@ private struct QuietClient: Client {
         await hooks.runAll()
 
         #expect(order.calls == Array(0..<discardOrderEntryCount))
-        #expect(!run.didRun)
+        #expect(!run.isSet)
     }
 
     @Test(.timeLimit(.minutes(hooksTestTimeout)))
     func runAllRunsTheWorkAndDoesNotCallOnDiscard() async {
         let discards = CallCount()
-        let run = RunRecord()
+        let run = AtomicFlag()
         let hooks = ResponseHooks(logger: .disabled, requestId: unitRequestId)
-        hooks.append({ run.markRan() }, onDiscard: { discards.increment() })
+        hooks.append({ run.set() }, onDiscard: { discards.increment() })
 
         await hooks.runAll()
         hooks.discardAll()
 
-        #expect(run.didRun)
+        #expect(run.isSet)
         #expect(discards.value == 0)
     }
 
@@ -291,7 +291,7 @@ private struct QuietClient: Client {
         let log = LogCapture()
         let discards = CallCount()
         let reference = WeakReference()
-        let run = RunRecord()
+        let run = AtomicFlag()
         let hooks = ResponseHooks(logger: log.logger, requestId: unitRequestId)
         await hooks.runAll()
 
@@ -301,7 +301,7 @@ private struct QuietClient: Client {
 
         #expect(discards.value == oneDiscardCall)
         #expect(!reference.isAlive)
-        #expect(!run.didRun)
+        #expect(!run.isSet)
         #expect(log.messages.count == dropWarningCount)
         #expect(log.messages.first?.contains("dropped") == true)
     }
@@ -319,14 +319,14 @@ private struct QuietClient: Client {
     private func appendTrackedClosure(
         to hooks: ResponseHooks,
         reference: WeakReference,
-        run: RunRecord,
+        run: AtomicFlag,
         onDiscard: (@Sendable () -> Void)? = nil
     ) {
         let captured = reference.makeObject()
         hooks.append(
             {
                 withExtendedLifetime(captured) {}
-                run.markRan()
+                run.set()
             },
             onDiscard: onDiscard
         )
@@ -388,7 +388,7 @@ private struct QuietClient: Client {
         _ = try #require(await deferred.next())
 
         #expect(!probe.lateCapture.isAlive)
-        #expect(!probe.lateClosureRun.didRun)
+        #expect(!probe.lateClosureRun.isSet)
         #expect(log.messages.contains { $0.contains("dropped") })
         await probe.stopChildTask()
         await agent.close()
@@ -403,7 +403,7 @@ private struct QuietClient: Client {
         }
         let discards = CallCount()
         let reference = WeakReference()
-        let run = RunRecord()
+        let run = AtomicFlag()
 
         TrackedWork.register(
             reference: reference,
@@ -414,7 +414,7 @@ private struct QuietClient: Client {
 
         #expect(discards.value == oneDiscardCall)
         #expect(!reference.isAlive)
-        #expect(!run.didRun)
+        #expect(!run.isSet)
         await agent.close()
     }
 }

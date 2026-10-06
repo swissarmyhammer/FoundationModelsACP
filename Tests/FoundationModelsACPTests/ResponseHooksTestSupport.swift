@@ -33,17 +33,19 @@ final class WeakReference: Sendable {
     }
 }
 
-/// Records if a closure ran, safe to share between tasks.
-final class RunRecord: Sendable {
-    /// The guarded flag.
-    private let flag = Atomic<Bool>(false)
+/// A flag that is `false` at the start and becomes `true` after `set()`, safe
+/// to share between tasks. A test sets it when an event occurs, for example
+/// when a closure runs or when a request handler ends. Then the test reads it.
+final class AtomicFlag: Sendable {
+    /// The guarded value.
+    private let value = Atomic<Bool>(false)
 
-    /// `true` after `markRan()`.
-    var didRun: Bool { flag.load(ordering: .sequentiallyConsistent) }
+    /// `true` after `set()`.
+    var isSet: Bool { value.load(ordering: .sequentiallyConsistent) }
 
-    /// Records that the closure ran.
-    func markRan() {
-        flag.store(true, ordering: .sequentiallyConsistent)
+    /// Sets the flag to `true`.
+    func set() {
+        value.store(true, ordering: .sequentiallyConsistent)
     }
 }
 
@@ -67,7 +69,7 @@ enum TrackedWork {
     ///   - deferral: The method that defers the work.
     static func register(
         reference: WeakReference,
-        run: RunRecord,
+        run: AtomicFlag,
         onDiscard: @escaping @Sendable () -> Void,
         with deferral: Deferral
     ) {
@@ -75,7 +77,7 @@ enum TrackedWork {
         deferral(
             {
                 withExtendedLifetime(captured) {}
-                run.markRan()
+                run.set()
             },
             onDiscard
         )

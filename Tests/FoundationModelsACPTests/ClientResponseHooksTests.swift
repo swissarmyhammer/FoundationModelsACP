@@ -127,7 +127,7 @@ private struct ConnectedPair {
         let pair = await connect(log: EventLog()) { _ in }
         let discards = CallCount()
         let reference = WeakReference()
-        let run = RunRecord()
+        let run = AtomicFlag()
 
         TrackedWork.register(
             reference: reference,
@@ -138,7 +138,7 @@ private struct ConnectedPair {
 
         #expect(discards.value == oneDiscardCall)
         #expect(!reference.isAlive)
-        #expect(!run.didRun)
+        #expect(!run.isSet)
         await pair.close()
     }
 
@@ -149,7 +149,7 @@ private struct ConnectedPair {
         let discarded = AsyncStream<Void>.makeStream()
         let discards = CallCount()
         let reference = WeakReference()
-        let run = RunRecord()
+        let run = AtomicFlag()
         let pair = await connect(log: EventLog()) { connection in
             TrackedWork.register(
                 reference: reference,
@@ -175,7 +175,7 @@ private struct ConnectedPair {
         _ = await pair.client.closed
 
         #expect(discards.value == oneDiscardCall)
-        #expect(!run.didRun)
+        #expect(!run.isSet)
         #expect(!reference.isAlive)
         await pair.agent.close()
         _ = try? await permission.value

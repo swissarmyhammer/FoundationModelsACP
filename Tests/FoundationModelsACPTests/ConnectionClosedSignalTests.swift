@@ -134,20 +134,6 @@ private struct ScriptedPeer: Sendable {
     }
 }
 
-/// Records if a request handler ended, safe to share between tasks.
-private final class HandlerRecord: Sendable {
-    /// The guarded flag.
-    private let flag = Atomic<Bool>(false)
-
-    /// `true` after the handler ended.
-    var hasEnded: Bool { flag.load(ordering: .sequentiallyConsistent) }
-
-    /// Records that the handler ended.
-    func markEnded() {
-        flag.store(true, ordering: .sequentiallyConsistent)
-    }
-}
-
 /// Holds a connection for a handler that the connection itself calls, safe
 /// to share between tasks. The test sets the connection after `init`.
 private final class ConnectionBox: Sendable {
@@ -217,12 +203,12 @@ private struct SignalTestAgent: Agent {
 /// Works for `handlerWorkAfterCancellation`, also when the current task is
 /// cancelled, and then records the end.
 ///
-/// - Parameter record: Gets the end of the work.
-private func finishWorkPastCancellation(record: HandlerRecord) async {
+/// - Parameter record: Is set at the end of the work.
+private func finishWorkPastCancellation(record: AtomicFlag) async {
     // A detached task does not get the cancellation of the current task, so
     // this work continues after the connection closed.
     await Task.detached { try? await Task.sleep(for: handlerWorkAfterCancellation) }.value
-    record.markEnded()
+    record.set()
 }
 
 /// A request handler that runs until its cancellation, then continues to
@@ -230,11 +216,11 @@ private func finishWorkPastCancellation(record: HandlerRecord) async {
 ///
 /// - Parameters:
 ///   - started: Gets one value when the handler starts.
-///   - record: Gets the end of the handler.
+///   - record: Is set at the end of the handler.
 /// - Returns: The handler.
 private func slowHandler(
     started: AsyncStream<Void>.Continuation,
-    record: HandlerRecord
+    record: AtomicFlag
 ) -> Connection.RequestHandler {
     { _, _ in
         started.yield(())
@@ -280,7 +266,7 @@ private func slowHandler(
     func signalComesAfterARunningRequestHandlerEnded(trigger: CloseTrigger) async throws {
         let peer = ScriptedPeer()
         let started = AsyncStream<Void>.makeStream()
-        let record = HandlerRecord()
+        let record = AtomicFlag()
         let connection = await Connection(
             transport: peer.transport,
             requestHandler: slowHandler(started: started.continuation, record: record)
@@ -293,18 +279,18 @@ private func slowHandler(
         let reason = await connection.closed
 
         #expect(reason.kind == trigger.expectedKind)
-        #expect(record.hasEnded)
+        #expect(record.isSet)
     }
 
     @Test(.timeLimit(.minutes(closedSignalTestTimeout)))
     func batchRequestAfterCloseStartsNoHandler() async throws {
         let peer = ScriptedPeer()
         let box = ConnectionBox()
-        let record = HandlerRecord()
+        let record = AtomicFlag()
         let connection = await Connection(
             transport: peer.transport,
             requestHandler: { _, _ in
-                record.markEnded()
+                record.set()
                 return .null
             },
             notificationHandler: { _, _ in await box.connection?.close() }
@@ -319,7 +305,7 @@ private func slowHandler(
         let reason = await connection.closed
 
         #expect(reason.kind == .closedLocally)
-        #expect(!record.hasEnded)
+        #expect(!record.isSet)
     }
 }
 
@@ -353,7 +339,7 @@ private func slowHandler(
     func agentSideSignalComesAfterDeferredWorkOfARespondedRequestEnded() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let started = AsyncStream<Void>.makeStream()
-        let record = HandlerRecord()
+        let record = AtomicFlag()
         let agent = await AgentSideConnection(stream: agentEnd) { connection in
             SignalTestAgent(connection: connection) {
                 started.continuation.yield(())
@@ -369,7 +355,7 @@ private func slowHandler(
         let reason = await agent.closed
 
         #expect(reason.kind == .closedLocally)
-        #expect(record.hasEnded)
+        #expect(record.isSet)
         await client.close()
     }
 
