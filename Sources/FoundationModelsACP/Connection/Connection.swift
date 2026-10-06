@@ -5,8 +5,16 @@ import Synchronization
 /// written that request's response — never before, so a handler that sends
 /// an outbound notification this way cannot have it race the response it
 /// logically follows. `AgentSideConnection.afterRespondingToCurrentRequest(_:)`
-/// is the public entry point; `Connection` only owns the collector and the
-/// task-local that locates the right one (see `Connection.currentResponseHooks`).
+/// and `ClientSideConnection.afterRespondingToCurrentRequest(_:)`, each with
+/// an `onDiscard:` overload, are the public entry points. `Connection` only
+/// owns the collector, the task-local that locates the right one (see
+/// `Connection.currentResponseHooks`), and the shared helper that the two
+/// sides call (`Connection.deferAfterCurrentResponse(_:onDiscard:)`).
+///
+/// Each closure can have a discard handler. The collector calls the handler
+/// exactly one time when the closure will never run, and never when the
+/// closure runs. Thus a caller that waits for the closure never stays
+/// suspended.
 ///
 /// A plain class guarded by a lock rather than an actor: registration must be
 /// synchronous, with no `await` between "the handler decides to defer work"
@@ -22,6 +30,21 @@ final class ResponseHooks: Sendable {
     /// One deferred closure.
     typealias Work = @Sendable () async -> Void
 
+    /// The handler that the collector calls when a deferred closure will
+    /// never run. It is synchronous, because `discardAll()` and `append` are
+    /// synchronous.
+    typealias DiscardHandler = @Sendable () -> Void
+
+    /// One registered closure and its optional discard handler.
+    private struct Entry {
+        /// The deferred closure.
+        let work: Work
+
+        /// The handler to call when `work` will never run, or `nil` for no
+        /// handler.
+        let onDiscard: DiscardHandler?
+    }
+
     /// Why the collector keeps no more closures.
     private enum ClosingReason {
         /// `runAll()` took the closures, after the response was written.
@@ -36,7 +59,7 @@ final class ResponseHooks: Sendable {
     private enum Phase {
         /// The handler can still defer work. The closures wait for the
         /// response, in registration order.
-        case collecting([Work])
+        case collecting([Entry])
 
         /// The closures were taken. The collector keeps no closure.
         case closed(ClosingReason)
@@ -72,10 +95,26 @@ final class ResponseHooks: Sendable {
     /// - Parameter work: The deferred work, run once this request's response
     ///   has been handed to the transport.
     func append(_ work: @escaping Work) {
+        append(work, onDiscard: nil)
+    }
+
+    /// Registers one closure to run after the current response is written,
+    /// with a handler for the case where the closure will never run.
+    ///
+    /// After `runAll()` or `discardAll()`, the method does not keep the
+    /// closure. It drops the closure, logs a warning, and then calls
+    /// `onDiscard` outside the lock.
+    ///
+    /// - Parameters:
+    ///   - work: The deferred work, run once this request's response has
+    ///     been handed to the transport.
+    ///   - onDiscard: Called exactly one time when `work` will never run, and
+    ///     never when `work` runs. `nil` for no handler.
+    func append(_ work: @escaping Work, onDiscard: DiscardHandler?) {
         let closingReason: ClosingReason? = phase.withLock { phase in
             switch phase {
             case .collecting(var pending):
-                pending.append(work)
+                pending.append(Entry(work: work, onDiscard: onDiscard))
                 phase = .collecting(pending)
                 return nil
             case .closed(let reason):
@@ -84,30 +123,39 @@ final class ResponseHooks: Sendable {
         }
         guard let closingReason else { return }
         logger.log(Connection.logPrefix + dropWarning(for: closingReason))
+        onDiscard?()
     }
 
     /// Takes every registered closure and clears them in the same lock, then
     /// runs them in registration order, awaiting each before starting the
-    /// next. After this call starts, the collector keeps no closure.
+    /// next. After this call starts, the collector keeps no closure. The
+    /// discard handlers are released and never called.
     func runAll() async {
-        for item in take(closingAs: .ran) {
-            await item()
+        for work in take(closingAs: .ran).map(\.work) {
+            await work()
         }
     }
 
     /// Releases every registered closure and does not run them. The
     /// connection calls this when it wrote no response, so the closures can
     /// never run.
+    ///
+    /// The method releases the closures first. Then it calls each discard
+    /// handler one time, in registration order, outside the lock. Thus a
+    /// discard handler sees no closure that the collector still keeps.
     func discardAll() {
-        _ = take(closingAs: .discarded)
+        let discardHandlers = take(closingAs: .discarded).compactMap(\.onDiscard)
+        for onDiscard in discardHandlers {
+            onDiscard()
+        }
     }
 
-    /// Takes the registered closures and closes the collector in one lock.
+    /// Takes the registered entries and closes the collector in one lock.
     ///
     /// - Parameter reason: Why the collector closes.
-    /// - Returns: The closures that were waiting, in registration order. The
+    /// - Returns: The entries that were waiting, in registration order. The
     ///   result is empty when the collector closed before.
-    private func take(closingAs reason: ClosingReason) -> [Work] {
+    private func take(closingAs reason: ClosingReason) -> [Entry] {
         phase.withLock { phase in
             guard case .collecting(let pending) = phase else { return [] }
             phase = .closed(reason)
@@ -142,6 +190,30 @@ extension Connection {
     /// without this connection threading a request id through every layer of
     /// dispatch just to let one handler find its own request back again.
     @TaskLocal static var currentResponseHooks: ResponseHooks?
+
+    /// Defers `work` until after this connection wrote the response to the
+    /// inbound request that the calling task handles. The two role
+    /// connections call this from `afterRespondingToCurrentRequest`.
+    ///
+    /// When the calling task handles no inbound request, there is no response
+    /// to follow: `work` does not run, and `onDiscard` runs at once, before
+    /// this method returns.
+    ///
+    /// - Parameters:
+    ///   - work: The deferred work, run once the current request's response
+    ///     has been handed to the transport.
+    ///   - onDiscard: Called exactly one time when `work` will never run, and
+    ///     never when `work` runs. `nil` for no handler.
+    static func deferAfterCurrentResponse(
+        _ work: @escaping ResponseHooks.Work,
+        onDiscard: ResponseHooks.DiscardHandler?
+    ) {
+        guard let hooks = currentResponseHooks else {
+            onDiscard?()
+            return
+        }
+        hooks.append(work, onDiscard: onDiscard)
+    }
 }
 
 /// Failures raised locally by `Connection`, never received from the peer.

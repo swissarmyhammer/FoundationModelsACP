@@ -258,10 +258,46 @@ public final class AgentSideConnection: Sendable {
     /// connection keeps no reference to it or to the values it captures, also
     /// while a task that the handler started is alive.
     ///
+    /// To learn when `work` will never run, use
+    /// ``afterRespondingToCurrentRequest(_:onDiscard:)``.
+    ///
     /// - Parameter work: The deferred work, run once the current request's
     ///   response has been handed to the transport.
     public func afterRespondingToCurrentRequest(_ work: @escaping @Sendable () async -> Void) {
-        Connection.currentResponseHooks?.append(work)
+        Connection.deferAfterCurrentResponse(work, onDiscard: nil)
+    }
+
+    /// Defers `work` until after this connection has written the response to
+    /// the inbound request that the calling task handles, and calls
+    /// `onDiscard` when `work` will never run.
+    ///
+    /// The rules for `work` are the same as for
+    /// ``afterRespondingToCurrentRequest(_:)``. The connection calls
+    /// `onDiscard` exactly one time when `work` will never run, and never when
+    /// `work` runs. Thus a caller that waits for `work` (for example, with a
+    /// continuation) can resume from `onDiscard`, and never stays suspended.
+    /// `onDiscard` is synchronous. The cases:
+    ///
+    /// 1. The connection closed before it wrote the response. The connection
+    ///    releases `work`, then calls `onDiscard`.
+    /// 2. The call comes after the deferred work of the request ran or was
+    ///    released. The connection logs a warning, drops `work`, and calls
+    ///    `onDiscard`.
+    /// 3. The call comes outside an inbound request. `work` does not run, and
+    ///    `onDiscard` runs at once, before this method returns.
+    ///
+    /// After `work` runs or is released, the connection keeps no reference to
+    /// `work` or to `onDiscard`.
+    ///
+    /// - Parameters:
+    ///   - work: The deferred work, run once the current request's response
+    ///     has been handed to the transport.
+    ///   - onDiscard: Called exactly one time when `work` will never run.
+    public func afterRespondingToCurrentRequest(
+        _ work: @escaping @Sendable () async -> Void,
+        onDiscard: @escaping @Sendable () -> Void
+    ) {
+        Connection.deferAfterCurrentResponse(work, onDiscard: onDiscard)
     }
 
     // MARK: - Inserting the user message of a prompt

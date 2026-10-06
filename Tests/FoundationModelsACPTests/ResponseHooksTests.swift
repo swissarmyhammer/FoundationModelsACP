@@ -6,48 +6,6 @@ import Testing
 
 // MARK: - Fixtures
 
-/// An object that a deferred closure captures. A test keeps only a weak
-/// reference to it, to see when the closure is released.
-private final class CapturedObject: Sendable {}
-
-/// A weak reference to a `CapturedObject`, safe to share between tasks.
-private final class WeakReference: Sendable {
-    /// The storage of the weak reference.
-    private struct Storage {
-        /// The referenced object, or `nil` after it is released.
-        weak var object: CapturedObject?
-    }
-
-    /// The guarded storage.
-    private let storage = Mutex(Storage())
-
-    /// `true` while the referenced object is in memory.
-    var isAlive: Bool { storage.withLock { $0.object != nil } }
-
-    /// Makes a new object, keeps a weak reference to it, and returns it.
-    ///
-    /// - Returns: The new object. The caller keeps the strong reference.
-    func makeObject() -> CapturedObject {
-        let object = CapturedObject()
-        storage.withLock { $0.object = object }
-        return object
-    }
-}
-
-/// Records if a closure ran, safe to share between tasks.
-private final class RunRecord: Sendable {
-    /// The guarded flag.
-    private let flag = Atomic<Bool>(false)
-
-    /// `true` after `markRan()`.
-    var didRun: Bool { flag.load(ordering: .sequentiallyConsistent) }
-
-    /// Records that the closure ran.
-    func markRan() {
-        flag.store(true, ordering: .sequentiallyConsistent)
-    }
-}
-
 /// The request that each `ResponseHooks` unit test uses. Its value has no
 /// effect.
 private let unitRequestId: RequestId = .number(1)
@@ -64,6 +22,26 @@ private let dropWarningCount = 1
 
 /// The time limit of each test in this suite, in minutes.
 private let hooksTestTimeout = 1
+
+/// The number of closures that the discard-order test appends.
+private let discardOrderEntryCount = 3
+
+/// Records the order in which `onDiscard` handlers run, safe to share
+/// between tasks.
+private final class DiscardOrder: Sendable {
+    /// The guarded registration indexes, in call order.
+    private let indexes = Mutex<[Int]>([])
+
+    /// The registration indexes of the handlers that ran, in call order.
+    var calls: [Int] { indexes.withLock { $0 } }
+
+    /// Records that the handler with this registration index ran.
+    ///
+    /// - Parameter index: The registration index of the handler.
+    func record(_ index: Int) {
+        indexes.withLock { $0.append(index) }
+    }
+}
 
 /// The one session that `DeferringAgent` makes.
 private let hooksSessionId = SessionId(rawValue: "hooks-session")
@@ -277,6 +255,57 @@ private struct QuietClient: Client {
         #expect(log.messages.first?.contains("dropped") == true)
     }
 
+    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    func discardAllCallsEachOnDiscardOneTimeInRegistrationOrder() async {
+        let order = DiscardOrder()
+        let run = RunRecord()
+        let hooks = ResponseHooks(logger: .disabled, requestId: unitRequestId)
+        for index in 0..<discardOrderEntryCount {
+            hooks.append({ run.markRan() }, onDiscard: { order.record(index) })
+        }
+
+        hooks.discardAll()
+        hooks.discardAll()
+        await hooks.runAll()
+
+        #expect(order.calls == Array(0..<discardOrderEntryCount))
+        #expect(!run.didRun)
+    }
+
+    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    func runAllRunsTheWorkAndDoesNotCallOnDiscard() async {
+        let discards = CallCount()
+        let run = RunRecord()
+        let hooks = ResponseHooks(logger: .disabled, requestId: unitRequestId)
+        hooks.append({ run.markRan() }, onDiscard: { discards.increment() })
+
+        await hooks.runAll()
+        hooks.discardAll()
+
+        #expect(run.didRun)
+        #expect(discards.value == 0)
+    }
+
+    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    func aLateAppendWithOnDiscardAfterRunAllCallsOnDiscardAndLogsOneWarning() async {
+        let log = LogCapture()
+        let discards = CallCount()
+        let reference = WeakReference()
+        let run = RunRecord()
+        let hooks = ResponseHooks(logger: log.logger, requestId: unitRequestId)
+        await hooks.runAll()
+
+        appendTrackedClosure(to: hooks, reference: reference, run: run) { discards.increment() }
+        await hooks.runAll()
+        hooks.discardAll()
+
+        #expect(discards.value == oneDiscardCall)
+        #expect(!reference.isAlive)
+        #expect(!run.didRun)
+        #expect(log.messages.count == dropWarningCount)
+        #expect(log.messages.first?.contains("dropped") == true)
+    }
+
     /// Appends a closure that captures a tracked object and records that it
     /// ran. The tracked object goes out of scope when this function returns,
     /// so only the closure can keep it.
@@ -285,12 +314,22 @@ private struct QuietClient: Client {
     ///   - hooks: The collector to append to.
     ///   - reference: Keeps a weak reference to the captured object.
     ///   - run: Records if the closure runs.
-    private func appendTrackedClosure(to hooks: ResponseHooks, reference: WeakReference, run: RunRecord) {
+    ///   - onDiscard: The handler for a discarded closure, or `nil` for no
+    ///     handler.
+    private func appendTrackedClosure(
+        to hooks: ResponseHooks,
+        reference: WeakReference,
+        run: RunRecord,
+        onDiscard: (@Sendable () -> Void)? = nil
+    ) {
         let captured = reference.makeObject()
-        hooks.append {
-            withExtendedLifetime(captured) {}
-            run.markRan()
-        }
+        hooks.append(
+            {
+                withExtendedLifetime(captured) {}
+                run.markRan()
+            },
+            onDiscard: onDiscard
+        )
     }
 }
 
@@ -354,5 +393,28 @@ private struct QuietClient: Client {
         await probe.stopChildTask()
         await agent.close()
         await client.close()
+    }
+
+    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    func anAgentCallOutsideAnInboundRequestRunsNothingAndSignalsDiscard() async {
+        let (_, agentEnd) = InMemoryTransport.pair()
+        let agent = await AgentSideConnection(stream: agentEnd) { connection in
+            DeferringAgent(connection: connection, probe: DeferralProbe())
+        }
+        let discards = CallCount()
+        let reference = WeakReference()
+        let run = RunRecord()
+
+        TrackedWork.register(
+            reference: reference,
+            run: run,
+            onDiscard: { discards.increment() },
+            with: agent.afterRespondingToCurrentRequest(_:onDiscard:)
+        )
+
+        #expect(discards.value == oneDiscardCall)
+        #expect(!reference.isAlive)
+        #expect(!run.didRun)
+        await agent.close()
     }
 }
