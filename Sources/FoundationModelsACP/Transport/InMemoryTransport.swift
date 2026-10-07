@@ -12,6 +12,12 @@ import Foundation
 /// Semantics mirror a pipe half-close: `close()` ends this end's outgoing
 /// direction, finishing the peer's `bytes` stream, while the opposite
 /// direction stays open until the peer closes too.
+///
+/// Semantics also mirror a pipe with no reader: when the reader of one end
+/// stops (its `bytes` stream is cancelled, for example because a connection
+/// on that end closed), the outgoing direction of that end finishes too, so
+/// the peer's `bytes` stream ends. A normal end of `bytes` (the peer closed)
+/// does not do this.
 public struct InMemoryTransport: ACPTransport {
     /// Thrown by `write(_:)` once the outgoing direction is gone — either
     /// this end was closed or the peer stopped consuming.
@@ -26,10 +32,21 @@ public struct InMemoryTransport: ACPTransport {
 
     /// Creates two connected ends: whatever one writes, the other reads.
     ///
+    /// When the reader of one end is cancelled, the outgoing direction of
+    /// that end finishes, and the `bytes` stream of the other end ends. Only
+    /// cancellation does this; a normal finish keeps the half-close.
+    ///
     /// - Returns: The two ends of the pair; assign either role to either end.
     public static func pair() -> (InMemoryTransport, InMemoryTransport) {
         let (firstBytes, firstContinuation) = AsyncThrowingStream<Data, any Error>.makeStream()
         let (secondBytes, secondContinuation) = AsyncThrowingStream<Data, any Error>.makeStream()
+        // The first end reads firstBytes and writes through secondContinuation.
+        firstContinuation.onTermination = { termination in
+            if case .cancelled = termination { secondContinuation.finish() }
+        }
+        secondContinuation.onTermination = { termination in
+            if case .cancelled = termination { firstContinuation.finish() }
+        }
         return (
             InMemoryTransport(bytes: firstBytes, outgoing: secondContinuation),
             InMemoryTransport(bytes: secondBytes, outgoing: firstContinuation)
