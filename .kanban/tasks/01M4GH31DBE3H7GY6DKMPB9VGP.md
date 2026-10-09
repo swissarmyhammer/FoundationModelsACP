@@ -27,8 +27,24 @@ comments:
     - evidence: swift test (root) 482 tests in 50 suites + 135 tests in 17 suites passed; IntegrationTests 7 passed; builds with -warnings-as-errors clean in both packages; both acceptance rg checks found nothing.
     - next: commit, then review.
   timestamp: 2026-10-09T22:38:04.389205+00:00
-position_column: doing
-position_ordinal: '8180'
+- actor: claude-code
+  id: 01m4hd4qcde069qzdnkfaamf2b
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (commit b2fb66c). 0 findings, 0 confirmed, 0 refuted. 7 validator runs attempted, 0 failed. 12 files reviewed. README.md and plan.md had no matching validator. The ignore rule excluded 4 files in .kanban/.
+    - next: The task is in done. No work is open.
+  timestamp: 2026-10-09T22:39:34.285443+00:00
+- actor: claude-code
+  id: 01m4hd4zncvp7e371x41kbk9yz
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — plan.md deleted; README.md; ProtocolVersion.swift; ClientSideConnection.swift; SchemaConformanceTests.swift; 9 test files
+    - test: green — swift test 482 + 135 passed; IntegrationTests 7 passed; 0 warnings; acceptance rg checks empty
+    - commit: b2fb66c
+    - review: clean — 0 findings (README.md not covered by a validator)
+  timestamp: 2026-10-09T22:39:42.764553+00:00
+position_column: done
+position_ordinal: af80
 title: Remove plan.md and the references to it
 ---
 ## Problem

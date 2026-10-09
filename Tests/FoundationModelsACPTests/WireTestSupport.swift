@@ -60,9 +60,22 @@ func sessionUpdateEnvelope(_ notification: UpdateSessionNotification) throws -> 
 /// - Parameter params: The raw notification params.
 /// - Returns: The envelope value ready to write over a transport.
 func sessionUpdateEnvelope(params: JSONValue) -> JSONValue {
+    notificationEnvelope(method: "session/update", params: params)
+}
+
+/// Frames raw notification params as a JSON-RPC envelope for the wire.
+///
+/// Use this to send params that the notification model cannot encode, for
+/// example a payload with a field of the wrong type.
+///
+/// - Parameters:
+///   - method: The wire method of the notification.
+///   - params: The raw notification params.
+/// - Returns: The envelope value ready to write over a transport.
+func notificationEnvelope(method: String, params: JSONValue) -> JSONValue {
     .object([
         "jsonrpc": .string("2.0"),
-        "method": .string("session/update"),
+        "method": .string(method),
         "params": params,
     ])
 }

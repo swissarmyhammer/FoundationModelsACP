@@ -84,7 +84,7 @@ extension JSONValue {
 
 extension SessionId {
     /// The params member that names the session of a call.
-    private static let paramsMemberKey = "sessionId"
+    static let paramsMemberKey = "sessionId"
 
     /// Reads the session that the raw params of a call name.
     ///
@@ -198,6 +198,54 @@ enum RoleDispatch {
         _ respond: (Request) async throws -> JSONValue
     ) async throws -> JSONValue {
         try await respond(JSONValue.decodeParams(Request.self, from: params))
+    }
+
+    /// One named value that the warning for an undecodable notification
+    /// shows. A `nil` value shows as `<absent>`.
+    typealias WarningField = (name: String, value: String?)
+
+    /// The text that a warning shows for a value that the params do not hold.
+    private static let absentValueText = "<absent>"
+
+    /// Decodes the params of one inbound notification, and writes a warning
+    /// when they do not decode.
+    ///
+    /// A notification has no response, so the peer does not learn of a
+    /// failure. The connection then drops the notification, writes one
+    /// warning to `logger`, and continues to read. The warning names the wire
+    /// method, the session (when the params hold a string `sessionId`), the
+    /// `fields`, and the decoding error, so that a schema difference with the
+    /// peer is visible.
+    ///
+    /// - Parameters:
+    ///   - params: The raw notification parameters.
+    ///   - paramsType: The parameters' model type.
+    ///   - handler: The routing table's handler name for the notification.
+    ///   - side: The side that serves the notification.
+    ///   - logPrefix: The prefix of each diagnostic of the connection type.
+    ///   - logger: The connection logger.
+    ///   - fields: Reads more values for the warning from the raw params. The
+    ///     connection calls it only when the params do not decode.
+    /// - Returns: The decoded parameters, or `nil` when they do not decode.
+    static func decodeNotification<Params: Decodable>(
+        _ params: JSONValue?,
+        as paramsType: Params.Type,
+        handler: String,
+        on side: MethodSide,
+        logPrefix: String,
+        logger: ACPLogger,
+        fields: (JSONValue?) -> [WarningField] = { _ in [] }
+    ) -> Params? {
+        do {
+            return try JSONValue.decodeParamsKeepingCause(paramsType, from: params)
+        } catch {
+            let method = RoleRouting.wireMethod(for: handler, on: side)
+            let session: WarningField = (SessionId.paramsMemberKey, SessionId(namedIn: params)?.rawValue)
+            let shown = [session] + fields(params)
+            let details = shown.map { "\($0.name): \($0.value ?? absentValueText)" }.joined(separator: ", ")
+            logger.log(logPrefix + "dropped a \(method) notification that does not decode (\(details)): \(error)")
+            return nil
+        }
     }
 
     /// Issues an outbound request and decodes its typed response.

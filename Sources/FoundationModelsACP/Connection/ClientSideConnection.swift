@@ -17,9 +17,6 @@ public final class ClientSideConnection: Sendable {
     /// The update member that names the variant of a `session/update`.
     private static let updateDiscriminatorKey = "sessionUpdate"
 
-    /// The text that a warning shows for a value that the params do not hold.
-    private static let absentValueText = "<absent>"
-
     /// The shared engine owning the connection and the served client.
     private let core: RoleConnectionCore<any Client>
 
@@ -230,8 +227,8 @@ public final class ClientSideConnection: Sendable {
     ///
     /// A decoded `session/update` is routed to its session stream first, then
     /// delivered to the client's own handler, so a host may consume updates
-    /// through either surface. A `session/update` that does not decode goes
-    /// to `logger` as a warning (see `serveSessionUpdate`).
+    /// through either surface. A notification that does not decode goes to
+    /// `logger` as a warning (see `RoleDispatch.decodeNotification`).
     ///
     /// - Parameters:
     ///   - handler: The routing table's handler name for the notification.
@@ -255,7 +252,10 @@ public final class ClientSideConnection: Sendable {
             )
         case "elicitationComplete":
             guard
-                let notification = try? JSONValue.decodeParams(CompleteElicitationNotification.self, from: params)
+                let notification = RoleDispatch.decodeNotification(
+                    params, as: CompleteElicitationNotification.self, handler: handler, on: .client,
+                    logPrefix: logPrefix, logger: logger
+                )
             else {
                 return
             }
@@ -294,32 +294,18 @@ public final class ClientSideConnection: Sendable {
         promptEchoes: PendingPromptEchoes,
         logger: ACPLogger
     ) async {
-        let notification: UpdateSessionNotification
-        do {
-            notification = try JSONValue.decodeParamsKeepingCause(UpdateSessionNotification.self, from: params)
-        } catch {
-            logger.log(undecodableUpdateWarning(handler, params: params, error: error))
+        guard
+            let notification = RoleDispatch.decodeNotification(
+                params, as: UpdateSessionNotification.self, handler: handler, on: .client,
+                logPrefix: logPrefix, logger: logger,
+                fields: { [(updateDiscriminatorKey, updateDiscriminator(namedIn: $0))] }
+            )
+        else {
             return
         }
         router.deliver(notification)
         promptEchoes.observe(notification)
         await client.sessionUpdate(notification)
-    }
-
-    /// The warning for a `session/update` notification that does not decode.
-    ///
-    /// - Parameters:
-    ///   - handler: The routing table's handler name for the notification.
-    ///   - params: The raw notification parameters.
-    ///   - error: The decoding error.
-    /// - Returns: The warning text.
-    private static func undecodableUpdateWarning(_ handler: String, params: JSONValue?, error: any Error) -> String {
-        let method = RoleRouting.wireMethod(for: handler, on: .client)
-        let session = SessionId(namedIn: params)?.rawValue ?? absentValueText
-        let variant = updateDiscriminator(namedIn: params) ?? absentValueText
-        return logPrefix
-            + "dropped a \(method) notification that does not decode "
-            + "(sessionId: \(session), sessionUpdate: \(variant)): \(error)"
     }
 
     /// Reads the `sessionUpdate` discriminator that the raw params of a

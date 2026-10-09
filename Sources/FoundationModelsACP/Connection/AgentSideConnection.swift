@@ -49,7 +49,7 @@ public final class AgentSideConnection: Sendable {
                 try await Self.serve(handler, params: params, to: agent)
             },
             dispatchNotification: { handler, params, agent in
-                await Self.serveNotification(handler, params: params, to: agent)
+                await Self.serveNotification(handler, params: params, to: agent, logger: logger)
             }
         )
         core.setRole(factory(self))
@@ -105,19 +105,27 @@ public final class AgentSideConnection: Sendable {
 
     /// Decodes and dispatches one notification to the agent's typed handler.
     ///
+    /// A notification that does not decode goes to `logger` as a warning
+    /// (see `RoleDispatch.decodeNotification`).
+    ///
     /// - Parameters:
     ///   - handler: The routing table's handler name for the notification.
     ///   - params: The raw notification parameters.
     ///   - agent: The agent to serve.
+    ///   - logger: The connection logger.
     private static func serveNotification(
         _ handler: String,
         params: JSONValue?,
-        to agent: any Agent
+        to agent: any Agent,
+        logger: ACPLogger
     ) async {
         switch handler {
         case "sessionCancel":
             guard
-                let notification = try? JSONValue.decodeParams(CancelSessionNotification.self, from: params)
+                let notification = RoleDispatch.decodeNotification(
+                    params, as: CancelSessionNotification.self, handler: handler, on: .agent,
+                    logPrefix: logPrefix, logger: logger
+                )
             else {
                 return
             }

@@ -21,6 +21,10 @@ struct StubAgent: Agent {
     /// The one session that `newSession(_:)` makes.
     static let sessionId = SessionId(rawValue: "stub-session")
 
+    /// Observes each `session/cancel` that the agent serves. The default
+    /// ignores it.
+    var onSessionCancel: @Sendable (CancelSessionNotification) -> Void = { _ in }
+
     func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
         InitializeResponse(
             info: Implementation(name: "stub-agent", version: "0.0.0"),
@@ -49,5 +53,7 @@ struct StubAgent: Agent {
         PromptResponse.stubAcknowledgement
     }
 
-    func sessionCancel(_ params: CancelSessionNotification) async {}
+    func sessionCancel(_ params: CancelSessionNotification) async {
+        onSessionCancel(params)
+    }
 }

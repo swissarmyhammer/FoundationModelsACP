@@ -80,21 +80,40 @@ private actor RecordingElicitationClient: Client {
         )
     )
 
+    /// The wire method of an `elicitation/complete` notification.
+    private static let completeMethod = "elicitation/complete"
+
+    /// The params member that names the elicitation that completed.
+    private static let elicitationIdField = "elicitationId"
+
+    /// The number that the malformed completion sends as its elicitation ID.
+    private static let numericElicitationId: Double = 9
+
+    /// The params of an `elicitation/complete` whose elicitation ID is a
+    /// number. The schema requires a string, so the payload does not decode.
+    private static let malformedCompleteParams = JSONValue.object([
+        elicitationIdField: .number(numericElicitationId)
+    ])
+
     /// Opens a connection pair serving the given client and runs `body`
     /// against both ends, closing the pair afterwards.
     ///
     /// - Parameters:
     ///   - client: The client to serve on the client side.
-    ///   - body: The test body, given the agent's outbound surface.
+    ///   - logger: The diagnostic sink of the client side.
+    ///   - body: The test body, given the agent's outbound surface and the
+    ///     raw agent end, on which the body can write frames that the
+    ///     agent surface cannot encode.
     private static func withConnectedPair(
         serving client: RecordingElicitationClient,
-        _ body: (AgentSideConnection) async throws -> Void
+        logger: ACPLogger = .disabled,
+        _ body: (AgentSideConnection, InMemoryTransport) async throws -> Void
     ) async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { _ in PassiveElicitationAgent() }
-        let clientConn = await ClientSideConnection(stream: clientEnd) { _ in client }
+        let clientConn = await ClientSideConnection(stream: clientEnd, logger: logger) { _ in client }
 
-        try await body(agentConn)
+        try await body(agentConn, agentEnd)
 
         await agentConn.close()
         await clientConn.close()
@@ -109,7 +128,7 @@ private actor RecordingElicitationClient: Client {
         ])
         let client = RecordingElicitationClient(response: acceptance)
 
-        try await Self.withConnectedPair(serving: client) { agentConn in
+        try await Self.withConnectedPair(serving: client) { agentConn, _ in
             let response = try await agentConn.createElicitation(Self.formRequest)
             #expect(response == acceptance)
         }
@@ -121,7 +140,7 @@ private actor RecordingElicitationClient: Client {
         let cancellation: CreateElicitationResponse = .object(["action": .string("cancel")])
         let client = RecordingElicitationClient(response: cancellation)
 
-        try await Self.withConnectedPair(serving: client) { agentConn in
+        try await Self.withConnectedPair(serving: client) { agentConn, _ in
             let response = try await agentConn.createElicitation(Self.urlRequest)
             #expect(response == cancellation)
         }
@@ -135,7 +154,7 @@ private actor RecordingElicitationClient: Client {
         let client = RecordingElicitationClient(response: .object(["action": .string("cancel")]))
         let completion = CompleteElicitationNotification(elicitationId: ElicitationId(rawValue: "elicit-1"))
 
-        try await Self.withConnectedPair(serving: client) { agentConn in
+        try await Self.withConnectedPair(serving: client) { agentConn, _ in
             try await agentConn.elicitationComplete(completion)
             // A notification returns before dispatch; the read loop awaits
             // notifications inline in arrival order, so a later request's
@@ -144,6 +163,32 @@ private actor RecordingElicitationClient: Client {
         }
 
         #expect(await client.completedElicitations == [completion])
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func aCompletionWithABadFieldTypeLogsOneWarningAndALaterCompletionStillArrives() async throws {
+        let client = RecordingElicitationClient(response: .object(["action": .string("cancel")]))
+        let completion = CompleteElicitationNotification(elicitationId: ElicitationId(rawValue: "elicit-1"))
+        let log = LogCapture()
+
+        try await Self.withConnectedPair(serving: client, logger: log.logger) { agentConn, agentEnd in
+            try await send(
+                notificationEnvelope(method: Self.completeMethod, params: Self.malformedCompleteParams),
+                over: agentEnd
+            )
+            try await agentConn.elicitationComplete(completion)
+            // The read loop awaits notifications inline in arrival order, so
+            // the response to a later request proves that the client served
+            // both notifications in front of it.
+            _ = try await agentConn.createElicitation(Self.urlRequest)
+        }
+
+        #expect(await client.completedElicitations == [completion])
+        let warnings = log.messages
+        #expect(warnings.count == 1)
+        let warning = try #require(warnings.first)
+        #expect(warning.contains(Self.completeMethod))
+        #expect(warning.contains(Self.elicitationIdField))
     }
 
     // MARK: - ClientCapabilities gates elicitation
