@@ -81,7 +81,7 @@ private final class TurnRegistry: Sendable {
     }
 }
 
-// MARK: - The M6 agent
+// MARK: - The prompt lifecycle agent
 
 /// An `Agent` implementing the v2 prompt lifecycle: `prompt(_:)` acknowledges
 /// at once, and everything else — `running`, the user's message echoed back
@@ -298,7 +298,7 @@ private let standardTestTimeout = 1  // minute
 /// `session/prompt` acknowledges immediately and reports everything else —
 /// `running`, the echoed user message, an optional `requires_action` pause,
 /// and the closing `idle`/`stopReason` — through `state_update` and other
-/// `session/update` notifications, per `plan.md` M6.
+/// `session/update` notifications.
 @Suite struct PromptLifecycleTests {
     // MARK: Fixture wiring
 
@@ -342,7 +342,7 @@ private let standardTestTimeout = 1  // minute
     func promptResponseArrivesBeforeTheFirstStateUpdate() async throws {
         // Repeated many times: a single pass could observe the correct order
         // by luck even from an implementation that races the two writes, and
-        // this is the one guarantee the whole milestone rests on.
+        // the whole v2 prompt lifecycle rests on this one guarantee.
         for _ in 0..<repetitionsForOrderingRaceDetection {
             let log = EventLog()
             let (clientEnd, rawAgentEnd) = InMemoryTransport.pair()

@@ -339,11 +339,12 @@ public final class ClientSideConnection: Sendable {
 
     /// Negotiates protocol version and capabilities with the agent.
     ///
-    /// This package is v2-only by decision (`plan.md`, *Decision: v2 only*):
-    /// it validates that the agent answered with exactly the protocol version
-    /// this call sent, and fails loud with `ProtocolVersionMismatchError` —
-    /// naming both versions — rather than silently proceeding against a peer
-    /// that speaks a version this package does not implement.
+    /// This package implements only v2 (see `ProtocolVersionMismatchError` for
+    /// the reason). Thus this call validates that the agent answered with
+    /// exactly the protocol version this call sent, and fails loud with
+    /// `ProtocolVersionMismatchError` — naming both versions — rather than
+    /// silently proceeding against a peer that speaks a version this package
+    /// does not implement.
     ///
     /// - Parameter params: The initialization request.
     /// - Returns: The agent's initialization response.

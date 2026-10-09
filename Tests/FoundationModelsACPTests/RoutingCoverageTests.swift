@@ -7,7 +7,7 @@ import Testing
 /// *handler* — not just that the generated routing table is internally
 /// consistent.
 ///
-/// `RoleRoutingTests` (`RoleDispatchTests.swift`, from M2) already pins
+/// `RoleRoutingTests` (`RoleDispatchTests.swift`) already pins
 /// `ACPMethodTable` itself: every entry's `wireMethod` resolves back to its
 /// own `handlerName` and nothing else, on both sides. What that static check
 /// cannot see is `AgentSideConnection.serve`/`serveNotification` and
@@ -15,10 +15,9 @@ import Testing
 /// statements that actually bind each handler name to a Swift method call.
 /// Those switches could misroute a case (swap two labels, leaving both arms
 /// individually well-typed) and the static table check would never notice,
-/// because it never calls either switch. This is exactly the bug class the
-/// task references: the real TS-SDK bug wired `setSessionModel` to
-/// `session/set_mode` — a hand-written dispatch mistake the routing *data*
-/// was innocent of.
+/// because it never calls either switch. This is exactly the bug class of a
+/// real TS-SDK bug, which wired `setSessionModel` to `session/set_mode` — a
+/// hand-written dispatch mistake the routing *data* was innocent of.
 ///
 /// This suite closes that gap by actually dispatching through a live
 /// `InMemoryTransport` pair for every stable method, and asserting the

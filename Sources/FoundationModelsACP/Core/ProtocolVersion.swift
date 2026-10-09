@@ -28,7 +28,8 @@ public struct ProtocolVersion: WireRawValueCodable, Hashable, Sendable {
 /// Thrown when a peer's `initialize` response names a protocol version other
 /// than the one this side sent.
 ///
-/// This package is v2-only by decision (`plan.md`, *Decision: v2 only*): there
+/// This package implements only v2. This is a decision: v2 is much simpler
+/// than v1, and a second version would double the types and the tests. There
 /// is no v1 surface and no version-branching logic, so a peer that answers
 /// with any version other than the one requested — lower, higher, or
 /// otherwise unrecognized — is not a peer this side can serve. The spec's own

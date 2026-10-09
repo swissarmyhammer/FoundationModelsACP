@@ -49,8 +49,8 @@ import Testing
         // neither. Note what this test does *not* rely on: `result`'s own
         // shape is not a reliable place to force a rejection, because the
         // schema's `ExtMethodResponse` branch — ACP's `_ext` forward-
-        // compatibility escape hatch (see `../../plan.md`'s "extension escape
-        // hatch" and `VendoredSchemaTests.onlyTheDeliberatelyFreeFormDefinitionsStayUntyped`
+        // compatibility escape hatch for vendor extension methods (see
+        // `VendoredSchemaTests.onlyTheDeliberatelyFreeFormDefinitionsStayUntyped`
         // in the unit suite) — declares no shape at all, so it matches any
         // `result` value whatsoever, including a bare number. That is a real,
         // deliberate property of the vendored schema, not a gap in this

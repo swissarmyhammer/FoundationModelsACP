@@ -7,7 +7,7 @@ import Testing
 /// order a single well-behaved turn would send them, proving
 /// `SessionMergeEngine` converges on the correct end state regardless of
 /// arrival order — correlation is by `messageId` / `toolCallId` / `terminalId`,
-/// never by position in the stream (plan.md M9, *Testing strategy*).
+/// never by position in the stream.
 ///
 /// `SessionMergeEngineTranscriptTests` already proves every individual folding
 /// rule (upsert replaces, chunks append, a patch folds onto what exists) from

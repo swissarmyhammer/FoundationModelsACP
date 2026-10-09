@@ -1,8 +1,34 @@
 ---
 assignees:
 - claude-code
-position_column: todo
-position_ordinal: '8780'
+comments:
+- actor: claude-code
+  id: 01m4hcycfavqe7hhyehxrp8dqq
+  text: |-
+    Implementation done. Discoveries:
+    - Line numbers in the card were old. ClientSideConnection reference is now at the `initialize(_:)` doc comment. PermissionRequestTests reference is at the suite doc comment.
+    - The acceptance commands did not find all indirect references. I also found "this milestone" (ReplayTransportTests, ThirdPartyInterop, PromptLifecycleTests ordering test), "the task references" (RoutingCoverageTests), and "*Testing strategy*" (GoldenSessionEndToEndTests, OutOfOrderConvergenceTests). I changed all of them.
+    - `"m1"` string values in tests (message IDs, auth method IDs) are not milestone references. The acceptance rg is case-sensitive, so they do not match.
+    - ProtocolVersionMismatchError now holds the short v2-only reason. ClientSideConnection.initialize points to it. README Cautions holds the same short reason.
+    - plan.md deletion is staged by `git rm`. Nothing is committed.
+    - insertUserMessage and the ResponseHooks success-only hooks are not changed.
+  timestamp: 2026-10-09T22:36:06.506697+00:00
+- actor: claude-code
+  id: 01m4hcygmv6j7za01mysee7264
+  text: |-
+    ### implement — changed
+    - evidence: 15 files — plan.md (deleted), README.md, Sources/FoundationModelsACP/Core/ProtocolVersion.swift, Sources/FoundationModelsACP/Connection/ClientSideConnection.swift, IntegrationTests/Tests/FoundationModelsACPIntegrationTests/SchemaConformanceTests.swift, Tests/FoundationModelsACPTests/{ThirdPartyInterop,ReplayTransportTests,GoldenSessionEndToEndTests,OutOfOrderConvergenceTests,PermissionRequestTests,PromptLifecycleTests,SessionLifecycleTests,RoutingCoverageTests,InitializeNegotiationTests}.swift. Both acceptance rg commands find nothing. `swift build --build-tests` clean; `swift test` 482 + 135 tests pass, 0 warnings; `swift test --package-path IntegrationTests` 7 tests pass.
+    - next: /review
+  timestamp: 2026-10-09T22:36:10.779996+00:00
+- actor: claude-code
+  id: 01m4hd1zk5zq10smzgxj40mzt4
+  text: |-
+    ### test — green
+    - evidence: swift test (root) 482 tests in 50 suites + 135 tests in 17 suites passed; IntegrationTests 7 passed; builds with -warnings-as-errors clean in both packages; both acceptance rg checks found nothing.
+    - next: commit, then review.
+  timestamp: 2026-10-09T22:38:04.389205+00:00
+position_column: doing
+position_ordinal: '8180'
 title: Remove plan.md and the references to it
 ---
 ## Problem

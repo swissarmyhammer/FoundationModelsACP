@@ -5,7 +5,8 @@ import Testing
 /// An `Agent` that answers `initialize` with a rich capability tree —
 /// authentication, both MCP transports, `additionalDirectories`, and every
 /// prompt extension — so a round trip through it exercises every nested
-/// `capabilities.session.*` shape M4 models, not just the baseline.
+/// `capabilities.session.*` shape that the package models, not just the
+/// baseline.
 private struct NegotiatingAgent: Agent {
     func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
         InitializeResponse(

@@ -65,12 +65,13 @@ draft: it vendors the new schema and regenerates the types. Thus an update can
 change the generated types.
 
 **This package does not serve v1.** It implements only v2. A client that
-speaks only v1 cannot talk to an agent that you build with this package. See
-*Decision: v2 only* in [`plan.md`](plan.md) for the full analysis.
+speaks only v1 cannot talk to an agent that you build with this package. The
+ACP migration guide recommends that you serve both versions, but this package
+does not, by decision. v2 is much simpler than v1, and support for both
+versions would double the generated types, the role protocols, and the tests.
 
 ## Documentation
 
-- [Plan](plan.md) — the v2 design, the decisions, and the milestones.
 - [Contributing](CONTRIBUTING.md) — how to regenerate the ACP types from the vendored schema.
 
 ## License

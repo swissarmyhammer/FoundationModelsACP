@@ -13,8 +13,8 @@ import Testing
 /// An actor rather than a lock-guarded class: every mutation here is already
 /// reached through `await` from the agent's async handlers, and an actor's
 /// isolation keeps the bookkeeping correct without a second concurrency
-/// primitive to get wrong — the kind of concern M3's tester found a real
-/// deadlock in for comparable shared state.
+/// primitive to get wrong. A second primitive around comparable shared state
+/// caused a real deadlock in the connection tests.
 private actor SessionRegistry {
     /// One session's tracked state.
     struct Session {
@@ -141,9 +141,9 @@ private actor SessionRegistry {
     }
 }
 
-// MARK: - The real M5 agent
+// MARK: - The session-managing agent
 
-/// An `Agent` implementing the actual M5 session lifecycle — creation,
+/// An `Agent` implementing the full v2 session lifecycle — creation,
 /// listing, resume with replay, close-cancels-and-frees, delete, and
 /// config-option updates — backed by a `SessionRegistry` and the connection
 /// the factory closure hands it, so replay and config-option pushes can call
@@ -386,9 +386,9 @@ private let fourCategoryConfigOptions: [SessionConfigOption] = [
 ///
 /// `options` is built as the schema's ungrouped-array shape: an array of
 /// `SessionConfigSelectOption`-equivalent objects. `SessionConfigSelectOptions`
-/// stays a `JSONValue` placeholder (see M1's comment on this card) because
-/// it is an untagged union with no discriminator to key a Swift enum on, so
-/// there is no typed constructor to reach for here.
+/// stays a `JSONValue` placeholder because it is an untagged union with no
+/// discriminator to key a Swift enum on, so there is no typed constructor to
+/// reach for here.
 private let selectConfigOption = SessionConfigOption(
     configId: SessionConfigId(rawValue: "select-option"),
     name: "Select Option",

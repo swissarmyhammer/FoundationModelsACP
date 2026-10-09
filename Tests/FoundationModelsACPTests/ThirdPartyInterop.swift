@@ -1,19 +1,19 @@
 /// Third-party interop against a real v2 agent or client — **deliberately
-/// deferred**, not silently skipped (plan.md M9).
+/// deferred**, not silently skipped.
 ///
-/// This is the one acceptance criterion this milestone cannot satisfy yet,
-/// and it is recorded here rather than left as an unchecked claim or faked
-/// with a mock.
+/// This is the one replay and interop requirement that the package cannot
+/// satisfy yet. It is recorded here rather than left as an unchecked claim or
+/// faked with a mock.
 ///
 /// ## Why deferred
 ///
-/// v2 is a **draft** (`schema-v2.0.0-alpha.8`): `plan.md`'s own "Decision: v2
-/// only" section notes the plan was written from a handful of doc pages plus
-/// the migration guide, and that the migration guide has already proven to
-/// run ahead of the schema. Both consumers this wire is for —
-/// `FoundationModelsACPAgent` and `FoundationModelsACPClient` — are
-/// themselves unimplemented, and no independent third-party v2 agent or
-/// client is known to exist to round-trip against. There is nothing to dial.
+/// v2 is a **draft** (`schema-v2.0.0-alpha.8`). The v2 design came from a
+/// small number of doc pages and the migration guide, and the migration
+/// guide was already ahead of the schema at one time. Both consumers this
+/// wire is for — `FoundationModelsACPAgent` and `FoundationModelsACPClient`
+/// — are themselves unimplemented, and no independent third-party v2 agent
+/// or client is known to exist to round-trip against. There is nothing to
+/// dial.
 ///
 /// ## Why not fake it with a mock
 ///

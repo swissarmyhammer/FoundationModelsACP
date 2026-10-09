@@ -4,15 +4,15 @@ import Testing
 @testable import FoundationModelsACP
 
 /// `ReplayTransport` — a static, recorded script replayed deterministically:
-/// no model, no network, no clock (plan.md M9).
+/// no model, no network, no clock.
 ///
 /// The mechanics tests below pin the transport primitive on its own, exactly
 /// as `Data` in, `Data` out — the same coverage this transport carried in v1,
 /// since the mechanism is protocol-version-agnostic. The transcript test pins
-/// the acceptance criterion this milestone adds: a full recorded
-/// *session*-level transcript containing unrecognized enum values and
-/// `_`-prefixed extensions round-trips losslessly, not just one decoded value
-/// at a time (`UnknownFallbackRoundTripTests` already covers that unit level
+/// a stronger requirement: a full recorded *session*-level transcript
+/// containing unrecognized enum values and `_`-prefixed extensions
+/// round-trips losslessly, not just one decoded value at a time
+/// (`UnknownFallbackRoundTripTests` already covers that unit level
 /// exhaustively).
 ///
 /// Every test here drives `ReplayTransport` with a manual, single-`Task`

@@ -6,10 +6,10 @@ import Testing
 /// The time limit of the read-loop test, in minutes.
 private let readLoopTestTimeout = 1
 
-/// `session/request_permission` (plan.md M8): a stable Client request that
-/// waits on a human — `elicitation/create` is the other — restructured in v2
-/// to separate prompt copy (`title`/`description`) from structured context
-/// (the tagged `subject`).
+/// `session/request_permission`: a stable Client request that waits on a
+/// human — `elicitation/create` is the other — restructured in v2 to separate
+/// prompt copy (`title`/`description`) from structured context (the tagged
+/// `subject`).
 ///
 /// Two halves. The first is pure wire round-tripping of `RequestPermissionRequest`
 /// and `RequestPermissionSubject`, complementing the generic tag-exhaustiveness

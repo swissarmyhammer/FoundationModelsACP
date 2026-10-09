@@ -7,11 +7,11 @@ import Testing
 /// The per-test time limit, in minutes, for the golden session below.
 private let standardTestTimeout = 1  // minute
 
-/// The representative full v2 session (plan.md M9, *Testing strategy*):
-/// `initialize`, `session/new`, `session/prompt`, a streamed turn (thought and
-/// message chunks, a tool call with a content chunk and a display terminal
-/// reference, the terminal's own upserts), a `session/request_permission`
-/// round trip, and the closing `idle`.
+/// The representative full v2 session: `initialize`, `session/new`,
+/// `session/prompt`, a streamed turn (thought and message chunks, a tool call
+/// with a content chunk and a display terminal reference, the terminal's own
+/// upserts), a `session/request_permission` round trip, and the closing
+/// `idle`.
 ///
 /// Driven over a live `InMemoryTransport` pair with real `AgentSideConnection`
 /// / `ClientSideConnection` — not `ReplayTransport` — because the permission

@@ -38,8 +38,24 @@ comments:
     - evidence: swift test (root) 482 tests in 50 suites + 135 tests in 17 suites passed; IntegrationTests 7 passed; build with -warnings-as-errors clean; ClientPromptEchoTests + SessionUpdateStreamTests 5 runs, 33/33 passed each run.
     - next: commit, then review.
   timestamp: 2026-10-09T22:28:50.917626+00:00
-position_column: doing
-position_ordinal: '8180'
+- actor: claude-code
+  id: 01m4hcpadtpacd4vn34ngdmj1j
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (commit 1cc2dd5). 7 files reviewed. 0 findings, 0 confirmed, 0 refuted, 0 failed. 4 .kanban files were not reviewed because of .reviewignore.
+    - next: None. The task is in done.
+  timestamp: 2026-10-09T22:31:42.266372+00:00
+- actor: claude-code
+  id: 01m4hcphw0aqtbj7hpy0zeh961
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — ClientSideConnection.swift, PendingPromptEchoes.swift (new), EchoedPromptResponse.swift (new), PendingPromptCorrelator.swift, ClientPromptEchoTests.swift (new), WireTestSupport.swift, SessionUpdateStreamTests.swift
+    - test: green — swift test 482 + 135 passed; IntegrationTests 7 passed; 0 warnings
+    - commit: 1cc2dd5
+    - review: clean — 0 findings
+  timestamp: 2026-10-09T22:31:49.888071+00:00
+position_column: done
+position_ordinal: ae80
 title: Use PendingPromptCorrelator in ClientSideConnection
 ---
 ## Problem
