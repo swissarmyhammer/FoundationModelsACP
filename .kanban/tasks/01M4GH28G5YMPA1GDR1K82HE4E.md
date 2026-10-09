@@ -27,6 +27,48 @@ comments:
     - evidence: swift test (root) 451 tests in 45 suites + 135 tests in 17 suites passed; IntegrationTests 7 passed; forced rebuild 0 warnings; UserMessageInsertionTests, ResponseHooksTests, PromptCancellationTests 5 runs each, all passed.
     - next: commit, then review.
   timestamp: 2026-10-09T16:09:13.414303+00:00
+- actor: claude-code
+  id: 01m4gr0n4p924n3pmb294zcrqz
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (commit 6181fe3). 1 finding (1 confirmed, 1 refuted). Sources/FoundationModelsACP/Connection/AgentSideConnection.swift:452 completeness/invariant-propagation.
+    - next: Make the history record follow the same success-only rule as the user_message echo. Update the doc of insertUserMessage(_:messageId:into:). Add a test for .recordInHistory with a throw after insertion. Then do the review again.
+  timestamp: 2026-10-09T16:30:20.822408+00:00
+- actor: claude-code
+  id: 01m4gr1276jvspd9tr03eqf60d
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — Connection.swift, AgentSideConnection.swift, UserMessageInsertionTests.swift, ResponseHooksTests.swift
+    - test: green — swift test 451 + 135 passed; IntegrationTests 7 passed; 0 warnings
+    - commit: 6181fe3
+    - review: findings — Sources/FoundationModelsACP/Connection/AgentSideConnection.swift:452 (completeness/invariant-propagation)
+  timestamp: 2026-10-09T16:30:34.214976+00:00
+- actor: claude-code
+  id: 01m4h7p81hx7yz57r4xnfg5rf1
+  text: |-
+    Blocker (finding at AgentSideConnection.swift, completeness/invariant-propagation):
+    - `insertUserMessage(_:messageId:into:)` takes `into history: inout SessionMergeEngine`. An inout value is not reachable after the method returns. Thus the success-only hook cannot apply the echo to the history, and the method cannot remove the message after an error response.
+    - To gate the history record on the response outcome, the public signature must change. This is a public API decision, so a person must choose:
+      - A) `into history: @escaping @Sendable (SessionUpdate) -> Void`. The connection calls the closure in the success-only hook, before the echo.
+      - B) A new public `final class` (for example `SessionHistory: Sendable`) that holds `Mutex<SessionMergeEngine>`, and `into history: SessionHistory`.
+      - C) Another form.
+    - With A or B, the history gets the message after the response is written, not before the method returns. The doc example `history.withLock { connection.insertUserMessage(params, into: &$0) }` changes.
+    - No source edits were made. The task is in `doing`.
+  timestamp: 2026-10-09T21:04:16.945883+00:00
+- actor: claude-code
+  id: 01m4h7pa9x61fcxvhb9nm2p6ns
+  text: |-
+    ### implement — stuck
+    - evidence: no files changed. `insertUserMessage(_:messageId:into:)` takes `inout SessionMergeEngine`; the success-only hook cannot reach it after return. The fix needs a public signature change (option A closure, option B new history class, or C other). A person must choose.
+    - next: the user picks A, B, or C; then run /implement again.
+  timestamp: 2026-10-09T21:04:19.261453+00:00
+- actor: claude-code
+  id: 01m4h7pxf2z5q8r1n9k1e7t7a0
+  text: |-
+    ### finish iteration 2 — stuck
+    - implement: stuck — no files changed. `insertUserMessage(_:messageId:into:)` takes `inout SessionMergeEngine`. The success-only work cannot get to that value after the method returns. To fix the finding at AgentSideConnection.swift:452, the public signature must change. A person must choose: (A) an `@escaping @Sendable (SessionUpdate) -> Void` parameter, (B) a new `SessionHistory: Sendable` class that holds `Mutex<SessionMergeEngine>`, or (C) another form.
+    - next: wait for the user decision, then run /implement again.
+  timestamp: 2026-10-09T21:04:38.882727+00:00
 depends_on:
 - 01M4GH23E1QC4SW735FQR92KN3
 position_column: doing
@@ -50,3 +92,12 @@ title: Do not send the user_message echo when the prompt handler throws
 - The new test passes, and all other tests pass.
 
 #acp-lifecycle
+
+## Review Findings (2026-10-09 11:09)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 4 file(s) reviewed, 4 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+- [ ] `Sources/FoundationModelsACP/Connection/AgentSideConnection.swift:452` `completeness/invariant-propagation` — The success-only gate covers only the user_message echo. The history record at line 423 still runs unconditionally, before the handler's error is known. When a handler calls insertUserMessage(_:messageId:into:) and then throws, the retained history keeps the user message, but the client gets an error response and no echo. The client and the history now disagree. Before this change, the echo went out on error, so both sides agreed. Move the history record into the success-only work, or otherwise gate it on the response outcome, so the history and the echo follow the same rule. Update the doc of `insertUserMessage(_:messageId:into:)` to say what happens to the history on an error response. Add a test for `.recordInHistory` with a throw after insertion that asserts the history is empty.

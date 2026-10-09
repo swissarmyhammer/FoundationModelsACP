@@ -14,6 +14,10 @@ public final class ClientSideConnection: Sendable {
     /// Demultiplexes `session/update` notifications into per-session streams.
     private let router: SessionUpdateRouter
 
+    /// The inbound `session/request_permission` requests that wait for an
+    /// answer, by session. ``sessionCancel(_:)`` answers them.
+    private let permissions: PendingPermissionRequests
+
     /// Creates the connection, wires the factory's client, and starts serving.
     ///
     /// The factory receives this connection so the client it builds can capture
@@ -40,6 +44,7 @@ public final class ClientSideConnection: Sendable {
         // connection's close handler rather than `self`, preserving the
         // initialization-cycle break the core relies on.
         let router = SessionUpdateRouter(limits: bufferLimits, logger: logger)
+        let permissions = PendingPermissionRequests()
         // The tracker gives each finished session request to the router at
         // the wire position of its response, before the caller resumes.
         let outgoingRequests = OutgoingRequestTracker { finished in router.deliver(finished) }
@@ -50,7 +55,7 @@ public final class ClientSideConnection: Sendable {
             servedSide: .client,
             peerSide: .agent,
             dispatchRequest: { handler, params, client in
-                try await Self.serve(handler, params: params, to: client)
+                try await Self.serve(handler, params: params, to: client, permissions: permissions)
             },
             dispatchNotification: { handler, params, client in
                 await Self.serveNotification(handler, params: params, to: client, router: router)
@@ -59,6 +64,7 @@ public final class ClientSideConnection: Sendable {
             outgoingRequests: outgoingRequests
         )
         self.router = router
+        self.permissions = permissions
         core.setRole(factory(self))
     }
 
@@ -165,23 +171,28 @@ public final class ClientSideConnection: Sendable {
     /// method's parameter type is only known at compile time, so this typed
     /// binding cannot be replaced by a runtime table over the routing metadata.
     ///
+    /// A permission request goes through `permissions`, so that
+    /// ``sessionCancel(_:)`` can answer it before the handler returns.
+    ///
     /// - Parameters:
     ///   - handler: The routing table's handler name for the method.
     ///   - params: The raw request parameters.
     ///   - client: The client to serve.
+    ///   - permissions: The permission requests that wait for an answer.
     /// - Returns: The encoded response value.
     /// - Throws: `RequestError.methodNotFound` for an unknown handler, or any
     ///   error the client throws.
     private static func serve(
         _ handler: String,
         params: JSONValue?,
-        to client: any Client
+        to client: any Client,
+        permissions: PendingPermissionRequests
     ) async throws -> JSONValue {
         switch handler {
         case "requestPermission":
-            return try await RoleDispatch.serveResult(
-                params, as: RequestPermissionRequest.self, client.requestPermission
-            )
+            return try await RoleDispatch.serveResult(params, as: RequestPermissionRequest.self) { request in
+                try await permissions.answer(request) { try await client.requestPermission($0) }
+            }
         case "createElicitation":
             return try await RoleDispatch.serveResult(
                 params, as: CreateElicitationRequest.self, client.createElicitation
@@ -319,9 +330,30 @@ public final class ClientSideConnection: Sendable {
     /// Cancellation is confirmed by an `idle` `state_update` carrying
     /// `stopReason: "cancelled"`, not by this notification returning.
     ///
+    /// The spec says that the client MUST answer each pending
+    /// `session/request_permission` of the session with the `cancelled`
+    /// outcome. This method does that for you: after it writes the
+    /// notification, it answers each permission request of the session that
+    /// waits for ``Client/requestPermission(_:)``. It does not wait for the
+    /// handler. The connection cancels the task of the handler and ignores
+    /// its late result. Deferred work that the handler registered before the
+    /// answer runs after the `cancelled` response. Deferred work that it
+    /// registers later does not run (see
+    /// ``afterRespondingToCurrentRequest(_:)``). The connection answers the
+    /// requests also when the write of the notification fails. A permission
+    /// request that arrives after this call goes to the handler as usual.
+    ///
+    /// The spec also says that the client SHOULD mark the unfinished tool
+    /// calls of the session as `cancelled` at once. Call
+    /// ``SessionMergeEngine/cancelUnfinishedToolCalls()`` on the engine of
+    /// the session after this method returns. The updates that the agent
+    /// sends after the cancel still arrive, and the engine applies them as
+    /// usual.
+    ///
     /// - Parameter notification: The cancellation notification.
     /// - Throws: `ConnectionError.closed` after disconnect.
     public func sessionCancel(_ notification: CancelSessionNotification) async throws {
+        defer { permissions.cancelAll(in: notification.sessionId) }
         try await core.notify("sessionCancel", notification)
     }
 
@@ -419,9 +451,10 @@ public final class ClientSideConnection: Sendable {
     ///
     /// Call this synchronously in the handler, before it returns. The
     /// connection calls each `Client` request handler on the task that
-    /// dispatches the request, so the handler finds its request. A call
-    /// outside an inbound request does nothing: there is no response to
-    /// follow, so the connection drops `work`.
+    /// dispatches the request, or (for ``Client/requestPermission(_:)``) on
+    /// a task that inherits the request of that task, so the handler finds
+    /// its request. A call outside an inbound request does nothing: there is
+    /// no response to follow, so the connection drops `work`.
     ///
     /// A task that the handler starts inherits the current request. A call
     /// from that task after the deferred work of the request started to run

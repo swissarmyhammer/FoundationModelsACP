@@ -195,6 +195,39 @@ public struct SessionMergeEngine: Hashable, Sendable {
         self = SessionMergeEngine()
     }
 
+    // MARK: - Cancelling
+
+    /// Marks each tool call that did not finish as `cancelled`.
+    ///
+    /// The spec says that a client SHOULD mark the unfinished tool calls of
+    /// the active work as `cancelled` immediately when it sends
+    /// `session/cancel`. Call this method on the engine of the session right
+    /// after ``ClientSideConnection/sessionCancel(_:)``:
+    ///
+    /// ```swift
+    /// try await connection.sessionCancel(CancelSessionNotification(sessionId: sessionId))
+    /// let changes = engine.cancelUnfinishedToolCalls()
+    /// ```
+    ///
+    /// A tool call is finished when its status is `completed`, `failed`, or
+    /// `cancelled`. Each other tool call gets the `cancelled` status: a
+    /// `pending` or `in_progress` tool call, a tool call with no status, and a
+    /// tool call with a status that this package does not know. The other
+    /// fields of the tool call do not change.
+    ///
+    /// The agent can send updates after the cancel. ``apply(_:)`` merges them
+    /// as usual, so a later status from the agent replaces `cancelled`.
+    ///
+    /// - Returns: One ``Change/entryChanged(index:entry:)`` for each tool call
+    ///   that became `cancelled`, in transcript order.
+    @discardableResult
+    public mutating func cancelUnfinishedToolCalls() -> [Change] {
+        let unfinished = entries.compactMap(\.kind.toolCall).filter { !$0.status.isTerminal }
+        return unfinished.map { toolCall in
+            apply(.toolCallUpdate(ToolCallUpdate(toolCallId: toolCall.toolCallId, status: .value(.cancelled))))
+        }
+    }
+
     // MARK: - Reading the state
 
     /// Finds the entry with an identifier.
@@ -442,6 +475,18 @@ public struct SessionMergeEngine: Hashable, Sendable {
             options.map { SessionUpdate.configOptionUpdate(ConfigOptionUpdate(configOptions: $0)) },
         ]
         return seedUpdates.compactMap { $0 }.map { apply($0) }
+    }
+}
+
+extension PatchField where Wrapped == ToolCallStatus {
+    /// `true` when the status tells that the tool call finished: `completed`,
+    /// `failed`, or `cancelled`. An omitted or cleared status, and a status
+    /// that this package does not know, do not tell that.
+    fileprivate var isTerminal: Bool {
+        switch self {
+        case .value(.completed), .value(.failed), .value(.cancelled): true
+        case .unchanged, .cleared, .value(.pending), .value(.inProgress), .value(.unknown): false
+        }
     }
 }
 
