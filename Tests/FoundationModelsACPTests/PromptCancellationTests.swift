@@ -101,12 +101,20 @@ private let cancellationPromptContent: [ContentBlock] = [.text(TextContent(text:
 /// The wire id of the `session/prompt` request.
 private let promptRequestId: JSONValue = .number(1)
 
+/// The number of the request that proves that no frame came after the error
+/// response.
+private let followUpRequestNumber: Double = 2
+
 /// The wire id of the request that proves that no frame came after the
 /// error response.
-private let followUpRequestId: JSONValue = .number(2)
+private let followUpRequestId: JSONValue = .number(followUpRequestNumber)
+
+/// How many milliseconds the handler sleeps between two checks for
+/// cancellation.
+private let cancellationPollMilliseconds = 5
 
 /// How long the handler sleeps between two checks for cancellation.
-private let cancellationPollInterval = Duration.milliseconds(5)
+private let cancellationPollInterval = Duration.milliseconds(cancellationPollMilliseconds)
 
 /// The time limit of each test in this suite, in minutes.
 private let cancellationTestTimeout = 1
