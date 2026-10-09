@@ -131,9 +131,23 @@ public final class AgentSideConnection: Sendable {
 
     /// Sends a streamed session update to the client.
     ///
+    /// Before it sends the update, the method makes sure that the update
+    /// obeys the schema rules that its Swift types do not state:
+    ///
+    /// - A stop reason is an ACP value, or a custom value that starts with
+    ///   `_`. ACP keeps other values for future versions.
+    /// - The `size` and `used` counts of a `usage_update` are 0 or more.
+    /// - The currency of a `usage_update` cost is an ISO 4217 code of three
+    ///   upper-case letters.
+    ///
+    /// An update that breaks a rule does not go to the client. A received
+    /// update is not checked: the client decodes such values.
+    ///
     /// - Parameter notification: The session-update notification.
-    /// - Throws: `ConnectionError.closed` after disconnect.
+    /// - Throws: `EncodingError.invalidValue` when the update breaks a rule
+    ///   above, or `ConnectionError.closed` after disconnect.
     public func sessionUpdate(_ notification: UpdateSessionNotification) async throws {
+        try notification.update.validateForSending()
         try await core.notify("sessionUpdate", notification)
     }
 
