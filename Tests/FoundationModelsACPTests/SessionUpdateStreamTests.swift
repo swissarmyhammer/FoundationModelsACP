@@ -74,12 +74,42 @@ private func idleState(stopReason: StopReason?) -> SessionUpdate {
 /// - Returns: The envelope value ready to write over a transport.
 /// - Throws: Rethrows any encoding failure.
 private func sessionUpdateEnvelope(_ notification: UpdateSessionNotification) throws -> JSONValue {
+    sessionUpdateEnvelope(params: try JSONValue.encode(result: notification))
+}
+
+/// Frames raw `session/update` params as a JSON-RPC envelope for the wire.
+///
+/// Use this to send params that the notification model cannot encode, for
+/// example a payload with a field of the wrong type.
+///
+/// - Parameter params: The raw notification params.
+/// - Returns: The envelope value ready to write over a transport.
+private func sessionUpdateEnvelope(params: JSONValue) -> JSONValue {
     .object([
         "jsonrpc": .string("2.0"),
         "method": .string("session/update"),
-        "params": try JSONValue.encode(result: notification),
+        "params": params,
     ])
 }
+
+/// The `sessionUpdate` discriminator of a tool-call update on the wire.
+private let toolCallUpdateDiscriminator = "tool_call_update"
+
+/// The wire name of the tool call ID field of a tool-call update.
+private let toolCallIdField = "toolCallId"
+
+/// A tool call ID of the wrong type: the schema requires a string.
+private let malformedToolCallId = JSONValue.number(42)
+
+/// The params of a `tool_call_update` for `sessionOne` whose tool call ID is a
+/// number. The client knows the variant, but the payload does not decode.
+private let malformedToolCallUpdateParams = JSONValue.object([
+    "sessionId": .string(sessionOne.rawValue),
+    "update": .object([
+        "sessionUpdate": .string(toolCallUpdateDiscriminator),
+        toolCallIdField: malformedToolCallId,
+    ]),
+])
 
 /// Frames a JSON-RPC success response keyed to a request id.
 ///
@@ -291,6 +321,31 @@ func anUpdateForASessionWithNoSubscriberDoesNotStopOtherSessions() async throws 
     try await send(sessionUpdateEnvelope(notification(for: sessionOne, messageChunk("still-here"))), over: agentEnd)
 
     #expect(await firstUpdates.nextUpdate() == messageChunk("still-here"))
+
+    await client.close()
+}
+
+// MARK: - A known update whose payload does not decode
+
+@Test(.timeLimit(.minutes(1)))
+func aKnownUpdateWithABadFieldTypeLogsOneWarningAndLaterUpdatesStillArrive() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let log = LogCapture()
+    let client = await ClientSideConnection(stream: clientEnd, logger: log.logger) { _ in MinimalClient() }
+    var updates = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
+
+    try await send(sessionUpdateEnvelope(params: malformedToolCallUpdateParams), over: agentEnd)
+    try await send(sessionUpdateEnvelope(notification(for: sessionOne, messageChunk("after-bad"))), over: agentEnd)
+
+    // The connection reads the notifications in wire order, so the warning
+    // for the bad update is in the log when the later update arrives.
+    #expect(await updates.nextUpdate() == messageChunk("after-bad"))
+    let warnings = log.messages
+    #expect(warnings.count == 1)
+    let warning = try #require(warnings.first)
+    #expect(warning.contains(sessionOne.rawValue))
+    #expect(warning.contains(toolCallUpdateDiscriminator))
+    #expect(warning.contains(toolCallIdField))
 
     await client.close()
 }

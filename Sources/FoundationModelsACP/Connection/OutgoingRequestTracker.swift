@@ -90,9 +90,6 @@ final class OutgoingRequestTracker: Sendable {
         }
     }
 
-    /// The params member that names the session of a request.
-    private static let sessionIdKey = "sessionId"
-
     /// The in-flight requests and the subscribers.
     private let broadcaster = EventBroadcaster<Topic, OutgoingRequestEvent, InFlightRequests>(
         context: InFlightRequests()
@@ -120,7 +117,7 @@ final class OutgoingRequestTracker: Sendable {
     ///     string `sessionId` member, the tracker gives the finish of the
     ///     request to the session observer.
     func start(id: RequestId, method: String, params: JSONValue?) {
-        let sessionId = Self.sessionId(namedIn: params)
+        let sessionId = SessionId(namedIn: params)
         broadcaster.withState { state in
             state.context.add(id: id, method: method, sessionId: sessionId)
             state.broadcast(.started(id: id, method: method))
@@ -199,17 +196,5 @@ final class OutgoingRequestTracker: Sendable {
     private func report(_ request: InFlightRequest, id: RequestId, outcome: OutgoingRequestOutcome) {
         guard let sessionObserver, let sessionId = request.sessionId else { return }
         sessionObserver(FinishedSessionRequest(id: id, method: request.method, sessionId: sessionId, outcome: outcome))
-    }
-
-    /// The session that the params of a request name.
-    ///
-    /// - Parameter params: The params of the request.
-    /// - Returns: The session, or `nil` when the params are not an object
-    ///   with a string `sessionId` member.
-    private static func sessionId(namedIn params: JSONValue?) -> SessionId? {
-        guard case .object(let members) = params, case .string(let rawValue) = members[sessionIdKey] else {
-            return nil
-        }
-        return SessionId(rawValue: rawValue)
     }
 }

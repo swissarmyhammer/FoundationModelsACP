@@ -19,10 +19,30 @@ extension JSONValue {
         from params: JSONValue?
     ) throws -> Model {
         do {
-            return try (params ?? .object([:])).decoded(as: modelType)
+            return try decodeParamsKeepingCause(modelType, from: params)
         } catch {
             throw RequestError.invalidParams
         }
+    }
+
+    /// Decodes call parameters into a handler's typed model, and keeps the
+    /// cause of a failure.
+    ///
+    /// Use this when the caller must tell why the parameters do not decode,
+    /// for example in a log. A `nil` params value is treated as an empty
+    /// object, as in ``decodeParams(_:from:)``.
+    ///
+    /// - Parameters:
+    ///   - modelType: The model type to decode.
+    ///   - params: The raw parameters, or `nil` for a paramless call.
+    /// - Returns: The decoded model.
+    /// - Throws: The decoding error when the parameters do not satisfy the
+    ///   model.
+    static func decodeParamsKeepingCause<Model: Decodable>(
+        _ modelType: Model.Type,
+        from params: JSONValue?
+    ) throws -> Model {
+        try (params ?? .object([:])).decoded(as: modelType)
     }
 
     /// Re-encodes one Codable value as another by round-tripping through JSON.
@@ -59,6 +79,26 @@ extension JSONValue {
     /// - Throws: Rethrows any decode failure from a malformed peer response.
     func decoded<Model: Decodable>(as modelType: Model.Type) throws -> Model {
         try Self.transcode(self, as: modelType)
+    }
+}
+
+extension SessionId {
+    /// The params member that names the session of a call.
+    private static let paramsMemberKey = "sessionId"
+
+    /// Reads the session that the raw params of a call name.
+    ///
+    /// This does not decode the full params, so it works also when other
+    /// members of the params do not decode.
+    ///
+    /// - Parameter params: The raw params of a call.
+    /// - Returns: The session, or `nil` when the params are not an object
+    ///   with a string `sessionId` member.
+    init?(namedIn params: JSONValue?) {
+        guard case .object(let members) = params, case .string(let rawValue) = members[Self.paramsMemberKey] else {
+            return nil
+        }
+        self.init(rawValue: rawValue)
     }
 }
 

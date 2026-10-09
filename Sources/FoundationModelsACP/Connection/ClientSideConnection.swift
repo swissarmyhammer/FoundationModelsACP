@@ -8,6 +8,18 @@ import Foundation
 /// `newSession`, `prompt`, and the rest of the agent surface) so a host can
 /// drive the agent.
 public final class ClientSideConnection: Sendable {
+    /// The prefix of each diagnostic that this type writes to the logger.
+    private static let logPrefix = "ClientSideConnection: "
+
+    /// The `session/update` params member that holds the update.
+    private static let updateMemberKey = "update"
+
+    /// The update member that names the variant of a `session/update`.
+    private static let updateDiscriminatorKey = "sessionUpdate"
+
+    /// The text that a warning shows for a value that the params do not hold.
+    private static let absentValueText = "<absent>"
+
     /// The shared engine owning the connection and the served client.
     private let core: RoleConnectionCore<any Client>
 
@@ -58,7 +70,7 @@ public final class ClientSideConnection: Sendable {
                 try await Self.serve(handler, params: params, to: client, permissions: permissions)
             },
             dispatchNotification: { handler, params, client in
-                await Self.serveNotification(handler, params: params, to: client, router: router)
+                await Self.serveNotification(handler, params: params, to: client, router: router, logger: logger)
             },
             onClose: { router.finishAll() },
             outgoingRequests: outgoingRequests
@@ -207,28 +219,25 @@ public final class ClientSideConnection: Sendable {
     ///
     /// A decoded `session/update` is routed to its session stream first, then
     /// delivered to the client's own handler, so a host may consume updates
-    /// through either surface.
+    /// through either surface. A `session/update` that does not decode goes
+    /// to `logger` as a warning (see `serveSessionUpdate`).
     ///
     /// - Parameters:
     ///   - handler: The routing table's handler name for the notification.
     ///   - params: The raw notification parameters.
     ///   - client: The client to serve.
     ///   - router: The per-session update router to fan the notification into.
+    ///   - logger: The connection logger.
     private static func serveNotification(
         _ handler: String,
         params: JSONValue?,
         to client: any Client,
-        router: SessionUpdateRouter
+        router: SessionUpdateRouter,
+        logger: ACPLogger
     ) async {
         switch handler {
         case "sessionUpdate":
-            guard
-                let notification = try? JSONValue.decodeParams(UpdateSessionNotification.self, from: params)
-            else {
-                return
-            }
-            router.deliver(notification)
-            await client.sessionUpdate(notification)
+            await serveSessionUpdate(handler, params: params, to: client, router: router, logger: logger)
         case "elicitationComplete":
             guard
                 let notification = try? JSONValue.decodeParams(CompleteElicitationNotification.self, from: params)
@@ -239,6 +248,73 @@ public final class ClientSideConnection: Sendable {
         default:
             break
         }
+    }
+
+    /// Decodes one `session/update` and gives it to the session streams and
+    /// to the client's handler.
+    ///
+    /// The schema keeps an unknown `sessionUpdate` variant as raw data, but a
+    /// known variant with a malformed payload does not decode. The connection
+    /// then drops the notification, writes one warning to `logger`, and
+    /// continues to read. The warning names the session (when the params
+    /// hold a string `sessionId`), the `sessionUpdate` discriminator, and the
+    /// decoding error, so that a schema difference with the agent is visible.
+    ///
+    /// - Parameters:
+    ///   - handler: The routing table's handler name for the notification.
+    ///   - params: The raw notification parameters.
+    ///   - client: The client to serve.
+    ///   - router: The per-session update router to fan the notification into.
+    ///   - logger: The connection logger.
+    private static func serveSessionUpdate(
+        _ handler: String,
+        params: JSONValue?,
+        to client: any Client,
+        router: SessionUpdateRouter,
+        logger: ACPLogger
+    ) async {
+        let notification: UpdateSessionNotification
+        do {
+            notification = try JSONValue.decodeParamsKeepingCause(UpdateSessionNotification.self, from: params)
+        } catch {
+            logger.log(undecodableUpdateWarning(handler, params: params, error: error))
+            return
+        }
+        router.deliver(notification)
+        await client.sessionUpdate(notification)
+    }
+
+    /// The warning for a `session/update` notification that does not decode.
+    ///
+    /// - Parameters:
+    ///   - handler: The routing table's handler name for the notification.
+    ///   - params: The raw notification parameters.
+    ///   - error: The decoding error.
+    /// - Returns: The warning text.
+    private static func undecodableUpdateWarning(_ handler: String, params: JSONValue?, error: any Error) -> String {
+        let method = RoleRouting.wireMethod(for: handler, on: .client)
+        let session = SessionId(namedIn: params)?.rawValue ?? absentValueText
+        let variant = updateDiscriminator(namedIn: params) ?? absentValueText
+        return logPrefix
+            + "dropped a \(method) notification that does not decode "
+            + "(sessionId: \(session), sessionUpdate: \(variant)): \(error)"
+    }
+
+    /// Reads the `sessionUpdate` discriminator that the raw params of a
+    /// `session/update` name.
+    ///
+    /// - Parameter params: The raw notification parameters.
+    /// - Returns: The discriminator, or `nil` when the params do not hold an
+    ///   `update` object with a string `sessionUpdate` member.
+    private static func updateDiscriminator(namedIn params: JSONValue?) -> String? {
+        guard
+            case .object(let members) = params,
+            case .object(let update) = members[updateMemberKey],
+            case .string(let discriminator) = update[updateDiscriminatorKey]
+        else {
+            return nil
+        }
+        return discriminator
     }
 
     // MARK: - Outbound (Client → Agent)
