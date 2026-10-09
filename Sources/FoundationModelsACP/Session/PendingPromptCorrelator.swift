@@ -141,7 +141,8 @@ extension SessionUpdate {
             chunk.messageId
         case .agentMessageChunk, .agentMessage, .agentThoughtChunk, .agentThought, .toolCallUpdate,
             .toolCallContentChunk, .terminalUpdate, .terminalOutputChunk, .planUpdate, .stateUpdate,
-            .availableCommandsUpdate, .configOptionUpdate, .usageUpdate, .sessionInfoUpdate, .unknown:
+            .availableCommandsUpdate, .configOptionUpdate, .usageUpdate, .sessionInfoUpdate, .notice,
+            .compactionUpdate, .compactionSummaryChunk, .unknown:
             nil
         }
     }

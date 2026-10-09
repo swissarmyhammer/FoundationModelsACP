@@ -650,41 +650,34 @@ enum SessionMergeEngineFixtures {
     private typealias Fixtures = SessionMergeEngineFixtures
 
     /// A compaction that has a status, an error, and `_meta`.
-    private static let reportedCompactionId = Unstable.CompactionId(rawValue: "compaction-1")
+    private static let reportedCompactionId = CompactionId(rawValue: "compaction-1")
 
     /// A compaction that has only a summary chunk, and no status yet.
-    private static let unreportedCompactionId = Unstable.CompactionId(rawValue: "compaction-2")
+    private static let unreportedCompactionId = CompactionId(rawValue: "compaction-2")
 
-    /// The unstable updates that make the two compaction entries.
-    ///
-    /// - Returns: The stable session updates that carry them.
-    /// - Throws: An error when a payload does not encode.
-    private static func compactionUpdates() throws -> [SessionUpdate] {
-        let reported = Unstable.CompactionUpdate(
+    /// The session updates that make the two compaction entries.
+    private static var compactionUpdates: [SessionUpdate] {
+        let reported = CompactionUpdate(
             compactionId: reportedCompactionId,
             status: .failed,
             error: .value("Model refused"),
             meta: .value(Fixtures.traceMeta)
         )
-        let chunk = Unstable.CompactionSummaryChunk(
+        let chunk = CompactionSummaryChunk(
             compactionId: unreportedCompactionId,
             content: Fixtures.text("early")
         )
-        return [
-            try SessionUpdate(.compactionUpdate(reported)),
-            try SessionUpdate(.compactionSummaryChunk(chunk)),
-        ]
+        return [.compactionUpdate(reported), .compactionSummaryChunk(chunk)]
     }
 
     /// Makes an engine that holds one entry of each kind and a value for
     /// each state field.
     ///
     /// - Returns: The engine.
-    /// - Throws: An error when a compaction payload does not encode.
-    private static func populatedEngine() throws -> SessionMergeEngine {
+    private static func populatedEngine() -> SessionMergeEngine {
         let windowSize = 1000
         let tokensUsed = 10
-        let updates: [SessionUpdate] = try compactionUpdates() + [
+        let updates: [SessionUpdate] = compactionUpdates + [
             .userMessage(UserMessage(messageId: Fixtures.messageId, content: .value([Fixtures.text("hi")]))),
             .agentThoughtChunk(ContentChunk(content: Fixtures.text("plan"), messageId: Fixtures.otherMessageId)),
             .agentMessageChunk(
@@ -713,7 +706,7 @@ enum SessionMergeEngineFixtures {
     }
 
     @Test func aReplayAppliedToANewEngineGivesTheSameState() throws {
-        let original = try Self.populatedEngine()
+        let original = Self.populatedEngine()
         let transcriptUpdates = original.transcriptUpdates
         let stateUpdates = original.stateUpdates
         var replayed = SessionMergeEngine()
@@ -742,7 +735,7 @@ enum SessionMergeEngineFixtures {
     }
 
     @Test func aReplayedEntryKeepsItsIdentifier() throws {
-        let original = try Self.populatedEngine()
+        let original = Self.populatedEngine()
         var replayed = SessionMergeEngine()
         for update in original.transcriptUpdates {
             replayed.apply(update)
@@ -751,7 +744,7 @@ enum SessionMergeEngineFixtures {
     }
 
     @Test func theTranscriptUpdatesHoldNoStateUpdate() throws {
-        let transcript = try Self.populatedEngine().transcriptUpdates
+        let transcript = Self.populatedEngine().transcriptUpdates
         let hasStateUpdate = transcript.contains { update in
             if case .stateUpdate = update { return true }
             return false
@@ -774,7 +767,7 @@ enum SessionMergeEngineFixtures {
     }
 
     @Test func resetReturnsTheEngineToItsInitialState() throws {
-        var engine = try Self.populatedEngine()
+        var engine = Self.populatedEngine()
         engine.reset()
         #expect(engine == SessionMergeEngine())
     }

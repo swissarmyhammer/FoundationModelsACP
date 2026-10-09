@@ -182,7 +182,7 @@ import FoundationModelsACP
         #expect(Self.set.schemaPath == "Schema/acp-v2.json")
         #expect(Self.set.metaPath == "Schema/acp-v2.meta.json")
         #expect(Self.set.unstableMetaPath == "Schema/acp-v2.meta.unstable.json")
-        #expect(SchemaSet.all.map(\.versionLabel) == ["v2", "v2-unstable"])
+        #expect(SchemaSet.all.map(\.versionLabel) == ["v2"])
         // Every declared artifact of every set is actually vendored.
         for schemaSet in SchemaSet.all {
             for path in [schemaSet.schemaPath, schemaSet.metaPath, schemaSet.unstableMetaPath].compactMap({ $0 }) {
@@ -252,11 +252,41 @@ import FoundationModelsACP
                 "agentThoughtChunk", "agentThought", "stateUpdate", "toolCallContentChunk",
                 "toolCallUpdate", "terminalUpdate", "terminalOutputChunk", "planUpdate",
                 "availableCommandsUpdate", "configOptionUpdate", "sessionInfoUpdate",
-                "usageUpdate", "unknown",
+                "usageUpdate", "notice", "compactionUpdate", "compactionSummaryChunk", "unknown",
             ]
         )
         #expect(declaration.contains("case terminalUpdate(TerminalUpdate)"))
         #expect(declaration.contains("case terminalOutputChunk(TerminalOutputChunk)"))
+    }
+
+    @Test func compactionUpdateCarriesPatchFieldsAndAFold() throws {
+        // `CompactionUpdate` is stable since `schema-v2.0.0-alpha.8`, and its
+        // description gives `summary`, `error` and `_meta` patch semantics.
+        let models = try Self.modelsSource(in: Self.generateFromVendoredArtifacts())
+        #expect(
+            Self.properties(ofType: "PatchField", in: models).filter { $0.hasPrefix("CompactionUpdate.") } == [
+                "CompactionUpdate.error: PatchField<String>",
+                "CompactionUpdate.summary: PatchField<[ContentBlock]>",
+                "CompactionUpdate.meta: PatchField<JSONValue>",
+            ]
+        )
+        #expect(models.contains("    public func folded(onto existing: CompactionUpdate) -> CompactionUpdate {"))
+    }
+
+    @Test func idleStateUpdateCarriesTheStopReasonEnumAndTheErrorObject() throws {
+        // `schema-v2.0.0-alpha.8` writes the stop reasons as the variants of
+        // `IdleStateUpdate`; the `error` variant adds an `error` member.
+        let generated = try Self.generateFromVendoredArtifacts()
+        let models = try Self.modelsSource(in: generated)
+        #expect(Self.properties(ofType: "StopReason", in: models) == ["IdleStateUpdate.stopReason: StopReason?"])
+        #expect(Self.properties(ofType: "ACPError", in: models).contains("IdleStateUpdate.error: ACPError?"))
+        let unions = try Self.unionsSource(in: generated)
+        let stopReason = try #require(Self.declaration(named: "StopReason", in: unions))
+        #expect(
+            Self.caseNames(in: stopReason) == [
+                "endTurn", "maxTokens", "maxTurnRequests", "refusal", "cancelled", "error", "unknown",
+            ]
+        )
     }
 
     @Test func toolCallContentCarriesTheTerminalReference() throws {
@@ -326,8 +356,8 @@ import FoundationModelsACP
             Self.declaredTypeNames(in: unions).filter {
                 Self.declaration(named: $0, in: unions)?.contains("case unknown(String)\n") == true
             } == [
-                "DiffFileType", "DiffPatchFormat", "ElicitationSchemaType", "IconTheme",
-                "PermissionOptionKind", "PlanEntryPriority", "PlanEntryStatus", "Role",
+                "CompactionStatus", "DiffFileType", "DiffPatchFormat", "ElicitationSchemaType", "IconTheme",
+                "NoticeSeverity", "PermissionOptionKind", "PlanEntryPriority", "PlanEntryStatus", "Role",
                 "SessionConfigOptionCategory", "StopReason", "StringFormat", "ToolCallStatus",
                 "ToolKind",
             ]
@@ -540,20 +570,20 @@ import FoundationModelsACP
         // boundaries, which the byte budget makes deterministic.
         #expect(
             emitted.mapValues(\.count) == [
-                "Identifiers.generated.swift": 13,
+                "Identifiers.generated.swift": 14,
                 "MethodTable.generated.swift": 2,
                 "Models.generated.swift": 14,
                 "Models2.generated.swift": 16,
-                "Models3.generated.swift": 15,
+                "Models3.generated.swift": 14,
                 "Models4.generated.swift": 15,
                 "Models5.generated.swift": 15,
                 "Models6.generated.swift": 15,
                 "Models7.generated.swift": 13,
-                "Models8.generated.swift": 15,
-                "Models9.generated.swift": 5,
+                "Models8.generated.swift": 13,
+                "Models9.generated.swift": 12,
                 "Unions.generated.swift": 14,
                 "Unions2.generated.swift": 12,
-                "Unions3.generated.swift": 1,
+                "Unions3.generated.swift": 3,
                 "Unresolved.generated.swift": 10,
             ]
         )

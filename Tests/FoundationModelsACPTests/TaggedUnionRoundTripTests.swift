@@ -365,30 +365,32 @@ import Testing
         #expect(encoded["env"] == nil)
     }
 
-    @Test func aMalformedTerminalArgumentIsDroppedNotFatal() throws {
-        // `x-deserialize-skip-invalid-items`: one bad element must not cost
-        // the whole authentication method.
-        let method = try WireRoundTrip.decode(
-            AuthMethod.self,
-            from: """
-                {"type":"terminal","methodId":"login","name":"Log in","args":["a",1,"b"]}
-                """
-        )
-        let payload = try #require(Self.terminalPayload(of: method))
-        #expect(payload.args == ["a", "b"])
+    @Test func aMalformedTerminalArgumentFailsTheDecode() throws {
+        // `schema-v2.0.0-alpha.8` removed `x-deserialize-skip-invalid-items`
+        // from `args`, so one bad element is a decode error again, not a
+        // dropped element.
+        #expect(throws: DecodingError.self) {
+            try WireRoundTrip.decode(
+                AuthMethod.self,
+                from: """
+                    {"type":"terminal","methodId":"login","name":"Log in","args":["a",1,"b"]}
+                    """
+            )
+        }
     }
 
-    @Test func aTerminalArgumentsFieldOfTheWrongTypeDegradesToNil() throws {
-        // `x-deserialize-default-on-error`: a field that is not an array at
-        // all degrades to absent, rather than failing the message.
-        let method = try WireRoundTrip.decode(
-            AuthMethod.self,
-            from: """
-                {"type":"terminal","methodId":"login","name":"Log in","args":"notanarray"}
-                """
-        )
-        let payload = try #require(Self.terminalPayload(of: method))
-        #expect(payload.args == nil)
+    @Test func aTerminalArgumentsFieldOfTheWrongTypeFailsTheDecode() throws {
+        // `schema-v2.0.0-alpha.8` removed `x-deserialize-default-on-error`
+        // from `args`, so a field that is not an array is a decode error, not
+        // an absent field.
+        #expect(throws: DecodingError.self) {
+            try WireRoundTrip.decode(
+                AuthMethod.self,
+                from: """
+                    {"type":"terminal","methodId":"login","name":"Log in","args":"notanarray"}
+                    """
+            )
+        }
     }
 
     // MARK: - Schema access

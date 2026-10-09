@@ -296,13 +296,27 @@ import Testing
         // write wins, so the two can disagree on the wire — and the struct's
         // Swift property and the union's would disagree in memory as well.
         // Reject the shape rather than emit it.
-        for schema in [Self.valueUnionCollidingWithBaseSchema, Self.taggedPayloadUnionCollidingWithBaseSchema] {
-            let error = #expect(throws: GeneratorError.self) {
-                _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: schema)
-            }
-            // Pinned, because "it threw" would also be satisfied by the shape
-            // being rejected somewhere upstream for an unrelated reason.
-            #expect(try #require(error).description.contains("collides with a base property of the same name"))
+        let error = #expect(throws: GeneratorError.self) {
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: Self.valueUnionCollidingWithBaseSchema)
+        }
+        // Pinned, because "it threw" would also be satisfied by the shape
+        // being rejected somewhere upstream for an unrelated reason.
+        #expect(try #require(error).description.contains("collides with a base property of the same name"))
+    }
+
+    @Test func aTaggedPayloadUnionThatPinsABasePropertyFlattensOnlyOptionalMembers() throws {
+        // A union that pins `const` values on a property the object declares
+        // is the property-enum shape (`IdleStateUpdate`): the property takes
+        // an enum, and each payload member becomes an optional property. A
+        // payload that requires a member cannot flatten as optional, so the
+        // shape still fails loudly, and the error names that member.
+        #expect(
+            throws: GeneratorError.unsupportedShape(
+                context: "Change variant 0",
+                detail: "flattened payload Alpha requires x; a variant payload's members must be optional"
+            )
+        ) {
+            _ = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: Self.taggedPayloadUnionCollidingWithBaseSchema)
         }
     }
 

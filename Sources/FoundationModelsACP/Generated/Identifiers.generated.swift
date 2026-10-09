@@ -14,6 +14,19 @@ public struct AuthMethodId: WireRawValueCodable, Hashable, Sendable {
     }
 }
 
+/// Unique identifier for a context compaction within a session.
+public struct CompactionId: WireRawValueCodable, Hashable, Sendable {
+    /// The opaque identifier string as it crosses the wire.
+    public let rawValue: String
+
+    /// Creates a `CompactionId` wrapping the given wire string.
+    ///
+    /// - Parameter rawValue: The opaque identifier string.
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+}
+
 /// Unique identifier for an elicitation.
 public struct ElicitationId: WireRawValueCodable, Hashable, Sendable {
     /// The opaque identifier string as it crosses the wire.
@@ -40,7 +53,11 @@ public struct MediaType: WireRawValueCodable, Hashable, Sendable {
     }
 }
 
-/// Unique identifier for a message within a session.
+/// Identifier for a message, unique among messages of the same type within a session.
+///
+/// Each message type, such as user messages, agent messages, and agent thoughts,
+/// has its own ID space: messages of different types may share an ID and remain
+/// distinct messages.
 public struct MessageId: WireRawValueCodable, Hashable, Sendable {
     /// The opaque identifier string as it crosses the wire.
     public let rawValue: String

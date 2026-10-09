@@ -727,9 +727,9 @@ public struct AuthMethodTerminal: Codable, Hashable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.methodId = try container.decode(AuthMethodId.self, forKey: .methodId)
         self.name = try container.decode(String.self, forKey: .name)
-        self.args = container.forgivingDecodeArrayIfPresent(of: String.self, forKey: .args)
+        self.args = try container.decodeIfPresent([String].self, forKey: .args)
         self.description = container.forgivingDecodeIfPresent(String.self, forKey: .description)
-        self.env = container.forgivingDecodeArrayIfPresent(of: EnvVariable.self, forKey: .env)
+        self.env = try container.decodeIfPresent([EnvVariable].self, forKey: .env)
         self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
     }
 

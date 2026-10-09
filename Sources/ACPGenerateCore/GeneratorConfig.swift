@@ -183,7 +183,14 @@ public struct GeneratorConfig: Sendable {
         // patch prose, so it stays a plain required field. `ToolCallUpdate.name`
         // (added in `schema-v2.0.0-alpha.4`) also states the rule in its own
         // description: omission means no change, `null` clears the name.
+        // `CompactionUpdate` (stable since `schema-v2.0.0-alpha.8`) states it
+        // for three fields: "`summary`, `error`, and `_meta` have patch
+        // semantics: omission leaves the stored value unchanged, `null`
+        // clears it, and a concrete value replaces it."
+        // `CompactionSummaryChunk._meta` and `Notice._meta` say that omission
+        // and `null` both mean absent, so they stay plain optionals.
         patchSemanticsFields: [
+            "CompactionUpdate.summary", "CompactionUpdate.error", "CompactionUpdate._meta",
             "UserMessage.content", "UserMessage._meta",
             "AgentMessage.content", "AgentMessage._meta",
             "AgentThought.content", "AgentThought._meta",
@@ -195,31 +202,5 @@ public struct GeneratorConfig: Sendable {
             "ToolCallUpdate.rawOutput", "ToolCallUpdate._meta",
         ],
         manifestVersion: 2
-    )
-
-    /// Configuration for the vendored `Schema/acp-v2.unstable.json` document.
-    ///
-    /// The roots are the payloads of the unstable session updates
-    /// `compaction_update`, `compaction_summary_chunk` and `notice`. The
-    /// stable set already emits `ContentBlock`, so it is shared: a reference
-    /// to it resolves to the stable type. The renames, acronyms and
-    /// hand-written definitions are the same as in `acpV2`, so that a name
-    /// resolves to the same Swift type in both sets.
-    ///
-    /// The `CompactionUpdate` description states the patch rule for its
-    /// fields: "`summary`, `error`, and `_meta` have patch semantics:
-    /// omission leaves the stored value unchanged, `null` clears it, and a
-    /// concrete value replaces it." `CompactionSummaryChunk._meta` and
-    /// `Notice._meta` say that omission and `null` both mean absent, so they
-    /// stay plain optionals.
-    public static let acpV2Unstable = GeneratorConfig(
-        typeRenames: acpV2.typeRenames,
-        knownAcronyms: acpV2.knownAcronyms,
-        handwrittenDefinitions: acpV2.handwrittenDefinitions,
-        patchSemanticsFields: [
-            "CompactionUpdate.summary", "CompactionUpdate.error", "CompactionUpdate._meta",
-        ],
-        rootDefinitions: ["CompactionUpdate", "CompactionSummaryChunk", "Notice"],
-        sharedDefinitions: ["ContentBlock"]
     )
 }

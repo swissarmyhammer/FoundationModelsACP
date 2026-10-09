@@ -99,7 +99,7 @@ public struct SchemaGenerator: Sendable {
         var identifiers: [String] = []
         var structModels: [StructModel] = []
         var modelDeclarations: [String] = []
-        var unions: [String] = []
+        var unions: [NamedDeclaration] = []
         var placeholders: [String] = []
 
         for (name, fragment) in Self.orderedEntries(of: definitions) where emittedDefinitions.contains(name) {
@@ -112,17 +112,20 @@ public struct SchemaGenerator: Sendable {
                     Emitter.identifierNewtype(name: emittedName(name: name), documentation: documentation)
                 )
             case .scalarEnum(let rawKind):
-                unions.append(
-                    Emitter.scalarEnumDeclaration(model: try scalarEnumModel(name: name, rawKind: rawKind, fragment: fragment))
-                )
+                unions.append(NamedDeclaration(
+                    name: name,
+                    source: Emitter.scalarEnumDeclaration(model: try scalarEnumModel(name: name, rawKind: rawKind, fragment: fragment))
+                ))
             case .taggedUnion:
-                unions.append(
-                    Emitter.taggedUnionDeclaration(model: try taggedUnionModel(name: name, fragment: fragment))
-                )
+                unions.append(NamedDeclaration(
+                    name: name,
+                    source: Emitter.taggedUnionDeclaration(model: try taggedUnionModel(name: name, fragment: fragment))
+                ))
             case .discriminatedUnion:
-                unions.append(
-                    Emitter.discriminatedUnionDeclaration(model: try discriminatedUnionModel(name: name, fragment: fragment))
-                )
+                unions.append(NamedDeclaration(
+                    name: name,
+                    source: Emitter.discriminatedUnionDeclaration(model: try discriminatedUnionModel(name: name, fragment: fragment))
+                ))
             case .objectValueUnion:
                 let model = try objectValueUnionModel(name: name, fragment: fragment)
                 structModels.append(model.base)
@@ -135,6 +138,14 @@ public struct SchemaGenerator: Sendable {
                 let model = try objectScopeUnionModel(name: name, fragment: fragment, definitions: definitions)
                 structModels.append(model.base)
                 modelDeclarations.append(Emitter.objectScopeUnionDeclaration(model: model))
+            case .objectPropertyEnum:
+                let model = try objectPropertyEnumModel(name: name, fragment: fragment, definitions: definitions)
+                structModels.append(model.base)
+                modelDeclarations.append(Emitter.structDeclaration(model: model.base))
+                unions.append(NamedDeclaration(
+                    name: model.propertyEnum.name,
+                    source: Emitter.scalarEnumDeclaration(model: model.propertyEnum)
+                ))
             case .deferredUnion(let keyword):
                 placeholders.append(
                     Emitter.placeholder(
@@ -163,7 +174,7 @@ public struct SchemaGenerator: Sendable {
         var files =
             Self.declarationFiles(baseName: "Identifiers", declarations: identifiers, namespace: namespace)
             + Self.declarationFiles(baseName: "Models", declarations: modelDeclarations, namespace: namespace)
-            + Self.declarationFiles(baseName: "Unions", declarations: unions, namespace: namespace)
+            + Self.declarationFiles(baseName: "Unions", declarations: try Self.inNameOrder(unions), namespace: namespace)
             + Self.declarationFiles(baseName: "Unresolved", declarations: placeholders, namespace: namespace)
         if let metaJSON {
             files.append(
@@ -184,6 +195,35 @@ public struct SchemaGenerator: Sendable {
     }
 
     // MARK: - Declaration file sharding
+
+    /// One rendered declaration and the name that sets its place in its file.
+    private struct NamedDeclaration {
+        /// The name the declaration sorts by: the schema name of the
+        /// definition that makes it, or the emitted name of a type the
+        /// generator makes without a definition of its own.
+        let name: String
+
+        /// The rendered declaration.
+        let source: String
+    }
+
+    /// Puts declarations in name order and makes sure no two have one name.
+    ///
+    /// Most declarations come in definition-name order already. A type the
+    /// generator makes for a definition's property has its own name, so it
+    /// takes its place here instead of the place of that definition.
+    ///
+    /// - Parameter declarations: The declarations, in any order.
+    /// - Returns: The rendered declarations, sorted by name.
+    /// - Throws: `GeneratorError.unsupportedShape` when two declarations
+    ///   have the same name, because the module could not compile them.
+    private static func inNameOrder(_ declarations: [NamedDeclaration]) throws -> [String] {
+        let sorted = declarations.sorted { $0.name < $1.name }
+        for (earlier, later) in zip(sorted, sorted.dropFirst()) where earlier.name == later.name {
+            throw GeneratorError.unsupportedShape(context: later.name, detail: "two declarations have this name")
+        }
+        return sorted.map(\.source)
+    }
 
     /// The suffix every generated Swift file name carries.
     private static let generatedFileNameSuffix = ".generated.swift"
@@ -743,8 +783,8 @@ public struct SchemaGenerator: Sendable {
             return .deferredUnion(keyword: Self.anyOfKey)
         }
         let modeled = variants.filter { $0[Self.notKey] == nil }
-        if members[Self.typeKey]?.stringValue == Self.objectTypeName, members[Self.propertiesKey] != nil {
-            return try classifyObjectTypedAnyOf(name: name, modeled: modeled)
+        if members[Self.typeKey]?.stringValue == Self.objectTypeName, let properties = members[Self.propertiesKey] {
+            return try classifyObjectTypedAnyOf(name: name, properties: properties.objectValue ?? [:], modeled: modeled)
         }
         return detectAnyOfDiscriminatedUnion(variants: variants, modeled: modeled)
     }
@@ -755,9 +795,14 @@ public struct SchemaGenerator: Sendable {
     ///
     /// - Parameters:
     ///   - name: The definition's schema name.
+    ///   - properties: The definition's own declared properties.
     ///   - modeled: `variants` with `not`-guarded catch-alls filtered out.
-    /// - Returns: `.objectTaggedUnion` when every modeled variant flattens an
-    ///   `allOf` `$ref` payload and some variant pins a `const` discriminator,
+    /// - Returns: `.objectPropertyEnum` when the variants pin `const` values
+    ///   on one member and the object declares that member itself (no other
+    ///   family can model it: each one rejects a union member that collides
+    ///   with a base property), `.objectTaggedUnion` when every modeled
+    ///   variant flattens an `allOf` `$ref` payload and some variant pins a
+    ///   `const` discriminator,
     ///   `.objectScopeUnion` when every variant flattens a payload and none
     ///   pins one (the serde flattened-untagged-union shape, selected by each
     ///   payload's required members), `.objectValueUnion` when no variant
@@ -773,8 +818,15 @@ public struct SchemaGenerator: Sendable {
     ///   re-derivation (via `taggedUnionModel`'s own filtered-to-empty guard)
     ///   would catch it — the same `emptyUnionDetail` error, reached less
     ///   directly.
-    private func classifyObjectTypedAnyOf(name: String, modeled: [JSONValue]) throws -> DefinitionKind {
+    private func classifyObjectTypedAnyOf(
+        name: String,
+        properties: [String: JSONValue],
+        modeled: [JSONValue]
+    ) throws -> DefinitionKind {
         try validateNonEmptyUnion(modeled, name: name)
+        if pinsOneOfItsOwnProperties(modeled, properties: properties) {
+            return .objectPropertyEnum
+        }
         if modeled.allSatisfy({ $0[Self.allOfKey] != nil }) {
             guard modeled.contains(where: hasConstDiscriminator) else {
                 return .objectScopeUnion
@@ -831,6 +883,28 @@ public struct SchemaGenerator: Sendable {
                     .keys
             }
         )
+    }
+
+    /// Reports whether a union selects its variant by the value of one of the
+    /// object's own declared properties.
+    ///
+    /// The variants must pin `const` values on one member only, the object
+    /// must declare that member itself, and each variant must hold that
+    /// member alone (a variant can still flatten a payload with `allOf`). A
+    /// variant with a second inline member is another family's shape.
+    ///
+    /// - Parameters:
+    ///   - modeled: The union's variants without the `not` catch-alls.
+    ///   - properties: The object's own declared properties.
+    /// - Returns: `true` for the property-enum shape.
+    private func pinsOneOfItsOwnProperties(_ modeled: [JSONValue], properties: [String: JSONValue]) -> Bool {
+        let pinned = pinnedDiscriminators(of: modeled)
+        guard pinned.count == 1, let property = pinned.first, properties[property] != nil else {
+            return false
+        }
+        return modeled.allSatisfy { variant in
+            (variant[Self.propertiesKey]?.objectValue ?? [:]).keys.allSatisfy { $0 == property }
+        }
     }
 
     /// Reports whether a union variant is the schema's explicit
@@ -1142,13 +1216,11 @@ public struct SchemaGenerator: Sendable {
         guard let reference = try flattenedPayloadReference(of: variant, context: context) else {
             throw GeneratorError.unsupportedShape(context: context, detail: "expected an \(Self.allOfKey) payload \(Self.refKey)")
         }
-        let definitionName = try referencedDefinitionName(reference: reference, context: context)
-        guard let definition = definitions[definitionName] else {
-            throw GeneratorError.unsupportedShape(
-                context: context,
-                detail: "\(Self.refKey) names \(definitionName), which the schema does not define"
-            )
-        }
+        let (definitionName, definition) = try referencedDefinition(
+            reference: reference,
+            definitions: definitions,
+            context: context
+        )
         let requiredKeys = (definition[Self.requiredKey]?.arrayValue ?? []).compactMap(\.stringValue)
         guard !requiredKeys.isEmpty else {
             throw GeneratorError.unsupportedShape(
@@ -1157,6 +1229,238 @@ public struct SchemaGenerator: Sendable {
             )
         }
         return (emittedName(name: definitionName), requiredKeys)
+    }
+
+    /// Finds the definition that a `$ref` names.
+    ///
+    /// - Parameters:
+    ///   - reference: The JSON pointer (e.g. `#/$defs/SessionId`).
+    ///   - definitions: The schema's top-level definitions.
+    ///   - context: The variant's error context.
+    /// - Returns: The definition's schema name and its fragment.
+    /// - Throws: `GeneratorError.unsupportedShape` for an external reference,
+    ///   or a reference that names no definition.
+    private func referencedDefinition(
+        reference: String,
+        definitions: [String: JSONValue],
+        context: String
+    ) throws -> (name: String, fragment: JSONValue) {
+        let definitionName = try referencedDefinitionName(reference: reference, context: context)
+        guard let definition = definitions[definitionName] else {
+            throw GeneratorError.unsupportedShape(
+                context: context,
+                detail: "\(Self.refKey) names \(definitionName), which the schema does not define"
+            )
+        }
+        return (definitionName, definition)
+    }
+
+    // MARK: - Property-enum unions
+
+    /// Builds the emission model for an object definition whose union pins
+    /// `const` values on one of the object's own properties.
+    ///
+    /// The variants give the values of the property, and the generator makes
+    /// a scalar enum for them. Each `const` variant is one case. The `not`
+    /// catch-all is the `unknown` fallback the enum always has. A variant
+    /// that sets the property to `null` adds no case, because the optional
+    /// property holds "no value" already. Each member of a variant's `allOf`
+    /// payload becomes an optional property of the struct, because on the
+    /// wire it sits beside the object's own members.
+    ///
+    /// - Parameters:
+    ///   - name: The definition's schema name.
+    ///   - fragment: The definition's schema fragment.
+    ///   - definitions: The schema's top-level definitions, which resolve
+    ///     each variant's payload `$ref`.
+    /// - Returns: The property-enum model.
+    /// - Throws: `GeneratorError.unsupportedShape` when a variant neither
+    ///   pins the property nor sets it to `null`, the property is not a plain
+    ///   string, the enum's name is taken, or a payload member is not
+    ///   optional or collides with another member.
+    private func objectPropertyEnumModel(
+        name: String,
+        fragment: JSONValue,
+        definitions: [String: JSONValue]
+    ) throws -> ObjectPropertyEnumModel {
+        let base = try structModel(name: name, fragment: fragment)
+        let variants = unionVariants(of: fragment)
+        let property = try valueUnionDiscriminator(of: variants, context: name)
+        let enumName = try propertyEnumName(property: property, definitions: definitions, context: name)
+        var cases: [EnumCaseModel] = []
+        var payloadMembers: [PropertyModel] = []
+        for (index, variant) in variants.enumerated() where !leavesPropertyUnset(variant, property: property) {
+            let context = "\(name) variant \(index)"
+            let tag = try discriminatorTag(of: variant, context: context).tag
+            cases.append(EnumCaseModel(
+                wireValue: tag,
+                swiftName: try swiftCaseName(fromWire: tag, context: context),
+                documentation: description(of: variant)
+            ))
+            payloadMembers += try flattenedPayloadMembers(of: variant, definitions: definitions, context: context)
+        }
+        try validateCaseNames(names: cases.map(\.swiftName), context: name)
+        try validateFlattenedMembers(payloadMembers, by: base, context: name)
+        let baseProperties = try base.properties.map { member in
+            try member.wireName == property ? enumTyped(member, as: enumName, context: name) : member
+        }
+        return ObjectPropertyEnumModel(
+            base: StructModel(
+                name: base.name,
+                documentation: base.documentation,
+                properties: inEmissionOrder(baseProperties + payloadMembers)
+            ),
+            propertyEnum: ScalarEnumModel(
+                name: enumName,
+                documentation: "A value of the `\(property)` member of `\(base.name)`.",
+                rawKind: .string,
+                cases: cases
+            )
+        )
+    }
+
+    /// The name of the enum the generator makes for a pinned property.
+    ///
+    /// - Parameters:
+    ///   - property: The pinned property's wire name (e.g. `stopReason`).
+    ///   - definitions: The schema's top-level definitions.
+    ///   - context: The definition name for error messages.
+    /// - Returns: The UpperCamelCase type name (e.g. `StopReason`).
+    /// - Throws: `GeneratorError.unsupportedShape` when the name is not a
+    ///   plain Swift identifier, or a definition emits a type of that name.
+    private func propertyEnumName(
+        property: String,
+        definitions: [String: JSONValue],
+        context: String
+    ) throws -> String {
+        let enumName = applyKnownAcronymCasing(to: try swiftTypeName(fromWireName: property, context: context))
+        guard !definitions.keys.contains(where: { emittedName(name: $0) == enumName }) else {
+            throw GeneratorError.unsupportedShape(
+                context: context,
+                detail: "the enum for \(property) would be named \(enumName), which a definition already emits"
+            )
+        }
+        return enumName
+    }
+
+    /// Reports whether a variant is the one that gives the pinned property
+    /// no value: its only member is that property, typed `null`, and it
+    /// flattens no payload.
+    ///
+    /// - Parameters:
+    ///   - variant: The union variant fragment.
+    ///   - property: The pinned property's wire name.
+    /// - Returns: `true` for the "no value" variant.
+    private func leavesPropertyUnset(_ variant: JSONValue, property: String) -> Bool {
+        guard variant[Self.allOfKey] == nil,
+            let properties = variant[Self.propertiesKey]?.objectValue,
+            properties.count == 1
+        else {
+            return false
+        }
+        return properties[property]?[Self.typeKey]?.stringValue == Self.nullTypeName
+    }
+
+    /// The members of the payload a variant flattens, as optional properties.
+    ///
+    /// Only the variant that flattens the payload carries its members, so on
+    /// the enclosing struct each member must be optional. A payload that
+    /// requires a member, or gives one a default, states a rule that an
+    /// optional property cannot keep, so the shape fails loudly.
+    ///
+    /// - Parameters:
+    ///   - variant: The union variant fragment.
+    ///   - definitions: The schema's top-level definitions.
+    ///   - context: The variant's error context.
+    /// - Returns: The payload's property models, or none when the variant
+    ///   flattens no payload.
+    /// - Throws: `GeneratorError.unsupportedShape` when the payload cannot be
+    ///   resolved, or one of its members is not optional.
+    private func flattenedPayloadMembers(
+        of variant: JSONValue,
+        definitions: [String: JSONValue],
+        context: String
+    ) throws -> [PropertyModel] {
+        guard let reference = try flattenedPayloadReference(of: variant, context: context) else { return [] }
+        let (definitionName, definition) = try referencedDefinition(
+            reference: reference,
+            definitions: definitions,
+            context: context
+        )
+        let members = try structModel(name: definitionName, fragment: definition).properties
+        for member in members {
+            guard !member.isRequired else {
+                throw GeneratorError.unsupportedShape(
+                    context: context,
+                    detail: "flattened payload \(definitionName) requires \(member.wireName); a variant payload's members must be optional"
+                )
+            }
+            guard member.isOptional else {
+                throw GeneratorError.unsupportedShape(
+                    context: context,
+                    detail: "flattened payload \(definitionName) gives \(member.wireName) a default; a variant payload's members must be optional"
+                )
+            }
+        }
+        return members
+    }
+
+    /// Fails when a flattened payload member collides with a base property or
+    /// with a member of another variant's payload.
+    ///
+    /// The struct stores each member once, so two declarations of one wire
+    /// name would encode twice and decode into one property.
+    ///
+    /// - Parameters:
+    ///   - members: The flattened payload members of every variant.
+    ///   - base: The base struct model.
+    ///   - context: The definition name for error messages.
+    /// - Throws: `GeneratorError.unsupportedShape` naming the collision.
+    private func validateFlattenedMembers(_ members: [PropertyModel], by base: StructModel, context: String) throws {
+        try validateUnclaimed(names: members.map(\.wireName), by: base, context: context)
+        var seen: Set<String> = []
+        for member in members where !seen.insert(member.wireName).inserted {
+            throw GeneratorError.unsupportedShape(
+                context: context,
+                detail: "two variant payloads declare \(member.wireName)"
+            )
+        }
+    }
+
+    /// Retypes the pinned property with the enum the generator makes for it.
+    ///
+    /// - Parameters:
+    ///   - member: The pinned property's model from the base struct.
+    ///   - enumName: The enum's type name.
+    ///   - context: The definition name for error messages.
+    /// - Returns: The property model typed by the enum.
+    /// - Throws: `GeneratorError.unsupportedShape` when the property is not a
+    ///   plain string with no default, which the enum could not stand for.
+    private func enumTyped(_ member: PropertyModel, as enumName: String, context: String) throws -> PropertyModel {
+        guard member.typeExpression == EnumRawKind.string.swiftTypeName,
+            member.elementType == nil,
+            member.defaultExpression == nil,
+            !member.hasPatchSemantics
+        else {
+            throw GeneratorError.unsupportedShape(
+                context: context,
+                detail: "the pinned property \(member.wireName) must be a plain string with no default"
+            )
+        }
+        return PropertyModel(
+            wireName: member.wireName,
+            swiftName: member.swiftName,
+            typeExpression: enumName,
+            elementType: nil,
+            isOptional: member.isOptional,
+            isRequired: member.isRequired,
+            defaultExpression: nil,
+            defaultsToEmptyInstance: false,
+            objectDefaultMembers: nil,
+            strategy: member.strategy,
+            documentation: member.documentation,
+            hasPatchSemantics: false
+        )
     }
 
     /// Reads the internally-tagged discriminator member of a union variant.
@@ -1685,7 +1989,7 @@ public struct SchemaGenerator: Sendable {
     private func structModel(name: String, fragment: JSONValue) throws -> StructModel {
         let properties = fragment[Self.propertiesKey]?.objectValue ?? [:]
         let required = Set((fragment[Self.requiredKey]?.arrayValue ?? []).compactMap(\.stringValue))
-        var models = try Self.orderedEntries(of: properties)
+        let models = try Self.orderedEntries(of: properties)
             .map { wireName, propertyFragment in
                 try propertyModel(
                     definition: name,
@@ -1694,14 +1998,22 @@ public struct SchemaGenerator: Sendable {
                     isRequired: required.contains(wireName)
                 )
             }
-        models.sort { lhs, rhs in
-            (emissionRank(of: lhs), lhs.wireName) < (emissionRank(of: rhs), rhs.wireName)
-        }
         return StructModel(
             name: emittedName(name: name),
             documentation: description(of: fragment),
-            properties: models
+            properties: inEmissionOrder(models)
         )
+    }
+
+    /// Puts properties in emission order: required, then optional, `_meta`
+    /// last, alphabetical by wire name within each group.
+    ///
+    /// - Parameter properties: The property models, in any order.
+    /// - Returns: The property models in emission order.
+    private func inEmissionOrder(_ properties: [PropertyModel]) -> [PropertyModel] {
+        properties.sorted { lhs, rhs in
+            (emissionRank(of: lhs), lhs.wireName) < (emissionRank(of: rhs), rhs.wireName)
+        }
     }
 
     /// Orders properties required-first, optional second, `_meta` last.

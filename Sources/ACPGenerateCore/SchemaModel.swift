@@ -56,6 +56,13 @@ enum DefinitionKind {
     /// base properties.
     case objectScopeUnion
 
+    /// A `type: object` definition that also carries a top-level `anyOf`
+    /// whose variants pin `const` values on one of the object's own declared
+    /// properties. A variant can flatten one `$ref` payload beside the
+    /// object's members. Emitted as a struct whose property takes a generated
+    /// scalar enum, with each payload member as an optional property.
+    case objectPropertyEnum
+
     /// An `anyOf`/`enum` definition this generator does not model as a typed
     /// declaration; emitted as a placeholder typealias seam.
     ///
@@ -383,6 +390,23 @@ struct ObjectScopeUnionModel {
 
     /// Cases in schema order.
     let cases: [ScopeUnionCaseModel]
+}
+
+/// The emission model for an object definition whose union selects its
+/// variant by the value of one of the object's own properties.
+///
+/// The schema writes the property's values only as the variants' `const`
+/// pins, so the generator makes a scalar enum for them. The struct keeps the
+/// property, typed by that enum, and takes each variant payload's members as
+/// optional properties of its own: on the wire they sit beside the object's
+/// members, and only the variant that flattens them carries them.
+struct ObjectPropertyEnumModel {
+    /// The struct model: the base properties, the enum-typed property, and
+    /// the flattened payload members, in emission order.
+    let base: StructModel
+
+    /// The scalar enum of the property's pinned values.
+    let propertyEnum: ScalarEnumModel
 }
 
 /// The emission model for one object-struct definition.

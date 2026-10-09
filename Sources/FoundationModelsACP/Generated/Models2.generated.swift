@@ -521,6 +521,157 @@ public struct CommandPermissionSubject: Codable, Hashable, Sendable {
     }
 }
 
+/// A content block appended to a compaction's summary. A first-seen ID creates
+/// an in-progress compaction. Chunks append in receive order.
+public struct CompactionSummaryChunk: Codable, Hashable, Sendable {
+    /// ID of the compaction whose summary receives this content.
+    public var compactionId: CompactionId
+
+    /// One content block to append.
+    public var content: ContentBlock
+
+    /// Metadata scoped to this chunk. Omission and `null` both mean absent.
+    public var meta: JSONValue?
+
+    /// Creates a `CompactionSummaryChunk`.
+    public init(
+        compactionId: CompactionId,
+        content: ContentBlock,
+        meta: JSONValue? = nil
+    ) {
+        self.compactionId = compactionId
+        self.content = content
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case compactionId
+        case content
+        case meta = "_meta"
+    }
+
+    /// Decodes a `CompactionSummaryChunk`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
+    ///   or violates a wire invariant.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.compactionId = try container.decode(CompactionId.self, forKey: .compactionId)
+        self.content = try container.decode(ContentBlock.self, forKey: .content)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `CompactionSummaryChunk`, omitting nil optional fields — never
+    /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(compactionId, forKey: .compactionId)
+        try container.encode(content, forKey: .content)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
+/// A context compaction upsert. The first notification fixes the compaction's
+/// timeline position. Later updates with the same ID patch that entity in place.
+///
+/// `summary`, `error`, and `_meta` have patch semantics: omission leaves the
+/// stored value unchanged, `null` clears it, and a concrete value replaces it.
+/// `summary: []` also clears the summary.
+public struct CompactionUpdate: Codable, Hashable, Sendable {
+    /// The Agent-owned ID of this compaction, unique within the session.
+    public var compactionId: CompactionId
+
+    /// Current lifecycle status.
+    public var status: CompactionStatus
+
+    /// Human-readable error details for the compaction.
+    public var error: PatchField<String>
+
+    /// Complete replacement user-displayable summary content for the compaction.
+    public var summary: PatchField<[ContentBlock]>
+
+    /// Extensible metadata patch for this compaction.
+    public var meta: PatchField<JSONValue>
+
+    /// Creates a `CompactionUpdate`.
+    public init(
+        compactionId: CompactionId,
+        status: CompactionStatus,
+        error: PatchField<String> = .unchanged,
+        summary: PatchField<[ContentBlock]> = .unchanged,
+        meta: PatchField<JSONValue> = .unchanged
+    ) {
+        self.compactionId = compactionId
+        self.status = status
+        self.error = error
+        self.summary = summary
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case compactionId
+        case status
+        case error
+        case summary
+        case meta = "_meta"
+    }
+
+    /// Decodes a `CompactionUpdate`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
+    ///   or violates a wire invariant.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.compactionId = try container.decode(CompactionId.self, forKey: .compactionId)
+        self.status = try container.decode(CompactionStatus.self, forKey: .status)
+        self.error = container.forgivingDecodePatchField(String.self, forKey: .error)
+        self.summary = container.forgivingDecodePatchArray(of: ContentBlock.self, forKey: .summary)
+        self.meta = container.forgivingDecodePatchField(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `CompactionUpdate`, omitting nil optional fields — never
+    /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// A patch-semantics field is the exception: `.cleared` writes an
+    /// explicit `null` rather than omitting the key, since here `null` is
+    /// itself the clear signal, not a stand-in for absence.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(compactionId, forKey: .compactionId)
+        try container.encode(status, forKey: .status)
+        try container.encodePatch(error, forKey: .error)
+        try container.encodePatch(summary, forKey: .summary)
+        try container.encodePatch(meta, forKey: .meta)
+    }
+
+    /// Folds this update onto a value that earlier updates made.
+    ///
+    /// A field with patch semantics keeps the earlier value when this
+    /// update omits it. Each other field takes the value in this update.
+    ///
+    /// - Parameter existing: The value that earlier updates made.
+    /// - Returns: The value after this update.
+    public func folded(onto existing: CompactionUpdate) -> CompactionUpdate {
+        CompactionUpdate(
+            compactionId: compactionId,
+            status: status,
+            error: error.folded(onto: existing.error),
+            summary: summary.folded(onto: existing.summary),
+            meta: meta.folded(onto: existing.meta)
+        )
+    }
+}
+
 /// Notification sent by the agent when a URL-based elicitation is complete.
 public struct CompleteElicitationNotification: Codable, Hashable, Sendable {
     /// The ID of the elicitation that completed.
@@ -788,188 +939,6 @@ public struct Cost: Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(amount, forKey: .amount)
         try container.encode(currency, forKey: .currency)
-        try container.encodeIfPresent(meta, forKey: .meta)
-    }
-}
-
-/// Request from the agent to elicit structured user input.
-///
-/// The agent sends this to the client to request information from the user,
-/// either via a form or by directing them to a URL.
-/// Elicitations are tied to a session (optionally a tool call) or a request.
-public struct CreateElicitationRequest: Codable, Hashable, Sendable {
-    /// The variant payload, selected by the `mode` discriminator.
-    public enum Payload: Codable, Hashable, Sendable {
-        /// Form-based elicitation where the client renders a form from the provided schema.
-        case form(ElicitationFormMode)
-
-        /// URL-based elicitation where the client directs the user to a URL.
-        case url(ElicitationUrlMode)
-
-        /// An unrecognized `mode` value, captured alongside the members
-        /// of the object that no other property owns, so a variant this revision
-        /// does not list decodes without error and re-encodes unchanged.
-        ///
-        /// The payload holds neither `mode` nor any member declared
-        /// beside this union: those have their own storage, and a second copy
-        /// here would win on re-encode. Encoding a payload that declares one is
-        /// an `EncodingError`.
-        case unknown(String, JSONValue)
-
-        private enum CodingKeys: String, CodingKey {
-            case mode
-        }
-
-        private enum Tag: String {
-            case form = "form"
-            case url = "url"
-        }
-
-        private static let excludedMembers = ["mode", "message", "_meta"]
-
-        /// Decodes by the `mode` discriminator, routing
-        /// unrecognized values to `.unknown`.
-        ///
-        /// - Parameter decoder: The decoder positioned at the object.
-        /// - Throws: `DecodingError` when the discriminator is missing or a
-        ///   known variant's payload is malformed.
-        public init(from decoder: any Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            let discriminator = try container.decode(String.self, forKey: .mode)
-            switch Tag(rawValue: discriminator) {
-            case .form:
-                self = .form(try ElicitationFormMode(from: decoder))
-            case .url:
-                self = .url(try ElicitationUrlMode(from: decoder))
-            case nil:
-                self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
-            }
-        }
-
-        /// Encodes the `mode` discriminator, flattening the
-        /// payload's fields into the same object.
-        ///
-        /// - Parameter encoder: The encoder to write the object into.
-        /// - Throws: Rethrows any error from the underlying encoder.
-        public func encode(to encoder: any Encoder) throws {
-            var container = encoder.container(keyedBy: CodingKeys.self)
-            switch self {
-            case .form(let payload):
-                try container.encode(Tag.form.rawValue, forKey: .mode)
-                try payload.encode(to: encoder)
-            case .url(let payload):
-                try container.encode(Tag.url.rawValue, forKey: .mode)
-                try payload.encode(to: encoder)
-            case .unknown(let discriminator, let payload):
-                try container.encode(discriminator, forKey: .mode)
-                try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
-            }
-        }
-    }
-
-    /// A human-readable message describing what input is needed.
-    public var message: String
-
-    /// The variant payload, whose own members sit flattened beside this object's.
-    public var mode: Payload
-
-    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
-    ///
-    /// Optional. Omitted and `null` are equivalent and mean no metadata.
-    ///
-    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
-
-    /// Creates a `CreateElicitationRequest`.
-    public init(
-        message: String,
-        mode: Payload,
-        meta: JSONValue? = nil
-    ) {
-        self.message = message
-        self.mode = mode
-        self.meta = meta
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case message
-        case meta = "_meta"
-    }
-
-    /// Decodes a `CreateElicitationRequest`; forgiving fields degrade to their
-    /// schema defaults instead of failing the message.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a strict field is missing or mistyped.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.message = try container.decode(String.self, forKey: .message)
-        self.mode = try Payload(from: decoder)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
-    }
-
-    /// Encodes a `CreateElicitationRequest`, omitting nil optional fields.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(message, forKey: .message)
-        try mode.encode(to: encoder)
-        try container.encodeIfPresent(meta, forKey: .meta)
-    }
-}
-
-/// Request parameters for deleting an existing session from `session/list`.
-///
-/// Only available if the Agent supports the `session.delete` capability.
-public struct DeleteSessionRequest: Codable, Hashable, Sendable {
-    /// The ID of the session to delete.
-    public var sessionId: SessionId
-
-    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
-    ///
-    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
-
-    /// Creates a `DeleteSessionRequest`.
-    public init(
-        sessionId: SessionId,
-        meta: JSONValue? = nil
-    ) {
-        self.sessionId = sessionId
-        self.meta = meta
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case sessionId
-        case meta = "_meta"
-    }
-
-    /// Decodes a `DeleteSessionRequest`; forgiving fields degrade to their
-    /// schema defaults instead of failing the message.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
-    ///   or violates a wire invariant.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.sessionId = try container.decode(SessionId.self, forKey: .sessionId)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
-    }
-
-    /// Encodes a `DeleteSessionRequest`, omitting nil optional fields — never
-    /// emitting JSON null for an absent capability-gated field.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(sessionId, forKey: .sessionId)
         try container.encodeIfPresent(meta, forKey: .meta)
     }
 }

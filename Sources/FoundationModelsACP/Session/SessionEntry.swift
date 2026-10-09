@@ -31,10 +31,8 @@ public struct SessionEntry: Hashable, Sendable, Identifiable {
         /// A plan, by its `planId`.
         case plan(PlanId)
 
-        /// **UNSTABLE**
-        ///
         /// A context compaction, by its `compactionId`.
-        case compaction(Unstable.CompactionId)
+        case compaction(CompactionId)
 
         /// An entry that has no wire identifier: an unknown session update,
         /// or a plan update with unknown content and no `planId`. The value is
@@ -64,8 +62,6 @@ public struct SessionEntry: Hashable, Sendable, Identifiable {
         /// A plan. The value is the last plan update for this plan.
         case plan(PlanUpdate)
 
-        /// **UNSTABLE**
-        ///
         /// A context compaction: a mark in the transcript, with its status
         /// and its summary.
         ///
@@ -94,8 +90,6 @@ public struct SessionEntry: Hashable, Sendable, Identifiable {
         public var meta: PatchField<JSONValue> = .unchanged
     }
 
-    /// **UNSTABLE**
-    ///
     /// The merged state of one context compaction.
     ///
     /// A `compaction_update` folds onto this state with the patch rules. A
@@ -107,20 +101,20 @@ public struct SessionEntry: Hashable, Sendable, Identifiable {
         /// The wire gives no status for this state, so the engine uses the
         /// `.unknown` case with the wire value `_unreported`.
         ///
-        /// The value begins with `_` because the unstable schema keeps each
+        /// The value begins with `_` because the schema keeps each
         /// `CompactionStatus` value that begins with `_` for
         /// implementation-specific extensions. A value that does not begin
         /// with `_` is kept for a future ACP status, so this library must not
         /// send one. The value encodes and decodes without change, so a
         /// replay keeps it.
-        public static let unreportedStatus = Unstable.CompactionStatus.unknown("_unreported")
+        public static let unreportedStatus = CompactionStatus.unknown("_unreported")
 
         /// The identifier of the compaction.
-        public var compactionId: Unstable.CompactionId
+        public var compactionId: CompactionId
 
         /// The status from the last `compaction_update`, or
         /// ``unreportedStatus`` before the first one.
-        public var status: Unstable.CompactionStatus
+        public var status: CompactionStatus
 
         /// The summary that the compaction keeps. An update with a summary
         /// replaces it, `null` or an empty list clears it, and a chunk
@@ -214,7 +208,7 @@ extension SessionEntry.Compaction {
     /// Makes the state of a compaction that no update has changed yet.
     ///
     /// - Parameter compactionId: The identifier of the compaction.
-    internal init(compactionId: Unstable.CompactionId) {
+    internal init(compactionId: CompactionId) {
         self.init(compactionId: compactionId, status: Self.unreportedStatus)
     }
 
@@ -223,8 +217,8 @@ extension SessionEntry.Compaction {
     ///
     /// An empty summary is omitted, because an empty compaction also has an
     /// empty summary.
-    private var asUpdate: Unstable.CompactionUpdate {
-        Unstable.CompactionUpdate(
+    private var asUpdate: CompactionUpdate {
+        CompactionUpdate(
             compactionId: compactionId,
             status: status,
             error: error,
@@ -234,13 +228,13 @@ extension SessionEntry.Compaction {
     }
 
     /// Folds a `compaction_update` onto this compaction with the generated
-    /// `Unstable.CompactionUpdate.folded(onto:)`.
+    /// `CompactionUpdate.folded(onto:)`.
     ///
     /// An omitted field does not change. `null` clears the field. A
     /// `summary` of `[]` also clears the summary.
     ///
     /// - Parameter update: The compaction update.
-    internal mutating func apply(_ update: Unstable.CompactionUpdate) {
+    internal mutating func apply(_ update: CompactionUpdate) {
         let merged = update.folded(onto: asUpdate)
         status = merged.status
         summary = merged.summary.resolved(onto: [])
@@ -252,22 +246,15 @@ extension SessionEntry.Compaction {
     /// that has `_meta` replaces the `_meta` of the compaction.
     ///
     /// - Parameter chunk: The summary chunk.
-    internal mutating func append(_ chunk: Unstable.CompactionSummaryChunk) {
+    internal mutating func append(_ chunk: CompactionSummaryChunk) {
         summary.append(chunk.content)
         meta = PatchField(optional: chunk.meta).folded(onto: meta)
     }
 
-    /// The one stable session update that carries this compaction as a
+    /// The one session update that carries this compaction as a
     /// `compaction_update`.
-    ///
-    /// Each value in a compaction came from a decoded JSON payload, so the
-    /// encode cannot fail. A failure is a defect in this type.
     fileprivate var replayUpdate: SessionUpdate {
-        do {
-            return try SessionUpdate(.compactionUpdate(asUpdate))
-        } catch {
-            preconditionFailure("The compaction \(compactionId) does not encode: \(error)")
-        }
+        .compactionUpdate(asUpdate)
     }
 }
 

@@ -535,21 +535,24 @@ private let standardTestTimeout = 1  // minute
         return try! JSONDecoder().decode(JSONValue.self, from: try! Data(contentsOf: url))
     }()
 
-    /// Every `const`-pinned wire value `StopReason`'s schema union declares —
-    /// derived from the vendored schema rather than hardcoded, so a revision
-    /// that adds, removes, or renames a stop reason changes what this test
-    /// covers instead of leaving it silently stale.
+    /// Every `const`-pinned `stopReason` value of `IdleStateUpdate`'s schema
+    /// union — derived from the vendored schema rather than hardcoded, so a
+    /// revision that adds, removes, or renames a stop reason changes what
+    /// this test covers instead of leaving it silently stale.
+    ///
+    /// The schema has no `StopReason` definition: each stop reason is one
+    /// variant of `IdleStateUpdate` that pins `stopReason` to its value.
     ///
     /// - Returns: The declared wire values, in schema order.
     /// - Throws: A test failure when the definition declares no union.
     private static func declaredStopReasonTags() throws -> [String] {
-        let variants = try #require(schema["$defs"]?["StopReason"]?["anyOf"])
+        let variants = try #require(schema["$defs"]?["IdleStateUpdate"]?["anyOf"])
         guard case .array(let entries) = variants else {
-            Issue.record("StopReason has no anyOf array")
+            Issue.record("IdleStateUpdate has no anyOf array")
             return []
         }
         return entries.compactMap { entry -> String? in
-            guard case .string(let tag)? = entry["const"] else { return nil }
+            guard case .string(let tag)? = entry["properties"]?["stopReason"]?["const"] else { return nil }
             return tag
         }
     }

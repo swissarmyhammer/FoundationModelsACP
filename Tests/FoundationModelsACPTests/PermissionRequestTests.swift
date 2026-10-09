@@ -95,7 +95,7 @@ import Testing
 
     // MARK: - Elicitation is a stable sibling, not this suite's subject
     //
-    // The vendored `schema-v2.0.0-alpha.7` holds elicitation on the stable
+    // The vendored `schema-v2.0.0-alpha.8` holds elicitation on the stable
     // client surface: `elicitation/create` routes beside
     // `session/request_permission` as the other long-lived, human-gated
     // request, and `ElicitationLifecycleTests` covers its lifecycle the way

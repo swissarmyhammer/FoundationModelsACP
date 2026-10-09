@@ -135,6 +135,74 @@ public enum AvailableCommandInput: Codable, Hashable, Sendable {
     }
 }
 
+/// Lifecycle state of a context compaction.
+public enum CompactionStatus: Codable, Hashable, Sendable {
+    /// Compaction has started and has not finished.
+    case inProgress
+
+    /// Compaction finished successfully.
+    case completed
+
+    /// Compaction finished unsuccessfully.
+    case failed
+
+    /// Compaction was cancelled before it finished.
+    case cancelled
+
+    /// An unrecognized wire value, captured verbatim so a newer peer's
+    /// value decodes without error and re-encodes unchanged.
+    case unknown(String)
+
+    private enum Tag: String {
+        case inProgress = "in_progress"
+        case completed = "completed"
+        case failed = "failed"
+        case cancelled = "cancelled"
+    }
+
+    /// The value as it crosses the wire.
+    public var wireValue: String {
+        switch self {
+        case .inProgress: Tag.inProgress.rawValue
+        case .completed: Tag.completed.rawValue
+        case .failed: Tag.failed.rawValue
+        case .cancelled: Tag.cancelled.rawValue
+        case .unknown(let value): value
+        }
+    }
+
+    /// Creates the case matching a wire value, routing unrecognized
+    /// values to `.unknown`.
+    ///
+    /// - Parameter wireValue: The value as it crosses the wire.
+    public init(wireValue: String) {
+        switch wireValue {
+        case Tag.inProgress.rawValue: self = .inProgress
+        case Tag.completed.rawValue: self = .completed
+        case Tag.failed.rawValue: self = .failed
+        case Tag.cancelled.rawValue: self = .cancelled
+        default: self = .unknown(wireValue)
+        }
+    }
+
+    /// Decodes the wire value, never failing on unrecognized values.
+    ///
+    /// - Parameter decoder: The decoder positioned at the value.
+    /// - Throws: `DecodingError` when the wire value is not a String.
+    public init(from decoder: any Decoder) throws {
+        self.init(wireValue: try decoder.singleValueContainer().decode(String.self))
+    }
+
+    /// Encodes the wire value; `.unknown` re-emits the value it captured.
+    ///
+    /// - Parameter encoder: The encoder to write the value into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(wireValue)
+    }
+}
+
 /// Content blocks represent displayable information in the Agent Client Protocol.
 ///
 /// They provide a structured way to handle various types of user-facing content—whether
@@ -828,6 +896,68 @@ public enum MultiSelectItems: Codable, Hashable, Sendable {
     }
 }
 
+/// Severity hint for a session notice.
+public enum NoticeSeverity: Codable, Hashable, Sendable {
+    /// Informational notice.
+    case info
+
+    /// Warning notice.
+    case warning
+
+    /// Error notice.
+    case error
+
+    /// An unrecognized wire value, captured verbatim so a newer peer's
+    /// value decodes without error and re-encodes unchanged.
+    case unknown(String)
+
+    private enum Tag: String {
+        case info = "info"
+        case warning = "warning"
+        case error = "error"
+    }
+
+    /// The value as it crosses the wire.
+    public var wireValue: String {
+        switch self {
+        case .info: Tag.info.rawValue
+        case .warning: Tag.warning.rawValue
+        case .error: Tag.error.rawValue
+        case .unknown(let value): value
+        }
+    }
+
+    /// Creates the case matching a wire value, routing unrecognized
+    /// values to `.unknown`.
+    ///
+    /// - Parameter wireValue: The value as it crosses the wire.
+    public init(wireValue: String) {
+        switch wireValue {
+        case Tag.info.rawValue: self = .info
+        case Tag.warning.rawValue: self = .warning
+        case Tag.error.rawValue: self = .error
+        default: self = .unknown(wireValue)
+        }
+    }
+
+    /// Decodes the wire value, never failing on unrecognized values.
+    ///
+    /// - Parameter decoder: The decoder positioned at the value.
+    /// - Throws: `DecodingError` when the wire value is not a String.
+    public init(from decoder: any Decoder) throws {
+        self.init(wireValue: try decoder.singleValueContainer().decode(String.self))
+    }
+
+    /// Encodes the wire value; `.unknown` re-emits the value it captured.
+    ///
+    /// - Parameter encoder: The encoder to write the value into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(wireValue)
+    }
+}
+
 /// The type of permission option being presented to the user.
 ///
 /// Helps clients choose appropriate icons and UI treatment.
@@ -876,143 +1006,6 @@ public enum PermissionOptionKind: Codable, Hashable, Sendable {
         case Tag.allowAlways.rawValue: self = .allowAlways
         case Tag.rejectOnce.rawValue: self = .rejectOnce
         case Tag.rejectAlways.rawValue: self = .rejectAlways
-        default: self = .unknown(wireValue)
-        }
-    }
-
-    /// Decodes the wire value, never failing on unrecognized values.
-    ///
-    /// - Parameter decoder: The decoder positioned at the value.
-    /// - Throws: `DecodingError` when the wire value is not a String.
-    public init(from decoder: any Decoder) throws {
-        self.init(wireValue: try decoder.singleValueContainer().decode(String.self))
-    }
-
-    /// Encodes the wire value; `.unknown` re-emits the value it captured.
-    ///
-    /// - Parameter encoder: The encoder to write the value into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(wireValue)
-    }
-}
-
-/// Priority levels for plan entries.
-///
-/// Used to indicate the relative importance or urgency of different
-/// tasks in the execution plan.
-/// See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/v2/agent-plan#plan-entries)
-public enum PlanEntryPriority: Codable, Hashable, Sendable {
-    /// High priority task - critical to the overall goal.
-    case high
-
-    /// Medium priority task - important but not critical.
-    case medium
-
-    /// Low priority task - nice to have but not essential.
-    case low
-
-    /// An unrecognized wire value, captured verbatim so a newer peer's
-    /// value decodes without error and re-encodes unchanged.
-    case unknown(String)
-
-    private enum Tag: String {
-        case high = "high"
-        case medium = "medium"
-        case low = "low"
-    }
-
-    /// The value as it crosses the wire.
-    public var wireValue: String {
-        switch self {
-        case .high: Tag.high.rawValue
-        case .medium: Tag.medium.rawValue
-        case .low: Tag.low.rawValue
-        case .unknown(let value): value
-        }
-    }
-
-    /// Creates the case matching a wire value, routing unrecognized
-    /// values to `.unknown`.
-    ///
-    /// - Parameter wireValue: The value as it crosses the wire.
-    public init(wireValue: String) {
-        switch wireValue {
-        case Tag.high.rawValue: self = .high
-        case Tag.medium.rawValue: self = .medium
-        case Tag.low.rawValue: self = .low
-        default: self = .unknown(wireValue)
-        }
-    }
-
-    /// Decodes the wire value, never failing on unrecognized values.
-    ///
-    /// - Parameter decoder: The decoder positioned at the value.
-    /// - Throws: `DecodingError` when the wire value is not a String.
-    public init(from decoder: any Decoder) throws {
-        self.init(wireValue: try decoder.singleValueContainer().decode(String.self))
-    }
-
-    /// Encodes the wire value; `.unknown` re-emits the value it captured.
-    ///
-    /// - Parameter encoder: The encoder to write the value into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(wireValue)
-    }
-}
-
-/// Status of a plan entry in the execution flow.
-///
-/// Tracks the lifecycle of each task from planning through completion.
-/// See protocol docs: [Plan Entries](https://agentclientprotocol.com/protocol/v2/agent-plan#plan-entries)
-public enum PlanEntryStatus: Codable, Hashable, Sendable {
-    /// The task has not started yet.
-    case pending
-
-    /// The task is currently being worked on.
-    case inProgress
-
-    /// The task has been successfully completed.
-    case completed
-
-    /// The task was cancelled before it completed.
-    case cancelled
-
-    /// An unrecognized wire value, captured verbatim so a newer peer's
-    /// value decodes without error and re-encodes unchanged.
-    case unknown(String)
-
-    private enum Tag: String {
-        case pending = "pending"
-        case inProgress = "in_progress"
-        case completed = "completed"
-        case cancelled = "cancelled"
-    }
-
-    /// The value as it crosses the wire.
-    public var wireValue: String {
-        switch self {
-        case .pending: Tag.pending.rawValue
-        case .inProgress: Tag.inProgress.rawValue
-        case .completed: Tag.completed.rawValue
-        case .cancelled: Tag.cancelled.rawValue
-        case .unknown(let value): value
-        }
-    }
-
-    /// Creates the case matching a wire value, routing unrecognized
-    /// values to `.unknown`.
-    ///
-    /// - Parameter wireValue: The value as it crosses the wire.
-    public init(wireValue: String) {
-        switch wireValue {
-        case Tag.pending.rawValue: self = .pending
-        case Tag.inProgress.rawValue: self = .inProgress
-        case Tag.completed.rawValue: self = .completed
-        case Tag.cancelled.rawValue: self = .cancelled
         default: self = .unknown(wireValue)
         }
     }
