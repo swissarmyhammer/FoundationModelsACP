@@ -333,8 +333,15 @@ public final class AgentSideConnection: Sendable {
     /// Call it before you defer other work, because deferred work runs in the
     /// order of registration. If the handler throws after this call, the
     /// echo goes out after the error response. Thus, do the checks
-    /// that can fail (for example, an unknown session) before this call. If
-    /// the connection closes before the echo goes out, the connection logs
+    /// that can fail (for example, an unknown session) before this call.
+    ///
+    /// After this call, the prompt is accepted. A `$/cancel_request` that
+    /// cancels the handler after this call does not give a `-32800` error:
+    /// the connection sends a success response that names the returned
+    /// identifier, and then the echo. The deferred work of the request does
+    /// not see that cancellation.
+    ///
+    /// If the connection closes before the echo goes out, the connection logs
     /// the failure. A call from a task that the handler started, after the
     /// deferred work of the request started to run, does not send the echo:
     /// the connection drops it and logs a warning, as
@@ -390,8 +397,9 @@ public final class AgentSideConnection: Sendable {
         insert(request, messageId: messageId) { history.apply($0) }
     }
 
-    /// Makes the `user_message` echo of a prompt, gives it to `record`, and
-    /// sends it after the response to the current request.
+    /// Makes the `user_message` echo of a prompt, gives it to `record`,
+    /// accepts the current request, and sends the echo after the response to
+    /// the current request.
     ///
     /// - Parameters:
     ///   - request: The prompt request.
@@ -410,18 +418,24 @@ public final class AgentSideConnection: Sendable {
             update: .userMessage(UserMessage(messageId: insertedId, content: .value(request.prompt)))
         )
         record(echo.update)
-        sendAfterCurrentResponse(echo)
+        acceptPrompt(naming: insertedId, echoing: echo)
         return insertedId
     }
 
-    /// Sends a `user_message` echo after the response to the current request.
+    /// Accepts the current request with a response that names the inserted
+    /// message, and sends a `user_message` echo after that response.
+    ///
+    /// After this call, a cancellation of the handler does not give a
+    /// `-32800` error: the connection sends the accepted response.
     ///
     /// With no current request, the echo cannot follow a response. This is
     /// an error of the caller: the method stops a debug build, logs the
     /// error, and does not send the echo.
     ///
-    /// - Parameter echo: The echo notification.
-    private func sendAfterCurrentResponse(_ echo: UpdateSessionNotification) {
+    /// - Parameters:
+    ///   - messageId: The identifier of the inserted user message.
+    ///   - echo: The echo notification.
+    private func acceptPrompt(naming messageId: MessageId, echoing echo: UpdateSessionNotification) {
         guard let hooks = Connection.currentResponseHooks else {
             assertionFailure("insertUserMessage must run in the handler of a request")
             logger.log(
@@ -430,12 +444,34 @@ public final class AgentSideConnection: Sendable {
             )
             return
         }
+        accept(PromptResponse(messageId: messageId), in: hooks)
         hooks.append { [self] in
             do {
                 try await sessionUpdate(echo)
             } catch {
                 logger.log(Self.logPrefix + "the user_message echo was not sent: \(error)")
             }
+        }
+    }
+
+    /// Records `response` as the accepted result of the current request.
+    ///
+    /// A `PromptResponse` always encodes. If it does not, the method stops a
+    /// debug build and logs the error. Then a cancellation of the handler
+    /// gives the `-32800` error, as before this method.
+    ///
+    /// - Parameters:
+    ///   - response: The response that names the inserted user message.
+    ///   - hooks: The collector of the current request.
+    private func accept(_ response: PromptResponse, in hooks: ResponseHooks) {
+        do {
+            hooks.accept(try JSONValue.encode(result: response))
+        } catch {
+            assertionFailure("a PromptResponse did not encode: \(error)")
+            logger.log(
+                Self.logPrefix + "the prompt response did not encode, "
+                    + "so a cancellation of the handler gives -32800: \(error)"
+            )
         }
     }
 }

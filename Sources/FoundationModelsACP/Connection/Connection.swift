@@ -76,6 +76,11 @@ final class ResponseHooks: Sendable {
     /// it.
     private let requestId: RequestId
 
+    /// The success result that the handler accepted before it returned, or
+    /// `nil` when the handler accepted no result. A cancellation after this
+    /// point does not change the response (see `settle(_:)`).
+    private let acceptedResult = Mutex<JSONValue?>(nil)
+
     /// Makes an empty collector for one inbound request.
     ///
     /// - Parameters:
@@ -148,6 +153,37 @@ final class ResponseHooks: Sendable {
         for onDiscard in discardHandlers {
             onDiscard()
         }
+    }
+
+    /// Records the success result of the request before the handler returns.
+    ///
+    /// Call this when the handler did work that the peer must learn about,
+    /// also when a cancellation stops the handler later. For example,
+    /// `AgentSideConnection.insertUserMessage` calls it, because the user
+    /// message is in the conversation after that call, and the
+    /// `session/prompt` response must name it. A second call replaces the
+    /// result of the first call.
+    ///
+    /// - Parameter result: The `result` value of the success response.
+    func accept(_ result: JSONValue) {
+        acceptedResult.withLock { $0 = result }
+    }
+
+    /// Gives the outcome that the connection sends for the request.
+    ///
+    /// When the handler was cancelled (`-32800`) after it accepted a result
+    /// with `accept(_:)`, the connection sends that result. Every other
+    /// outcome stays as it is.
+    ///
+    /// - Parameter outcome: The outcome of the handler.
+    /// - Returns: The outcome to send.
+    func settle(_ outcome: Result<JSONValue, RequestError>) -> Result<JSONValue, RequestError> {
+        guard case .failure(let error) = outcome, error.code == .requestCancelled,
+            let accepted = acceptedResult.withLock({ $0 })
+        else {
+            return outcome
+        }
+        return .success(accepted)
     }
 
     /// Takes the registered entries and closes the collector in one lock.
@@ -840,7 +876,10 @@ public actor Connection {
     /// Runs one inbound request in its own `Task` so it never blocks the read
     /// loop, then sends the response keyed by the request's `id`. A `Task`
     /// cancelled by `$/cancel_request` answers `requestCancelled` rather than
-    /// leaving the peer unanswered.
+    /// leaving the peer unanswered — unless the handler accepted a result
+    /// first (`ResponseHooks.accept(_:)`), which the response then carries.
+    /// The deferred work of the request runs in a task that is not
+    /// cancelled.
     ///
     /// A request whose `id` collides with one already in flight is rejected
     /// with `invalidRequest` rather than dispatched: `inboundTasks` has one
@@ -881,9 +920,12 @@ public actor Connection {
             // is what makes deferred work provably follow the response
             // rather than merely being likely to.
             let hooks = ResponseHooks(logger: logger, requestId: id)
-            let outcome = await Self.$currentResponseHooks.withValue(hooks) {
-                await Self.outcome(of: handler, method: method, params: params)
-            }
+            // A handler that accepted a result keeps it after a later
+            // cancellation (`ResponseHooks.settle(_:)`).
+            let outcome = hooks.settle(
+                await Self.$currentResponseHooks.withValue(hooks) {
+                    await Self.outcome(of: handler, method: method, params: params)
+                })
             // Only run deferred hooks when a response was actually written:
             // `completeInbound` skips writing if the connection closed while
             // the handler ran, and running hooks anyway would break the
@@ -892,7 +934,13 @@ public actor Connection {
             // started keeps `hooks` through the task-local, and must not keep
             // the closures and their captured values too.
             if await self.completeInbound(id: id, outcome: outcome, batchToken: batchToken) {
-                await hooks.runAll()
+                // A `$/cancel_request` cancels this task, and it can come
+                // after the handler accepted the request. The deferred work
+                // (for example, the turn of an accepted prompt) must not see
+                // that cancellation. A new task does not inherit it. This
+                // task waits for the new task, so `closed` still waits for
+                // the deferred work.
+                await Task { await hooks.runAll() }.value
             } else {
                 hooks.discardAll()
             }

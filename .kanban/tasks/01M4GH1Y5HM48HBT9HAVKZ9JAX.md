@@ -61,8 +61,24 @@ comments:
     - evidence: swift test (root) 445 tests in 44 suites + 135 tests in 17 suites passed, 0 failed; swift test (IntegrationTests) 7 tests passed; clean rebuild of both packages: 0 warnings, 0 errors; no skip markers.
     - next: commit, then review.
   timestamp: 2026-10-09T15:28:26.262986+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m4gn88d084ctv3jv3pgkwyyt
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (dc336cb). 0 findings, 0 confirmed, 2 refuted, 56 attempted, 0 failed. 41 files reviewed. 23 files not reviewed: 18 files in .kanban/ (ignore rule), and 5 files with no validator (Schema/README.md, Schema/acp-v2.json, Schema/acp-v2.unstable.json, two .schema-hash files). Six code-hygiene Swift rules did not read six Unstable* paths, because the files were not on disk.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-09T15:42:04.192251+00:00
+- actor: claude-code
+  id: 01m4gn8rvdnj74132ah51q2rez
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — schema-v2.0.0-alpha.8 vendored; generator property-enum union stage; stable compaction and notice types; 63 files
+    - test: green — swift test 445 + 135 passed; IntegrationTests 7 passed; 0 warnings
+    - commit: dc336cb
+    - review: clean — 0 findings (56 attempted, 2 refuted)
+  timestamp: 2026-10-09T15:42:21.037309+00:00
+position_column: done
+position_ordinal: a980
 title: Re-vendor the v2 schema to get the error stop reason and the idle error object
 ---
 ## Problem
