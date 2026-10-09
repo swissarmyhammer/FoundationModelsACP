@@ -1,5 +1,4 @@
 import Foundation
-import Synchronization
 import Testing
 
 @testable import FoundationModelsACP
@@ -22,90 +21,11 @@ private let cancelledSession = StubAgent.sessionId
 /// A session that the client does not cancel.
 private let otherSession = SessionId(rawValue: "other-session")
 
-/// The option that `GatedPermissionClient` selects.
-private let allowOption = PermissionOptionId(rawValue: "allow")
-
-/// The outcome that the handler of `GatedPermissionClient` gives.
-private let selectedOutcome = RequestPermissionOutcome.selected(SelectedPermissionOutcome(optionId: allowOption))
-
-/// Makes the permission request that the agent sends for one session.
-///
-/// - Parameter sessionId: The session of the request.
-/// - Returns: The permission request.
-private func permissionRequest(for sessionId: SessionId) -> RequestPermissionRequest {
-    RequestPermissionRequest(
-        options: [PermissionOption(kind: .allowOnce, name: "Allow", optionId: allowOption)],
-        sessionId: sessionId,
-        title: "Permission needed"
-    )
-}
-
-/// A release that each waiting task gets one time. A cancellation of a
-/// waiting task does not end its wait, so a handler that waits here stands
-/// for a handler that ignores cancellation.
-private final class Gate: Sendable {
-    /// `true` after `open()`, and the tasks that wait for it.
-    private let state = Mutex<(isOpen: Bool, waiters: [CheckedContinuation<Void, Never>])>((false, []))
-
-    /// Releases each waiting task, and each task that waits later.
-    func open() {
-        let waiters = state.withLock { state in
-            state.isOpen = true
-            defer { state.waiters = [] }
-            return state.waiters
-        }
-        for waiter in waiters {
-            waiter.resume()
-        }
-    }
-
-    /// Waits until `open()` runs.
-    func wait() async {
-        await withCheckedContinuation { continuation in
-            let isOpen = state.withLock { state in
-                if !state.isOpen {
-                    state.waiters.append(continuation)
-                }
-                return state.isOpen
-            }
-            if isOpen {
-                continuation.resume()
-            }
-        }
-    }
-}
-
-/// A client whose `requestPermission(_:)` handler tells the test that it
-/// started, waits for a gate, and then selects `allowOption`.
-private struct GatedPermissionClient: Client {
-    /// Gets the session of each permission request that the handler starts.
-    let entered: AsyncStream<SessionId>.Continuation
-
-    /// Gets one value for each handler that ended.
-    let exited: AsyncStream<Void>.Continuation
-
-    /// The gate that each handler waits for.
-    let gate: Gate
-
-    func sessionUpdate(_ notification: UpdateSessionNotification) async {}
-
-    /// Waits for the gate, and then selects `allowOption`.
-    ///
-    /// - Parameter params: The permission request.
-    /// - Returns: The `selected` outcome.
-    func requestPermission(_ params: RequestPermissionRequest) async throws -> RequestPermissionResponse {
-        entered.yield(params.sessionId)
-        await gate.wait()
-        exited.yield()
-        return RequestPermissionResponse(outcome: selectedOutcome)
-    }
-
-    func createElicitation(_ params: CreateElicitationRequest) async throws -> CreateElicitationResponse {
-        throw RequestError.methodNotFound("createElicitation")
-    }
-
-    func elicitationComplete(_ notification: CompleteElicitationNotification) async {}
-}
+/// The outcome that the handler of `GatedPermissionClient` gives in this
+/// suite: it selects the one option of `RequestPermissionRequest.stub(for:)`.
+private let selectedOutcome = RequestPermissionOutcome.selected(
+    SelectedPermissionOutcome(optionId: RequestPermissionRequest.stubOptionId)
+)
 
 /// The two ends of one test connection, and the probes of the client.
 private struct PermissionHarness {
@@ -137,7 +57,9 @@ private struct PermissionHarness {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agent = await AgentSideConnection(stream: agentEnd) { _ in StubAgent() }
         let client = await ClientSideConnection(stream: LoggingTransport(underlying: clientEnd, log: log)) { _ in
-            GatedPermissionClient(entered: entered.continuation, exited: exited.continuation, gate: gate)
+            GatedPermissionClient(
+                entered: entered.continuation, exited: exited.continuation, gate: gate, outcome: selectedOutcome
+            )
         }
         return PermissionHarness(
             agent: agent, client: client, log: log, gate: gate, entered: entered.stream, exited: exited.stream
@@ -151,7 +73,7 @@ private struct PermissionHarness {
     /// - Returns: The task that gives the answer of the client.
     func sendPermissionRequest(for sessionId: SessionId) async throws -> Task<RequestPermissionResponse, any Error> {
         let agent = agent
-        let answer = Task { try await agent.requestPermission(permissionRequest(for: sessionId)) }
+        let answer = Task { try await agent.requestPermission(.stub(for: sessionId)) }
         var started = entered.makeAsyncIterator()
         #expect(try #require(await started.next()) == sessionId)
         return answer

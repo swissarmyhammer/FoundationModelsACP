@@ -3,6 +3,9 @@ import Testing
 
 @testable import FoundationModelsACP
 
+/// The time limit of the read-loop test, in minutes.
+private let readLoopTestTimeout = 1
+
 /// `session/request_permission` (plan.md M8): a stable Client request that
 /// waits on a human — `elicitation/create` is the other — restructured in v2
 /// to separate prompt copy (`title`/`description`) from structured context
@@ -105,84 +108,21 @@ import Testing
 
     // MARK: - A pending permission request must not block the read loop
 
-    /// An `Agent` implementing only what `AgentSideConnection`'s factory
-    /// requires; this suite drives `requestPermission`/`sessionUpdate`
-    /// directly through the connection rather than through a served prompt, so
-    /// none of these methods are ever actually called.
-    private struct UnusedAgent: Agent {
-        func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
-            InitializeResponse(
-                info: Implementation(name: "unused-agent", version: "0.0.0"),
-                protocolVersion: .v2,
-                capabilities: AgentCapabilities(session: SessionCapabilities())
-            )
-        }
-
-        func newSession(_ params: NewSessionRequest) async throws -> NewSessionResponse {
-            NewSessionResponse(sessionId: SessionId(rawValue: "session-1"))
-        }
-
-        func listSessions(_ params: ListSessionsRequest) async throws -> ListSessionsResponse {
-            ListSessionsResponse(sessions: [])
-        }
-
-        func resumeSession(_ params: ResumeSessionRequest) async throws -> ResumeSessionResponse {
-            ResumeSessionResponse()
-        }
-
-        func closeSession(_ params: CloseSessionRequest) async throws -> CloseSessionResponse {
-            CloseSessionResponse()
-        }
-
-        func prompt(_ params: PromptRequest) async throws -> PromptResponse {
-            PromptResponse.stubAcknowledgement
-        }
-
-        func sessionCancel(_ params: CancelSessionNotification) async {}
-    }
-
-    /// A client whose `requestPermission` suspends on a test-controlled gate
-    /// instead of answering — a stand-in for a human still looking at the
-    /// prompt, the same role `ConnectionTests.slowRequestHandlerDoesNotDelaySubsequentNotification`
-    /// gives a raw handler, but here through the real typed `Client` surface.
-    private struct GatedPermissionClient: Client {
-        /// Signaled once this handler is definitely running, so the test can
-        /// wait for it before sending more traffic.
-        let entered: AsyncStream<Void>.Continuation
-
-        /// Finishes once the test releases the pending request.
-        let gate: AsyncStream<Void>
-
-        func sessionUpdate(_ notification: UpdateSessionNotification) async {}
-
-        func requestPermission(
-            _ params: RequestPermissionRequest
-        ) async throws -> RequestPermissionResponse {
-            entered.yield(())
-            var release = gate.makeAsyncIterator()
-            _ = await release.next()
-            return RequestPermissionResponse(outcome: .cancelled)
-        }
-
-        func createElicitation(
-            _ params: CreateElicitationRequest
-        ) async throws -> CreateElicitationResponse {
-            throw RequestError.methodNotFound("createElicitation")
-        }
-
-        func elicitationComplete(_ notification: CompleteElicitationNotification) async {}
-    }
-
-    @Test(.timeLimit(.minutes(1)))
+    /// The test sends `requestPermission` and `sessionUpdate` directly from
+    /// the `StubAgent` side. The shared `GatedPermissionClient` waits for a
+    /// gate and does not answer. It stands for a human who still looks at the
+    /// prompt. `ConnectionTests.slowRequestHandlerDoesNotDelaySubsequentNotification`
+    /// gives a raw handler the same role; this test uses the typed `Client`.
+    @Test(.timeLimit(.minutes(readLoopTestTimeout)))
     func aPendingPermissionRequestDoesNotBlockAConcurrentSessionUpdate() async throws {
-        let session = SessionId(rawValue: "session-1")
-        let entered = AsyncStream<Void>.makeStream()
-        let gate = AsyncStream<Void>.makeStream()
+        let session = StubAgent.sessionId
+        let entered = AsyncStream<SessionId>.makeStream()
+        let gate = Gate()
 
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
-        let agentConn = await AgentSideConnection(stream: agentEnd) { _ in UnusedAgent() }
+        let agentConn = await AgentSideConnection(stream: agentEnd) { _ in StubAgent() }
         let client = await ClientSideConnection(stream: clientEnd) { _ in
-            GatedPermissionClient(entered: entered.continuation, gate: gate.stream)
+            GatedPermissionClient(entered: entered.continuation, gate: gate, outcome: .cancelled)
         }
         var updates = client.subscribe(to: session).updates.makeAsyncIterator()
 
@@ -190,15 +130,7 @@ import Testing
         // the gate rather than answering, so this stays pending for the rest
         // of the test until the gate is released below.
         let permission = Task {
-            try await agentConn.requestPermission(
-                RequestPermissionRequest(
-                    options: [
-                        PermissionOption(kind: .allowOnce, name: "Allow", optionId: PermissionOptionId(rawValue: "allow"))
-                    ],
-                    sessionId: session,
-                    title: "Permission needed"
-                )
-            )
+            try await agentConn.requestPermission(.stub(for: session))
         }
 
         // Wait until the client's handler is definitely running before
@@ -218,7 +150,7 @@ import Testing
 
         // Only now release the gate — the assertion above already proved the
         // request was genuinely still pending, not merely fast.
-        gate.continuation.finish()
+        gate.open()
         let response = try await permission.value
         #expect(response.outcome == .cancelled)
 

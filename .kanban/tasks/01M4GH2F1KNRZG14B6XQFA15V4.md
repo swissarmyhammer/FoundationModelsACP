@@ -43,6 +43,46 @@ comments:
     - evidence: swift test (root) 462 tests in 47 suites + 135 tests in 17 suites passed; IntegrationTests 7 passed; forced rebuild 0 warnings; PermissionCancellationTests + SessionMergeEngineCancellationTests 5 runs, 11/11 passed each run.
     - next: commit, then review.
   timestamp: 2026-10-09T21:35:47.530704+00:00
+- actor: claude-code
+  id: 01m4h9p710keekpmmwgj6rg7ra
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD; 1 finding (1 confirmed, 2 refuted) — Tests/FoundationModelsACPTests/PermissionCancellationTests.swift:80
+    - next: Remove the duplicate GatedPermissionClient test double. Reuse the gated client in PermissionRequestTests, or move it to a shared test support file. Then review again.
+  timestamp: 2026-10-09T21:39:13.056480+00:00
+- actor: claude-code
+  id: 01m4h9pghyswq4rsn3wp54sbav
+  text: |-
+    ### finish iteration 1 — findings
+    - implement: changed — PendingPermissionRequests.swift (new), ClientSideConnection.swift, SessionMergeEngine.swift, PermissionCancellationTests.swift (new), SessionMergeEngineCancellationTests.swift (new)
+    - test: green — swift test 462 + 135 passed; IntegrationTests 7 passed; 0 warnings
+    - commit: a8736dc
+    - review: findings — Tests/FoundationModelsACPTests/PermissionCancellationTests.swift:80 (reuse/reuse)
+  timestamp: 2026-10-09T21:39:22.814075+00:00
+- actor: claude-code
+  id: 01m4h9smqc0tm2rmzrja19pjge
+  text: |-
+    Picked up the reuse finding. Research:
+    - The two `GatedPermissionClient` structs differ in three points: the `entered` element (`SessionId` against `Void`), the gate (`Gate` class against `AsyncStream<Void>`), and the outcome (`selected allow` against `cancelled`). `PermissionCancellationTests` also has an `exited` probe.
+    - Other duplicate test doubles of the same kind in the two files: `PermissionRequestTests.UnusedAgent` repeats the shared `StubAgent` (PromptTestSupport.swift). The permission request literal (one `allowOnce` option "allow", title "Permission needed") is in the two files.
+    - Plan: new `PermissionTestSupport.swift` with `Gate`, one `GatedPermissionClient` (parameters: `outcome`, optional `exited`), and `RequestPermissionRequest.stub(for:)`. `PermissionRequestTests` uses `StubAgent` in place of `UnusedAgent`.
+  timestamp: 2026-10-09T21:41:05.388940+00:00
+- actor: claude-code
+  id: 01m4h9x6s6ejeb89mch7hc3wk2
+  text: |-
+    Fix for the reuse finding landed.
+    - New file `Tests/FoundationModelsACPTests/PermissionTestSupport.swift`: `Gate`, one shared `GatedPermissionClient`, and `RequestPermissionRequest.stub(for:)` with `stubOptionId`. The client has an `outcome` parameter and an optional `exited` probe (default `nil`). These are the differences between the two old structs.
+    - `PermissionCancellationTests`: the private `Gate`, `GatedPermissionClient`, `allowOption` and `permissionRequest(for:)` are removed. The harness gives `outcome: selectedOutcome`.
+    - `PermissionRequestTests`: the private `UnusedAgent` and `GatedPermissionClient` are removed. The test uses `StubAgent`, the shared client with `outcome: .cancelled`, `Gate.open()` in place of the stream `finish()`, and `.stub(for:)` in place of the request literal. The time limit is the named constant `readLoopTestTimeout`.
+    - Note: I read only the Swift-applicable parts of the validator dump. The dump is 754K characters, and most of it is tool scripts for other languages.
+  timestamp: 2026-10-09T21:43:02.182743+00:00
+- actor: claude-code
+  id: 01m4h9x8c87fcnebmr3cejr95x
+  text: |-
+    ### implement — changed
+    - evidence: 3 files — Tests/FoundationModelsACPTests/PermissionTestSupport.swift (new), Tests/FoundationModelsACPTests/PermissionCancellationTests.swift, Tests/FoundationModelsACPTests/PermissionRequestTests.swift; `swift test --filter 'PermissionCancellationTests|PermissionRequestTests'` 11 tests in 2 suites passed, 0 warnings
+    - next: /review
+  timestamp: 2026-10-09T21:43:03.816878+00:00
 position_column: doing
 position_ordinal: '8180'
 title: Add a client cancel helper that answers pending permission requests with cancelled
@@ -71,3 +111,12 @@ Also: when the agent cancels its wait for a permission, the agent sends `$/cance
 - The tests pass, and all other tests pass.
 
 #acp-lifecycle
+
+## Review Findings (2026-10-09 16:36)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 5 file(s) reviewed, 6 not reviewed.
+
+> 6 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 6 file(s)
+
+- [x] `Tests/FoundationModelsACPTests/PermissionCancellationTests.swift:80` `reuse/reuse` — The new test struct GatedPermissionClient repeats a gated permission client that already exists in PermissionRequestTests. Both wait on a gate, report the session, and select the same kind of option. Two copies of the test double can drift apart. Read PermissionRequestTests.swift:147-160. If its gated client fits, reuse it, or move it to a shared test support file. If its contract differs, add a parameter for the difference instead of a second struct.
