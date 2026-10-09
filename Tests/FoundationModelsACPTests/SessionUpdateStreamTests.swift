@@ -68,30 +68,6 @@ private func idleState(stopReason: StopReason?) -> SessionUpdate {
     .stateUpdate(.idle(IdleStateUpdate(stopReason: stopReason)))
 }
 
-/// Frames a `session/update` notification as a JSON-RPC envelope for the wire.
-///
-/// - Parameter notification: The notification to send.
-/// - Returns: The envelope value ready to write over a transport.
-/// - Throws: Rethrows any encoding failure.
-private func sessionUpdateEnvelope(_ notification: UpdateSessionNotification) throws -> JSONValue {
-    sessionUpdateEnvelope(params: try JSONValue.encode(result: notification))
-}
-
-/// Frames raw `session/update` params as a JSON-RPC envelope for the wire.
-///
-/// Use this to send params that the notification model cannot encode, for
-/// example a payload with a field of the wrong type.
-///
-/// - Parameter params: The raw notification params.
-/// - Returns: The envelope value ready to write over a transport.
-private func sessionUpdateEnvelope(params: JSONValue) -> JSONValue {
-    .object([
-        "jsonrpc": .string("2.0"),
-        "method": .string("session/update"),
-        "params": params,
-    ])
-}
-
 /// The `sessionUpdate` discriminator of a tool-call update on the wire.
 private let toolCallUpdateDiscriminator = "tool_call_update"
 
@@ -113,21 +89,6 @@ private let malformedToolCallUpdateParams = JSONValue.object([
         toolCallIdField: malformedToolCallId,
     ]),
 ])
-
-/// Frames a JSON-RPC success response keyed to a request id.
-///
-/// - Parameters:
-///   - id: The request's wire id, echoed on the response.
-///   - result: The response model to send as the result.
-/// - Returns: The response envelope ready to write over a transport.
-/// - Throws: Rethrows any encoding failure.
-private func responseEnvelope(id: JSONValue, result: some Encodable) throws -> JSONValue {
-    .object([
-        "jsonrpc": .string("2.0"),
-        "id": id,
-        "result": try JSONValue.encode(result: result),
-    ])
-}
 
 /// Frames a `session/prompt` acknowledgement keyed to a request id.
 ///
@@ -624,20 +585,6 @@ private let shortRequestTimeoutMilliseconds = 50
 /// The timeout of the request in the timeout test. The raw agent end never
 /// answers that request.
 private let shortRequestTimeout: Duration = .milliseconds(shortRequestTimeoutMilliseconds)
-
-/// Frames a JSON-RPC error response keyed to a request id.
-///
-/// - Parameters:
-///   - id: The request's wire id, echoed on the response.
-///   - error: The error to send.
-/// - Returns: The response envelope ready to write over a transport.
-private func errorEnvelope(id: JSONValue, error: RequestError) -> JSONValue {
-    .object([
-        "jsonrpc": .string("2.0"),
-        "id": id,
-        "error": error.wireValue,
-    ])
-}
 
 /// Starts `session/resume` of `sessionOne` and returns its wire id, so a test
 /// can script the replay and the response by hand.

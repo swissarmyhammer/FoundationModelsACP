@@ -30,6 +30,10 @@ public final class ClientSideConnection: Sendable {
     /// answer, by session. ``sessionCancel(_:)`` answers them.
     private let permissions: PendingPermissionRequests
 
+    /// The ``promptWithEcho(_:)`` calls that wait for their response or for
+    /// their `user_message` echo.
+    private let promptEchoes: PendingPromptEchoes
+
     /// Creates the connection, wires the factory's client, and starts serving.
     ///
     /// The factory receives this connection so the client it builds can capture
@@ -57,6 +61,7 @@ public final class ClientSideConnection: Sendable {
         // initialization-cycle break the core relies on.
         let router = SessionUpdateRouter(limits: bufferLimits, logger: logger)
         let permissions = PendingPermissionRequests()
+        let promptEchoes = PendingPromptEchoes()
         // The tracker gives each finished session request to the router at
         // the wire position of its response, before the caller resumes.
         let outgoingRequests = OutgoingRequestTracker { finished in router.deliver(finished) }
@@ -70,13 +75,19 @@ public final class ClientSideConnection: Sendable {
                 try await Self.serve(handler, params: params, to: client, permissions: permissions)
             },
             dispatchNotification: { handler, params, client in
-                await Self.serveNotification(handler, params: params, to: client, router: router, logger: logger)
+                await Self.serveNotification(
+                    handler, params: params, to: client, router: router, promptEchoes: promptEchoes, logger: logger
+                )
             },
-            onClose: { router.finishAll() },
+            onClose: {
+                router.finishAll()
+                promptEchoes.finishAll()
+            },
             outgoingRequests: outgoingRequests
         )
         self.router = router
         self.permissions = permissions
+        self.promptEchoes = promptEchoes
         core.setRole(factory(self))
     }
 
@@ -227,17 +238,21 @@ public final class ClientSideConnection: Sendable {
     ///   - params: The raw notification parameters.
     ///   - client: The client to serve.
     ///   - router: The per-session update router to fan the notification into.
+    ///   - promptEchoes: The prompts that wait for their `user_message` echo.
     ///   - logger: The connection logger.
     private static func serveNotification(
         _ handler: String,
         params: JSONValue?,
         to client: any Client,
         router: SessionUpdateRouter,
+        promptEchoes: PendingPromptEchoes,
         logger: ACPLogger
     ) async {
         switch handler {
         case "sessionUpdate":
-            await serveSessionUpdate(handler, params: params, to: client, router: router, logger: logger)
+            await serveSessionUpdate(
+                handler, params: params, to: client, router: router, promptEchoes: promptEchoes, logger: logger
+            )
         case "elicitationComplete":
             guard
                 let notification = try? JSONValue.decodeParams(CompleteElicitationNotification.self, from: params)
@@ -260,17 +275,23 @@ public final class ClientSideConnection: Sendable {
     /// hold a string `sessionId`), the `sessionUpdate` discriminator, and the
     /// decoding error, so that a schema difference with the agent is visible.
     ///
+    /// A decoded update goes to the session streams first, and then to the
+    /// ``promptWithEcho(_:)`` calls of its session. Thus, when a call returns
+    /// an echo, the session streams already have the echo.
+    ///
     /// - Parameters:
     ///   - handler: The routing table's handler name for the notification.
     ///   - params: The raw notification parameters.
     ///   - client: The client to serve.
     ///   - router: The per-session update router to fan the notification into.
+    ///   - promptEchoes: The prompts that wait for their `user_message` echo.
     ///   - logger: The connection logger.
     private static func serveSessionUpdate(
         _ handler: String,
         params: JSONValue?,
         to client: any Client,
         router: SessionUpdateRouter,
+        promptEchoes: PendingPromptEchoes,
         logger: ACPLogger
     ) async {
         let notification: UpdateSessionNotification
@@ -281,6 +302,7 @@ public final class ClientSideConnection: Sendable {
             return
         }
         router.deliver(notification)
+        promptEchoes.observe(notification)
         await client.sessionUpdate(notification)
     }
 
@@ -395,6 +417,47 @@ public final class ClientSideConnection: Sendable {
     ///   disconnect.
     public func prompt(_ params: PromptRequest) async throws -> PromptResponse {
         try await core.call("prompt", params, returning: PromptResponse.self)
+    }
+
+    /// Runs one prompt turn on the agent, and waits for the echo of the user
+    /// message that the agent inserted for the prompt.
+    ///
+    /// The agent gives the inserted user message a `messageId`. The response
+    /// names it, and the agent sends the message as a `user_message` (or
+    /// `user_message_chunk`) update: the echo. The spec says that a client
+    /// must accept the echo before or after the response. This method does
+    /// that for you, with one ``PendingPromptCorrelator`` for each session: it
+    /// returns when it has the response and the first echo update of the
+    /// message, in either arrival order.
+    ///
+    /// An echo of a different message, or an echo in a different session,
+    /// does not complete the call. The echo still goes to ``subscribe(to:)``
+    /// and to ``Client/sessionUpdate(_:)`` as usual, before this method
+    /// returns it.
+    ///
+    /// The `requestTimeout` of the connection applies to the request only.
+    /// The wait for the echo has no time limit. To stop the wait, cancel the
+    /// task.
+    ///
+    /// Use ``prompt(_:)`` when you do not need the echo.
+    ///
+    /// - Parameter params: The prompt request.
+    /// - Returns: The response and the echo of the user message.
+    /// - Throws: `RequestError` on a peer error, `ConnectionError` on
+    ///   disconnect (also when the connection closes before the echo arrives),
+    ///   or `CancellationError` when the task is cancelled before the echo
+    ///   arrives.
+    public func promptWithEcho(_ params: PromptRequest) async throws -> EchoedPromptResponse {
+        let ticket = promptEchoes.register(in: params.sessionId)
+        let response: PromptResponse
+        do {
+            response = try await prompt(params)
+        } catch {
+            promptEchoes.remove(ticket)
+            throw error
+        }
+        let echo = try await promptEchoes.echo(for: ticket, response: response)
+        return EchoedPromptResponse(response: response, echo: echo)
     }
 
     /// Cancels the current turn on the agent.

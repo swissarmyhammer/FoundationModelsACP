@@ -60,6 +60,14 @@ public struct PendingPromptCorrelator<LocalID: Hashable & Sendable>: Hashable, S
     /// Creates a correlator with no pending prompts.
     public init() {}
 
+    /// Tells if a pending prompt waits for its `session/prompt` response.
+    ///
+    /// While this is `true`, ``observe(_:)`` keeps each echo that no response
+    /// named yet.
+    var isAwaitingResponse: Bool {
+        !awaitingResponse.isEmpty
+    }
+
     /// Records a local prompt that the client is about to send.
     ///
     /// Call this before you send `session/prompt`. Then the correlator keeps
@@ -133,7 +141,7 @@ public struct PendingPromptCorrelator<LocalID: Hashable & Sendable>: Hashable, S
 extension SessionUpdate {
     /// The message identifier, when this update is a `user_message` or a
     /// `user_message_chunk`.
-    fileprivate var userMessageId: MessageId? {
+    var userMessageId: MessageId? {
         switch self {
         case .userMessage(let message):
             message.messageId

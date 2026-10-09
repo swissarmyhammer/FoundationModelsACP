@@ -1,7 +1,7 @@
 import Foundation
 import Synchronization
 
-import FoundationModelsACP
+@testable import FoundationModelsACP
 
 // MARK: - Diagnostic capture
 
@@ -41,6 +41,59 @@ func send(_ message: JSONValue, over transport: some ACPTransport) async throws 
 /// - Throws: Rethrows the transport-write failure.
 func sendRawLine(_ line: String, over transport: some ACPTransport) async throws {
     try await transport.write(Data((line + "\n").utf8))
+}
+
+/// Frames a `session/update` notification as a JSON-RPC envelope for the wire.
+///
+/// - Parameter notification: The notification to send.
+/// - Returns: The envelope value ready to write over a transport.
+/// - Throws: Rethrows any encoding failure.
+func sessionUpdateEnvelope(_ notification: UpdateSessionNotification) throws -> JSONValue {
+    sessionUpdateEnvelope(params: try JSONValue.encode(result: notification))
+}
+
+/// Frames raw `session/update` params as a JSON-RPC envelope for the wire.
+///
+/// Use this to send params that the notification model cannot encode, for
+/// example a payload with a field of the wrong type.
+///
+/// - Parameter params: The raw notification params.
+/// - Returns: The envelope value ready to write over a transport.
+func sessionUpdateEnvelope(params: JSONValue) -> JSONValue {
+    .object([
+        "jsonrpc": .string("2.0"),
+        "method": .string("session/update"),
+        "params": params,
+    ])
+}
+
+/// Frames a JSON-RPC success response keyed to a request id.
+///
+/// - Parameters:
+///   - id: The request's wire id, echoed on the response.
+///   - result: The response model to send as the result.
+/// - Returns: The response envelope ready to write over a transport.
+/// - Throws: Rethrows any encoding failure.
+func responseEnvelope(id: JSONValue, result: some Encodable) throws -> JSONValue {
+    .object([
+        "jsonrpc": .string("2.0"),
+        "id": id,
+        "result": try JSONValue.encode(result: result),
+    ])
+}
+
+/// Frames a JSON-RPC error response keyed to a request id.
+///
+/// - Parameters:
+///   - id: The request's wire id, echoed on the response.
+///   - error: The error to send.
+/// - Returns: The response envelope ready to write over a transport.
+func errorEnvelope(id: JSONValue, error: RequestError) -> JSONValue {
+    .object([
+        "jsonrpc": .string("2.0"),
+        "id": id,
+        "error": error.wireValue,
+    ])
 }
 
 /// Transport stub whose incoming stream and outgoing writes are both driven

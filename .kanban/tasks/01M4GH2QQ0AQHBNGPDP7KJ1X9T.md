@@ -36,8 +36,24 @@ comments:
     - evidence: swift test (root) 474 tests in 49 suites + 135 tests in 17 suites passed; IntegrationTests 7 passed; forced rebuild 0 warnings; OutboundSessionUpdateRuleTests 5 runs, 8/8 passed each run.
     - next: commit, then review.
   timestamp: 2026-10-09T22:14:00.207756+00:00
-position_column: doing
-position_ordinal: '8180'
+- actor: claude-code
+  id: 01m4hbswxgs3tmtxhkgvq29ax9
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (dd8996e). 0 findings, 0 confirmed, 1 refuted, 7 files attempted (3 reviewed, 4 .kanban files ignored by .reviewignore).
+    - next: None. The task moved to done.
+  timestamp: 2026-10-09T22:16:10.928317+00:00
+- actor: claude-code
+  id: 01m4hbt3dty878gfcdc5pgwwhf
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — SessionUpdateSendRules.swift (new), AgentSideConnection.swift, OutboundSessionUpdateRuleTests.swift (new)
+    - test: green — swift test 474 + 135 passed; IntegrationTests 7 passed; 0 warnings
+    - commit: dd8996e
+    - review: clean — 0 findings (1 refuted)
+  timestamp: 2026-10-09T22:16:17.594761+00:00
+position_column: done
+position_ordinal: ad80
 title: Validate stop reasons and usage values before they are sent
 ---
 ## Problem
