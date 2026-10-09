@@ -16,6 +16,11 @@ private enum InsertionMode: Sendable {
 
     /// The helper also applies the echo to the history of the agent.
     case recordInHistory
+
+    /// The helper makes a new message identifier. Then the handler defers
+    /// work that yields to `deferredWorkRan`, and throws
+    /// `insertionFailure`.
+    case throwAfterInsertion(deferredWorkRan: AsyncStream<Void>.Continuation)
 }
 
 /// The retained history of `InsertingAgent`. The test reads it after the
@@ -65,10 +70,19 @@ private struct InsertingAgent: Agent {
     /// Inserts the prompt as a user message, and names that message in the
     /// response.
     ///
+    /// In `InsertionMode.throwAfterInsertion`, the method defers work after
+    /// the insertion, and then throws.
+    ///
     /// - Parameter params: The prompt request.
     /// - Returns: The response that names the inserted user message.
+    /// - Throws: `insertionFailure` in `InsertionMode.throwAfterInsertion`.
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {
-        PromptResponse(messageId: insert(params))
+        let messageId = insert(params)
+        if case .throwAfterInsertion(let deferredWorkRan) = mode {
+            connection.afterRespondingToCurrentRequest { deferredWorkRan.yield() }
+            throw insertionFailure
+        }
+        return PromptResponse(messageId: messageId)
     }
 
     func sessionCancel(_ params: CancelSessionNotification) async {}
@@ -79,7 +93,7 @@ private struct InsertingAgent: Agent {
     /// - Returns: The identifier of the inserted user message.
     private func insert(_ request: PromptRequest) -> MessageId {
         switch mode {
-        case .newMessageId:
+        case .newMessageId, .throwAfterInsertion:
             connection.insertUserMessage(request)
         case .callerMessageId(let messageId):
             connection.insertUserMessage(request, messageId: messageId)
@@ -125,6 +139,16 @@ private let orderingRepetitions = 50
 
 /// The time limit of each test in this suite, in minutes.
 private let insertionTestTimeout = 1
+
+/// The error that `InsertingAgent` throws after the insertion, in
+/// `InsertionMode.throwAfterInsertion`.
+private let insertionFailure = RequestError.internalError(detail: "the prompt failed after the insertion")
+
+/// The kind that `LoggingTransport` records for a response frame.
+private let responseFrameKind = "response"
+
+/// The kind that `LoggingTransport` records for a `session/update` frame.
+private let updateFrameKind = "update"
 
 /// The agent and client connections of one test.
 private struct ConnectionPair {
@@ -232,9 +256,30 @@ private struct ConnectionPair {
             // When the client has the echo, the agent wrote both frames.
             _ = try #require(await updates.nextUpdate())
 
-            #expect(await log.events == ["response", "update"])
+            #expect(await log.events == [responseFrameKind, updateFrameKind])
             await pair.close()
         }
+    }
+
+    @Test(.timeLimit(.minutes(insertionTestTimeout)))
+    func aHandlerThatThrowsAfterTheInsertionGivesAnErrorAndNoEcho() async throws {
+        let log = EventLog()
+        let (deferredWorkRan, deferredWorkContinuation) = AsyncStream<Void>.makeStream()
+        let pair = try await connect(mode: .throwAfterInsertion(deferredWorkRan: deferredWorkContinuation)) {
+            LoggingTransport(underlying: $0, log: log)
+        }
+        await log.reset()
+
+        await #expect(throws: insertionFailure) {
+            try await pair.client.prompt(insertionPrompt)
+        }
+        // The deferred work of the handler runs after the echo would run.
+        var ran = deferredWorkRan.makeAsyncIterator()
+        _ = try #require(await ran.next())
+
+        let frameKinds = await log.events
+        #expect(frameKinds == [responseFrameKind])
+        await pair.close()
     }
 
     @Test(.timeLimit(.minutes(insertionTestTimeout)))

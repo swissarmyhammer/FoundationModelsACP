@@ -331,15 +331,18 @@ public final class AgentSideConnection: Sendable {
     /// with an assertion, logs the error, and does not send the echo.
     ///
     /// Call it before you defer other work, because deferred work runs in the
-    /// order of registration. If the handler throws after this call, the
-    /// echo goes out after the error response. Thus, do the checks
-    /// that can fail (for example, an unknown session) before this call.
+    /// order of registration.
     ///
     /// After this call, the prompt is accepted. A `$/cancel_request` that
     /// cancels the handler after this call does not give a `-32800` error:
     /// the connection sends a success response that names the returned
     /// identifier, and then the echo. The deferred work of the request does
     /// not see that cancellation.
+    ///
+    /// If the handler throws an error that is not a cancellation after this
+    /// call, the connection sends the error response and does not send the
+    /// echo. Other work that the handler deferred still runs after the error
+    /// response.
     ///
     /// If the connection closes before the echo goes out, the connection logs
     /// the failure. A call from a task that the handler started, after the
@@ -426,7 +429,8 @@ public final class AgentSideConnection: Sendable {
     /// message, and sends a `user_message` echo after that response.
     ///
     /// After this call, a cancellation of the handler does not give a
-    /// `-32800` error: the connection sends the accepted response.
+    /// `-32800` error: the connection sends the accepted response. After an
+    /// error response, the connection does not send the echo.
     ///
     /// With no current request, the echo cannot follow a response. This is
     /// an error of the caller: the method stops a debug build, logs the
@@ -445,7 +449,7 @@ public final class AgentSideConnection: Sendable {
             return
         }
         accept(PromptResponse(messageId: messageId), in: hooks)
-        hooks.append { [self] in
+        hooks.appendSuccessOnly { [self] in
             do {
                 try await sessionUpdate(echo)
             } catch {

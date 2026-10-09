@@ -43,11 +43,25 @@ final class ResponseHooks: Sendable {
         /// The handler to call when `work` will never run, or `nil` for no
         /// handler.
         let onDiscard: DiscardHandler?
+
+        /// `true` when `work` runs only after a success response. Such an
+        /// entry has no discard handler.
+        let needsSuccess: Bool
+
+        /// Tells if `work` runs after the response.
+        ///
+        /// - Parameter responseSucceeded: `true` when the response is a
+        ///   success response.
+        /// - Returns: `true` when `work` runs.
+        func runs(afterSuccess responseSucceeded: Bool) -> Bool {
+            responseSucceeded || !needsSuccess
+        }
     }
 
     /// Why the collector keeps no more closures.
     private enum ClosingReason {
-        /// `runAll()` took the closures, after the response was written.
+        /// `runAll(responseSucceeded:)` took the closures, after the response
+        /// was written.
         case ran
 
         /// `discardAll()` released the closures, because the connection
@@ -92,23 +106,12 @@ final class ResponseHooks: Sendable {
         self.requestId = requestId
     }
 
-    /// Registers one closure to run after the current response is written.
-    ///
-    /// After `runAll()` or `discardAll()`, the method does not keep the
-    /// closure. It drops the closure and logs a warning.
-    ///
-    /// - Parameter work: The deferred work, run once this request's response
-    ///   has been handed to the transport.
-    func append(_ work: @escaping Work) {
-        append(work, onDiscard: nil)
-    }
-
     /// Registers one closure to run after the current response is written,
     /// with a handler for the case where the closure will never run.
     ///
-    /// After `runAll()` or `discardAll()`, the method does not keep the
-    /// closure. It drops the closure, logs a warning, and then calls
-    /// `onDiscard` outside the lock.
+    /// After `runAll(responseSucceeded:)` or `discardAll()`, the method does
+    /// not keep the closure. It drops the closure, logs a warning, and then
+    /// calls `onDiscard` outside the lock.
     ///
     /// - Parameters:
     ///   - work: The deferred work, run once this request's response has
@@ -116,10 +119,39 @@ final class ResponseHooks: Sendable {
     ///   - onDiscard: Called exactly one time when `work` will never run, and
     ///     never when `work` runs. `nil` for no handler.
     func append(_ work: @escaping Work, onDiscard: DiscardHandler?) {
+        register(Entry(work: work, onDiscard: onDiscard, needsSuccess: false))
+    }
+
+    /// Registers one closure to run after the current response is written,
+    /// only when that response is a success response.
+    ///
+    /// When the response is an error response, `runAll(responseSucceeded:)`
+    /// releases the closure and does not run it. For example,
+    /// `AgentSideConnection.insertUserMessage` registers its `user_message`
+    /// echo with this method: a handler that throws after the insertion did
+    /// not accept the message, so the echo must not go out.
+    ///
+    /// After `runAll(responseSucceeded:)` or `discardAll()`, the method does
+    /// not keep the closure. It drops the closure and logs a warning.
+    ///
+    /// - Parameter work: The deferred work, run once this request's success
+    ///   response has been handed to the transport.
+    func appendSuccessOnly(_ work: @escaping Work) {
+        register(Entry(work: work, onDiscard: nil, needsSuccess: true))
+    }
+
+    /// Keeps one entry until the closures run or are discarded.
+    ///
+    /// After `runAll(responseSucceeded:)` or `discardAll()`, the method does
+    /// not keep the entry. It drops the entry, logs a warning, and then calls
+    /// the discard handler of the entry outside the lock.
+    ///
+    /// - Parameter entry: The entry to keep.
+    private func register(_ entry: Entry) {
         let closingReason: ClosingReason? = phase.withLock { phase in
             switch phase {
             case .collecting(var pending):
-                pending.append(Entry(work: work, onDiscard: onDiscard))
+                pending.append(entry)
                 phase = .collecting(pending)
                 return nil
             case .closed(let reason):
@@ -128,15 +160,22 @@ final class ResponseHooks: Sendable {
         }
         guard let closingReason else { return }
         logger.log(Connection.logPrefix + dropWarning(for: closingReason))
-        onDiscard?()
+        entry.onDiscard?()
     }
 
     /// Takes every registered closure and clears them in the same lock, then
     /// runs them in registration order, awaiting each before starting the
     /// next. After this call starts, the collector keeps no closure. The
     /// discard handlers are released and never called.
-    func runAll() async {
-        for work in take(closingAs: .ran).map(\.work) {
+    ///
+    /// After an error response, the method releases each closure from
+    /// `appendSuccessOnly(_:)` and does not run it.
+    ///
+    /// - Parameter responseSucceeded: `true` when the connection wrote a
+    ///   success response, and `false` when it wrote an error response.
+    func runAll(responseSucceeded: Bool) async {
+        let entries = take(closingAs: .ran).filter { $0.runs(afterSuccess: responseSucceeded) }
+        for work in entries.map(\.work) {
             await work()
         }
     }
@@ -915,8 +954,9 @@ public actor Connection {
         let task = Task {
             // Bound around the handler call so `afterRespondingToCurrentRequest`
             // finds the right collector no matter how deep the handler's own
-            // `await`s go, as long as they stay on this task. `hooks.runAll()`
-            // below — outside this scope, after the response is written —
+            // `await`s go, as long as they stay on this task.
+            // `hooks.runAll(responseSucceeded:)` below — outside this scope,
+            // after the response is written —
             // is what makes deferred work provably follow the response
             // rather than merely being likely to.
             let hooks = ResponseHooks(logger: logger, requestId: id)
@@ -939,8 +979,11 @@ public actor Connection {
                 // (for example, the turn of an accepted prompt) must not see
                 // that cancellation. A new task does not inherit it. This
                 // task waits for the new task, so `closed` still waits for
-                // the deferred work.
-                await Task { await hooks.runAll() }.value
+                // the deferred work. After an error response, the work that
+                // needs a success response (for example, the `user_message`
+                // echo of `insertUserMessage`) does not run.
+                let responseSucceeded = if case .success = outcome { true } else { false }
+                await Task { await hooks.runAll(responseSucceeded: responseSucceeded) }.value
             } else {
                 hooks.discardAll()
             }

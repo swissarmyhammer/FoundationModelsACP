@@ -201,7 +201,7 @@ private struct QuietClient: Client {
         let hooks = ResponseHooks(logger: .disabled, requestId: unitRequestId)
         appendTrackedClosure(to: hooks, reference: reference, run: run)
 
-        await hooks.runAll()
+        await hooks.runAll(responseSucceeded: true)
 
         #expect(run.isSet)
         #expect(!reference.isAlive)
@@ -213,10 +213,10 @@ private struct QuietClient: Client {
         let reference = WeakReference()
         let run = AtomicFlag()
         let hooks = ResponseHooks(logger: log.logger, requestId: unitRequestId)
-        await hooks.runAll()
+        await hooks.runAll(responseSucceeded: true)
 
         appendTrackedClosure(to: hooks, reference: reference, run: run)
-        await hooks.runAll()
+        await hooks.runAll(responseSucceeded: true)
 
         #expect(!reference.isAlive)
         #expect(!run.isSet)
@@ -232,7 +232,7 @@ private struct QuietClient: Client {
         appendTrackedClosure(to: hooks, reference: reference, run: run)
 
         hooks.discardAll()
-        await hooks.runAll()
+        await hooks.runAll(responseSucceeded: true)
 
         #expect(!reference.isAlive)
         #expect(!run.isSet)
@@ -247,7 +247,7 @@ private struct QuietClient: Client {
         hooks.discardAll()
 
         appendTrackedClosure(to: hooks, reference: reference, run: run)
-        await hooks.runAll()
+        await hooks.runAll(responseSucceeded: true)
 
         #expect(!reference.isAlive)
         #expect(!run.isSet)
@@ -266,7 +266,7 @@ private struct QuietClient: Client {
 
         hooks.discardAll()
         hooks.discardAll()
-        await hooks.runAll()
+        await hooks.runAll(responseSucceeded: true)
 
         #expect(order.calls == Array(0..<discardOrderEntryCount))
         #expect(!run.isSet)
@@ -279,11 +279,36 @@ private struct QuietClient: Client {
         let hooks = ResponseHooks(logger: .disabled, requestId: unitRequestId)
         hooks.append({ run.set() }, onDiscard: { discards.increment() })
 
-        await hooks.runAll()
+        await hooks.runAll(responseSucceeded: true)
         hooks.discardAll()
 
         #expect(run.isSet)
         #expect(discards.value == 0)
+    }
+
+    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    func runAllAfterAnErrorResponseSkipsSuccessOnlyWorkAndRunsOtherWork() async {
+        let successOnlyRun = AtomicFlag()
+        let otherRun = AtomicFlag()
+        let hooks = ResponseHooks(logger: .disabled, requestId: unitRequestId)
+        hooks.appendSuccessOnly { successOnlyRun.set() }
+        hooks.append({ otherRun.set() }, onDiscard: nil)
+
+        await hooks.runAll(responseSucceeded: false)
+
+        #expect(!successOnlyRun.isSet)
+        #expect(otherRun.isSet)
+    }
+
+    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    func runAllAfterASuccessResponseRunsSuccessOnlyWork() async {
+        let run = AtomicFlag()
+        let hooks = ResponseHooks(logger: .disabled, requestId: unitRequestId)
+        hooks.appendSuccessOnly { run.set() }
+
+        await hooks.runAll(responseSucceeded: true)
+
+        #expect(run.isSet)
     }
 
     @Test(.timeLimit(.minutes(hooksTestTimeout)))
@@ -293,10 +318,10 @@ private struct QuietClient: Client {
         let reference = WeakReference()
         let run = AtomicFlag()
         let hooks = ResponseHooks(logger: log.logger, requestId: unitRequestId)
-        await hooks.runAll()
+        await hooks.runAll(responseSucceeded: true)
 
         appendTrackedClosure(to: hooks, reference: reference, run: run) { discards.increment() }
-        await hooks.runAll()
+        await hooks.runAll(responseSucceeded: true)
         hooks.discardAll()
 
         #expect(discards.value == oneDiscardCall)
