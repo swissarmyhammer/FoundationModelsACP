@@ -97,12 +97,7 @@ extension RequestError {
         } else {
             code = .internalError
         }
-        let message: String
-        if case .string(let value) = fields["message", default: .null] {
-            message = value
-        } else {
-            message = "Unknown error"
-        }
+        let message = wire.string(member: "message") ?? "Unknown error"
         self = RequestError(code: code, message: message, data: fields["data"])
     }
 

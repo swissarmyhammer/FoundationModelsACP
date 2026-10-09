@@ -307,14 +307,10 @@ public final class ClientSideConnection: Sendable {
     /// - Returns: The discriminator, or `nil` when the params do not hold an
     ///   `update` object with a string `sessionUpdate` member.
     private static func updateDiscriminator(namedIn params: JSONValue?) -> String? {
-        guard
-            case .object(let members) = params,
-            case .object(let update) = members[updateMemberKey],
-            case .string(let discriminator) = update[updateDiscriminatorKey]
-        else {
+        guard case .object(let members) = params else {
             return nil
         }
-        return discriminator
+        return members[updateMemberKey]?.string(member: updateDiscriminatorKey)
     }
 
     // MARK: - Outbound (Client → Agent)

@@ -82,12 +82,10 @@ public struct TraceContextMeta: Sendable, Hashable {
     ///   object, has no `traceparent` string, or has a `traceparent` that is
     ///   not valid.
     public static func extract(from meta: JSONValue?) -> TraceContextMeta? {
-        guard case .object(let members)? = meta,
-            let traceparent = string(members[traceparentKey])
-        else {
+        guard let traceparent = meta?.string(member: traceparentKey) else {
             return nil
         }
-        return TraceContextMeta(traceparent: traceparent, tracestate: string(members[tracestateKey]))
+        return TraceContextMeta(traceparent: traceparent, tracestate: meta?.string(member: tracestateKey))
     }
 
     /// Writes this trace context into an ACP `_meta` value.
@@ -129,17 +127,6 @@ public struct TraceContextMeta: Sendable, Hashable {
         result[Self.traceparentKey] = .string(traceparent)
         result[Self.tracestateKey] = tracestate.map(JSONValue.string)
         return .object(result)
-    }
-
-    /// Gives the text of a JSON string.
-    ///
-    /// - Parameter value: A `_meta` member, or `nil` when it is not there.
-    /// - Returns: The text, or `nil` when `value` is not a string.
-    private static func string(_ value: JSONValue?) -> String? {
-        guard case .string(let text)? = value else {
-            return nil
-        }
-        return text
     }
 }
 

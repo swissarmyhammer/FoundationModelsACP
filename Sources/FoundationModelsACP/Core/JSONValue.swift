@@ -62,6 +62,22 @@ public enum JSONValue: Codable, Hashable, Sendable {
     }
 }
 
+// MARK: - Member reads
+
+extension JSONValue {
+    /// Reads the text of one string member of a JSON object.
+    ///
+    /// - Parameter key: The member name.
+    /// - Returns: The text, or `nil` when this value is not an object, or when
+    ///   the object has no member `key` with a string value.
+    func string(member key: String) -> String? {
+        guard case .object(let members) = self, case .string(let text)? = members[key] else {
+            return nil
+        }
+        return text
+    }
+}
+
 // MARK: - Flattened object members
 
 extension JSONValue {

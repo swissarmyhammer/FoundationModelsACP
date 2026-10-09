@@ -95,7 +95,7 @@ extension SessionId {
     /// - Returns: The session, or `nil` when the params are not an object
     ///   with a string `sessionId` member.
     init?(namedIn params: JSONValue?) {
-        guard case .object(let members) = params, case .string(let rawValue) = members[Self.paramsMemberKey] else {
+        guard let rawValue = params?.string(member: Self.paramsMemberKey) else {
             return nil
         }
         self.init(rawValue: rawValue)

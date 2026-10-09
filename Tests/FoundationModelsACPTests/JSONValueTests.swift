@@ -87,4 +87,22 @@ import Testing
             try WireRoundTrip.decode(Wrapper.self, from: "[1,2]")
         }
     }
+
+    @Test func stringMemberGivesTheTextOfAStringMember() {
+        let value = JSONValue.object(["name": .string("text"), "other": .null])
+        #expect(value.string(member: "name") == "text")
+    }
+
+    @Test func stringMemberIsNilWhenTheMemberIsAbsentOrNotAString() {
+        let value = JSONValue.object(["number": .number(1), "nested": .object(["name": .string("text")])])
+        #expect(value.string(member: "absent") == nil)
+        #expect(value.string(member: "number") == nil)
+        #expect(value.string(member: "nested") == nil)
+    }
+
+    @Test func stringMemberIsNilWhenTheValueIsNotAnObject() {
+        for value: JSONValue in [.null, .bool(true), .number(1), .string("name"), .array([.string("name")])] {
+            #expect(value.string(member: "name") == nil)
+        }
+    }
 }

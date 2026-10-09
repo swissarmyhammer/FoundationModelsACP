@@ -303,10 +303,7 @@ extension PlanUpdate {
         case .items(let items):
             return items.planId
         case .unknown(_, let payload):
-            guard case .object(let members) = payload, case .string(let rawValue)? = members["planId"] else {
-                return nil
-            }
-            return PlanId(rawValue: rawValue)
+            return payload.string(member: "planId").map(PlanId.init(rawValue:))
         }
     }
 }

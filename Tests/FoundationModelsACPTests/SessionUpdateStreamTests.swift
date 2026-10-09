@@ -98,8 +98,11 @@ private let toolCallUpdateDiscriminator = "tool_call_update"
 /// The wire name of the tool call ID field of a tool-call update.
 private let toolCallIdField = "toolCallId"
 
+/// The number that the malformed tool-call update sends as its tool call ID.
+private let numericToolCallId: Double = 42
+
 /// A tool call ID of the wrong type: the schema requires a string.
-private let malformedToolCallId = JSONValue.number(42)
+private let malformedToolCallId = JSONValue.number(numericToolCallId)
 
 /// The params of a `tool_call_update` for `sessionOne` whose tool call ID is a
 /// number. The client knows the variant, but the payload does not decode.
