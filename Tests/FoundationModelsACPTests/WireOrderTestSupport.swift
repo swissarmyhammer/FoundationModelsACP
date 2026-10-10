@@ -27,7 +27,7 @@ actor EventLog {
     }
 }
 
-/// Wraps an `ACPTransport`, and records the kind of each outgoing frame
+/// Wraps an `ACPTransport`, and records an event for each outgoing frame
 /// before the real transport writes it.
 ///
 /// A test then reads the order in which the wrapped side wrote frames to the
@@ -38,19 +38,28 @@ struct LoggingTransport: ACPTransport {
     /// The real transport.
     let underlying: any ACPTransport
 
-    /// The log that gets the kind of each outgoing frame.
+    /// The log that gets one event for each outgoing frame.
     let log: EventLog
+
+    /// The per-frame hook. It gets the kind of the frame and returns the
+    /// event that the log records. The default records the kind.
+    ///
+    /// `write(_:)` calls the hook synchronously, before the frame is written.
+    /// Thus a hook can add state that the wrapped side has when it writes the
+    /// frame, for example the number of history entries.
+    var eventForFrame: @Sendable (_ kind: String) -> String = { $0 }
 
     /// The incoming bytes of the real transport.
     var bytes: AsyncThrowingStream<Data, any Error> { underlying.bytes }
 
-    /// Records the kind of the frame, then writes the frame to the real
+    /// Records the event for the frame, then writes the frame to the real
     /// transport.
     ///
     /// - Parameter data: The outgoing bytes.
     /// - Throws: Any error from the real transport.
     func write(_ data: Data) async throws {
-        await log.record(Self.classify(data))
+        let event = eventForFrame(Self.classify(data))
+        await log.record(event)
         try await underlying.write(data)
     }
 
@@ -62,12 +71,9 @@ struct LoggingTransport: ACPTransport {
     /// `session/request_permission`) also has an `id`, so the `method` check
     /// is necessary.
     ///
-    /// Other test transports also use this method to classify the frames
-    /// that they write.
-    ///
     /// - Parameter data: The outgoing bytes of one frame.
     /// - Returns: `"update"`, `"response"`, or `"other"`.
-    static func classify(_ data: Data) -> String {
+    private static func classify(_ data: Data) -> String {
         guard
             let value = try? JSONDecoder().decode(JSONValue.self, from: data),
             case .object(let fields) = value

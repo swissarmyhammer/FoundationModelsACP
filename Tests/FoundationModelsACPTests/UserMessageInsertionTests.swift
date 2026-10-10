@@ -49,6 +49,23 @@ private final class AgentHistory: Sendable {
     var entryCount: Int {
         engine.withLock { $0.entries.count }
     }
+
+    /// The event that the ordering test records for one frame that the agent
+    /// writes. It names the kind of the frame and the number of history
+    /// entries when the agent wrote the frame.
+    ///
+    /// The hook of `LoggingTransport` calls this method before the frame is
+    /// written. The history closure of `insertUserMessage` runs synchronously
+    /// in the same task. Thus the count shows if the history got the message
+    /// before or after each frame.
+    ///
+    /// - Parameters:
+    ///   - kind: The kind of the frame, from `LoggingTransport`.
+    ///   - entryCount: The number of entries in the history.
+    /// - Returns: The event that the log records.
+    static func frameEvent(kind: String, entryCount: Int) -> String {
+        "\(kind) with \(entryCount) history entries"
+    }
 }
 
 /// An agent that inserts each prompt as a user message with
@@ -177,6 +194,14 @@ private let responseFrameKind = "response"
 /// The kind that `LoggingTransport` records for a `session/update` frame.
 private let updateFrameKind = "update"
 
+/// The number of history entries before the history gets the inserted user
+/// message.
+private let historyEntriesWithoutTheMessage = 0
+
+/// The number of history entries after the history gets the inserted user
+/// message.
+private let historyEntriesWithTheMessage = 1
+
 /// The agent and client connections of one test.
 private struct ConnectionPair {
     /// The agent side.
@@ -189,67 +214,6 @@ private struct ConnectionPair {
     func close() async {
         await agent.close()
         await client.close()
-    }
-}
-
-/// One frame that `HistoryProbeTransport` saw the agent write.
-private struct WrittenFrame: Equatable, Sendable {
-    /// The kind of the frame, from `LoggingTransport.classify(_:)`.
-    let kind: String
-
-    /// The number of entries in the history of the agent when the agent
-    /// wrote the frame.
-    let historyEntryCount: Int
-}
-
-/// Wraps the agent end of the transport. Before each write, it records the
-/// kind of the frame and the number of entries in the history of the agent.
-///
-/// The record and the write occur in the same task, and the history closure
-/// of `insertUserMessage` runs synchronously. Thus the count shows if the
-/// history got the message before or after each frame.
-private final class HistoryProbeTransport: ACPTransport {
-    /// The real transport.
-    private let underlying: any ACPTransport
-
-    /// The history that the probe counts.
-    private let history: AgentHistory
-
-    /// The frames that the agent wrote, in order.
-    private let written = Mutex<[WrittenFrame]>([])
-
-    /// Makes a probe.
-    ///
-    /// - Parameters:
-    ///   - underlying: The real transport.
-    ///   - history: The history that the probe counts.
-    init(underlying: any ACPTransport, history: AgentHistory) {
-        self.underlying = underlying
-        self.history = history
-    }
-
-    /// The incoming bytes of the real transport.
-    var bytes: AsyncThrowingStream<Data, any Error> { underlying.bytes }
-
-    /// The frames that the agent wrote since the last `reset()`.
-    var frames: [WrittenFrame] {
-        written.withLock { $0 }
-    }
-
-    /// Records the frame, then writes it to the real transport.
-    ///
-    /// - Parameter data: The outgoing bytes.
-    /// - Throws: Any error from the real transport.
-    func write(_ data: Data) async throws {
-        let frame = WrittenFrame(kind: LoggingTransport.classify(data), historyEntryCount: history.entryCount)
-        written.withLock { $0.append(frame) }
-        try await underlying.write(data)
-    }
-
-    /// Removes the recorded frames. Then the setup traffic is not in a
-    /// measurement that starts later.
-    func reset() {
-        written.withLock { $0.removeAll() }
     }
 }
 
@@ -390,21 +354,20 @@ private final class HistoryProbeTransport: ACPTransport {
         var ran = deferredWorkRan.makeAsyncIterator()
         _ = try #require(await ran.next())
 
-        #expect(history.entryCount == 0)
+        #expect(history.entryCount == historyEntriesWithoutTheMessage)
         await pair.close()
     }
 
     @Test(.timeLimit(.minutes(insertionTestTimeout)))
     func theHistoryGetsTheMessageAfterTheResponseAndBeforeTheEcho() async throws {
         let history = AgentHistory()
-        var probe: HistoryProbeTransport?
-        let pair = try await connect(mode: .recordInHistory, history: history) { agentEnd in
-            let transport = HistoryProbeTransport(underlying: agentEnd, history: history)
-            probe = transport
-            return transport
+        let log = EventLog()
+        let pair = try await connect(mode: .recordInHistory, history: history) {
+            LoggingTransport(underlying: $0, log: log) { kind in
+                AgentHistory.frameEvent(kind: kind, entryCount: history.entryCount)
+            }
         }
-        let transport = try #require(probe)
-        transport.reset()
+        await log.reset()
         var updates = pair.client.subscribe(to: insertionSessionId).updates.makeAsyncIterator()
 
         _ = try await pair.client.prompt(insertionPrompt)
@@ -412,9 +375,9 @@ private final class HistoryProbeTransport: ACPTransport {
         _ = try #require(await updates.nextUpdate())
 
         #expect(
-            transport.frames == [
-                WrittenFrame(kind: responseFrameKind, historyEntryCount: 0),
-                WrittenFrame(kind: updateFrameKind, historyEntryCount: 1),
+            await log.events == [
+                AgentHistory.frameEvent(kind: responseFrameKind, entryCount: historyEntriesWithoutTheMessage),
+                AgentHistory.frameEvent(kind: updateFrameKind, entryCount: historyEntriesWithTheMessage),
             ])
         await pair.close()
     }

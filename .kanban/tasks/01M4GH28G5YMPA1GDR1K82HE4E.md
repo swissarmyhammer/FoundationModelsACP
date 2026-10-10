@@ -100,6 +100,39 @@ comments:
     - evidence: swift test (root) 486 tests in 51 suites + 135 tests in 17 suites passed; IntegrationTests 7 passed; forced recompile 0 warnings; UserMessageInsertionTests + ResponseHooksTests + PromptCancellationTests 5 runs, 28/28 passed each run.
     - next: commit, then review.
   timestamp: 2026-10-10T07:28:08.476094+00:00
+- actor: claude-code
+  id: 01m4jbgsmq5hf7gvbkpe6a2ahc
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD; 1 finding (1 confirmed, 0 refuted) — Tests/FoundationModelsACPTests/UserMessageInsertionTests.swift:243 (reuse/reuse). The prior finding at AgentSideConnection.swift:452 is checked.
+    - next: Remove HistoryProbeTransport. Extend LoggingTransport to supply the history count through a per-frame hook. Then run the tests and review again.
+  timestamp: 2026-10-10T07:30:27.095514+00:00
+- actor: claude-code
+  id: 01m4jbh3bc5z00tvvsrgy9x4p7
+  text: |-
+    ### finish iteration 3 — findings
+    - implement: changed — AgentSideConnection.swift, UserMessageInsertionTests.swift, WireOrderTestSupport.swift (option A: history closure)
+    - test: green — swift test 486 + 135 passed; IntegrationTests 7 passed; 0 warnings
+    - commit: 7b3ee45
+    - review: findings — Tests/FoundationModelsACPTests/UserMessageInsertionTests.swift:243 (reuse/reuse); prior finding AgentSideConnection.swift:452 checked
+  timestamp: 2026-10-10T07:30:37.036930+00:00
+- actor: claude-code
+  id: 01m4jbkygy3ak9p8rfh2q6resr
+  text: |-
+    Research for the reuse finding:
+    - `HistoryProbeTransport` (UserMessageInsertionTests.swift) and `LoggingTransport` (WireOrderTestSupport.swift) both classify the frame, record it, and then forward the write.
+    - Plan: give `LoggingTransport` a per-frame hook `eventForFrame: @Sendable (String) -> String` with the identity as the default. The hook gets the frame kind and returns the event that the log records. The ordering test supplies a hook that adds the history entry count. Then remove `HistoryProbeTransport` and `WrittenFrame`.
+    - After the removal, only `LoggingTransport` calls `classify(_:)`, so it goes back to `private`.
+    - Other wrappers: `WireOrderTestSupport.swift` and `WireTestSupport.swift` have no other wrapper of this kind. `ScriptedTransport` (WireTestSupport.swift) does not forward. `CapturingTransport` (GoldenSessionEndToEndTests.swift) records the raw bytes, not a frame kind, so the frame-kind hook does not apply to it.
+  timestamp: 2026-10-10T07:32:10.398984+00:00
+- actor: claude-code
+  id: 01m4jbpqpmby5re6g5ea96qrbv
+  text: |-
+    ### implement — changed
+    - evidence: 2 files — Tests/FoundationModelsACPTests/WireOrderTestSupport.swift, Tests/FoundationModelsACPTests/UserMessageInsertionTests.swift. `LoggingTransport` has a new per-frame hook `eventForFrame: @Sendable (_ kind: String) -> String` (default: the kind). `write(_:)` calls it synchronously before the frame is written. `HistoryProbeTransport` and `WrittenFrame` are removed. The ordering test supplies the history count through the hook with `AgentHistory.frameEvent(kind:entryCount:)`. `classify(_:)` is `private` again. The literal counts 0 and 1 are now the named constants `historyEntriesWithoutTheMessage` and `historyEntriesWithTheMessage` (also in the throw test). RED: `swift build --build-tests` failed with "extra trailing closure passed in call" before the hook existed. GREEN: `swift test --filter 'UserMessageInsertionTests|ClientResponseHooksTests|PermissionCancellationTests|PromptLifecycleTests'` — 26 tests in 4 suites passed, 0 warnings. Finding flipped to [x].
+    - notes: No other test support file has a wrapper that records a frame kind and forwards. `CapturingTransport` (GoldenSessionEndToEndTests.swift) records raw bytes for a golden comparison, so the frame-kind hook does not apply.
+    - next: /review
+  timestamp: 2026-10-10T07:33:41.716690+00:00
 depends_on:
 - 01M4GH23E1QC4SW735FQR92KN3
 position_column: doing
@@ -132,3 +165,12 @@ title: Do not send the user_message echo when the prompt handler throws
 > - `.kanban/ (from .reviewignore)` — 4 file(s)
 
 - [x] `Sources/FoundationModelsACP/Connection/AgentSideConnection.swift:452` `completeness/invariant-propagation` — The success-only gate covers only the user_message echo. The history record at line 423 still runs unconditionally, before the handler's error is known. When a handler calls insertUserMessage(_:messageId:into:) and then throws, the retained history keeps the user message, but the client gets an error response and no echo. The client and the history now disagree. Before this change, the echo went out on error, so both sides agreed. Move the history record into the success-only work, or otherwise gate it on the response outcome, so the history and the echo follow the same rule. Update the doc of `insertUserMessage(_:messageId:into:)` to say what happens to the history on an error response. Add a test for `.recordInHistory` with a throw after insertion that asserts the history is empty.
+
+## Review Findings (2026-10-10 02:28)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 3 file(s) reviewed, 6 not reviewed.
+
+> 6 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 6 file(s)
+
+- [x] `Tests/FoundationModelsACPTests/UserMessageInsertionTests.swift:243` `reuse/reuse` — HistoryProbeTransport.write repeats the record-then-forward logic of LoggingTransport.write. Each class wraps the agent end of the transport, records a frame kind, and then calls the underlying write. The probe adds only the history count. A second wrapper for the same job means two copies to maintain. Extend LoggingTransport instead of adding a second wrapper. For example, give LoggingTransport an optional per-frame hook that receives the frame kind, or make it generic over what it records. Then HistoryProbeTransport can be removed, and the history count can be supplied through that hook.
