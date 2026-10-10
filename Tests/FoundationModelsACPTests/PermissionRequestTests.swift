@@ -116,15 +116,9 @@ private let readLoopTestTimeout = 1
     @Test(.timeLimit(.minutes(readLoopTestTimeout)))
     func aPendingPermissionRequestDoesNotBlockAConcurrentSessionUpdate() async throws {
         let session = StubAgent.sessionId
-        let entered = AsyncStream<SessionId>.makeStream()
-        let gate = Gate()
-
-        let (clientEnd, agentEnd) = InMemoryTransport.pair()
-        let agentConn = await AgentSideConnection(stream: agentEnd) { _ in StubAgent() }
-        let client = await ClientSideConnection(stream: clientEnd) { _ in
-            GatedPermissionClient(entered: entered.continuation, gate: gate, outcome: .cancelled)
-        }
-        var updates = client.subscribe(to: session).updates.makeAsyncIterator()
+        let connection = await GatedPermissionConnection.connect(outcome: .cancelled)
+        let agentConn = await connection.connectStubAgent()
+        var updates = connection.client.subscribe(to: session).updates.makeAsyncIterator()
 
         // Fires `session/request_permission`; the client's handler suspends on
         // the gate rather than answering, so this stays pending for the rest
@@ -136,7 +130,7 @@ private let readLoopTestTimeout = 1
         // Wait until the client's handler is definitely running before
         // sending more traffic, so the notification below demonstrably
         // arrives while the permission request is still outstanding.
-        var enteredIterator = entered.stream.makeAsyncIterator()
+        var enteredIterator = connection.entered.makeAsyncIterator()
         _ = await enteredIterator.next()
 
         // A concurrent `session/update`, sent over the very same connection
@@ -150,11 +144,11 @@ private let readLoopTestTimeout = 1
 
         // Only now release the gate — the assertion above already proved the
         // request was genuinely still pending, not merely fast.
-        gate.open()
+        connection.gate.open()
         let response = try await permission.value
         #expect(response.outcome == .cancelled)
 
         await agentConn.close()
-        await client.close()
+        await connection.client.close()
     }
 }

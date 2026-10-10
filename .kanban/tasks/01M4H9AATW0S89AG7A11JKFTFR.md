@@ -46,6 +46,39 @@ comments:
     - evidence: swift test (root) 488 tests in 52 suites + 135 tests in 17 suites passed; IntegrationTests 7 passed; forced rebuild 0 warnings; PermissionCancelRequestTests + PermissionCancellationTests + PermissionRequestTests 5 runs, 13/13 passed each run.
     - next: commit, then review.
   timestamp: 2026-10-10T07:43:04.996500+00:00
+- actor: claude-code
+  id: 01m4jcc7zwmca2sw526hakwsmf
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD; 1 finding (1 confirmed, 2 refuted); Tests/FoundationModelsACPTests/PermissionCancelRequestTests.swift:65
+    - next: Remove the copy of the connection setup in `RawAgentHarness.connect()`. Use `PermissionHarness.connect()`, or move the shared setup into `PermissionTestSupport.swift`. Then run the review again.
+  timestamp: 2026-10-10T07:45:26.524484+00:00
+- actor: claude-code
+  id: 01m4jcckdt3tnwr4h156fw87qf
+  text: |-
+    ### finish iteration 2 — findings
+    - implement: changed — PermissionCancelRequestTests.swift (new), PermissionTestSupport.swift, WireTestSupport.swift, PendingPermissionRequests.swift (doc), ClientSideConnection.swift (doc)
+    - test: green — swift test 488 + 135 passed; IntegrationTests 7 passed; 0 warnings
+    - commit: e03434c
+    - review: findings — Tests/FoundationModelsACPTests/PermissionCancelRequestTests.swift:65 (reuse/reuse)
+  timestamp: 2026-10-10T07:45:38.234119+00:00
+- actor: claude-code
+  id: 01m4jcj4bbhvgcembd56rh8gth
+  text: |-
+    ### implement — reuse finding fixed
+    - The connection setup is now in one place: `GatedPermissionConnection.connect(outcome:clientTransport:)` in Tests/FoundationModelsACPTests/PermissionTestSupport.swift. It makes the gate, the `entered`/`exited`/`cancelled` streams, the `InMemoryTransport` pair and the `ClientSideConnection` that serves `GatedPermissionClient`. It returns the raw agent end. `clientTransport` wraps the client end (PermissionCancellationTests gives `LoggingTransport`). `connectStubAgent()` serves a `StubAgent` on the agent end.
+    - Three copies are removed: `PermissionHarness.connect()` (PermissionCancellationTests.swift), `RawAgentHarness.connect()` (PermissionCancelRequestTests.swift), and the inline setup in `PermissionRequestTests.aPendingPermissionRequestDoesNotBlockAConcurrentSessionUpdate`. Each harness now holds `connection: GatedPermissionConnection`.
+    - `GatedPermissionClient.exited` and `.cancelled` are not optional now, because the one setup always gives them. The hand-written `init` with `nil` defaults is removed; the memberwise init is used.
+    - No TDD red step: this change is a test-support refactor with no new behavior. The 13 tests of the three suites are the check.
+    - evidence: `swift test --filter 'PermissionCancelRequestTests|PermissionCancellationTests|PermissionRequestTests'` — 13 tests in 3 suites passed, 0 warnings, 0 errors.
+  timestamp: 2026-10-10T07:48:39.403517+00:00
+- actor: claude-code
+  id: 01m4jcj7h36m2eckv915wz95na
+  text: |-
+    ### implement — changed
+    - evidence: 4 files — Tests/FoundationModelsACPTests/PermissionTestSupport.swift, Tests/FoundationModelsACPTests/PermissionCancelRequestTests.swift, Tests/FoundationModelsACPTests/PermissionCancellationTests.swift, Tests/FoundationModelsACPTests/PermissionRequestTests.swift; swift test --filter (3 permission suites) 13/13 passed, 0 warnings
+    - next: /review
+  timestamp: 2026-10-10T07:48:42.659068+00:00
 position_column: doing
 position_ordinal: '80'
 title: Decide the answer to $/cancel_request for a pending session/request_permission
@@ -64,3 +97,12 @@ When the agent cancels its wait for a permission, the agent sends `$/cancel_requ
 A person must select the option. Then add tests for the selected behavior.
 
 #acp-lifecycle
+
+## Review Findings (2026-10-10 02:43)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 5 file(s) reviewed, 4 not reviewed.
+
+> 4 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 4 file(s)
+
+- [x] `Tests/FoundationModelsACPTests/PermissionCancelRequestTests.swift:65` `reuse/reuse` — The new `RawAgentHarness.connect()` repeats the connection setup of `PermissionHarness.connect()`. This creates a second copy of the same wiring that the test suite already has. Call the existing `PermissionHarness.connect()` and add only the raw agent end, or move the shared wiring into `PermissionTestSupport.swift` so that all permission harnesses use it.

@@ -40,43 +40,20 @@ private let selectedOutcome = RequestPermissionOutcome.selected(
 /// A `ClientSideConnection` that serves a `GatedPermissionClient`, and the raw
 /// agent end of its transport.
 private struct RawAgentHarness {
-    /// The client side.
-    let client: ClientSideConnection
-
-    /// The raw agent end of the transport.
-    let agentEnd: InMemoryTransport
+    /// The client side, the raw agent end of its transport, and the probes of
+    /// its permission handler.
+    let connection: GatedPermissionConnection
 
     /// Reads the frames that the client writes.
     let reader: WireReader
-
-    /// The gate of the permission handler.
-    let gate: Gate
-
-    /// The sessions of the permission requests that reached the handler.
-    let entered: AsyncStream<SessionId>
-
-    /// One value for each permission handler whose task is cancelled.
-    let cancelled: AsyncStream<Void>
 
     /// Connects a `GatedPermissionClient` to a raw agent end over
     /// `InMemoryTransport`.
     ///
     /// - Returns: The harness.
     static func connect() async -> RawAgentHarness {
-        let gate = Gate()
-        let entered = AsyncStream<SessionId>.makeStream()
-        let cancelled = AsyncStream<Void>.makeStream()
-        let (clientEnd, agentEnd) = InMemoryTransport.pair()
-        let client = await ClientSideConnection(stream: clientEnd) { _ in
-            GatedPermissionClient(
-                entered: entered.continuation, cancelled: cancelled.continuation, gate: gate,
-                outcome: selectedOutcome
-            )
-        }
-        return RawAgentHarness(
-            client: client, agentEnd: agentEnd, reader: WireReader(agentEnd), gate: gate,
-            entered: entered.stream, cancelled: cancelled.stream
-        )
+        let connection = await GatedPermissionConnection.connect(outcome: selectedOutcome)
+        return RawAgentHarness(connection: connection, reader: WireReader(connection.agentEnd))
     }
 
     /// Sends the permission request, and waits until the handler started.
@@ -86,9 +63,9 @@ private struct RawAgentHarness {
         let params = try JSONValue.encode(result: RequestPermissionRequest.stub(for: permissionSession))
         try await send(
             RawPeerEnvelope.request(id: permissionRequestId, method: requestPermissionMethod, params: params),
-            over: agentEnd
+            over: connection.agentEnd
         )
-        var started = entered.makeAsyncIterator()
+        var started = connection.entered.makeAsyncIterator()
         #expect(await started.next() == permissionSession)
     }
 
@@ -96,7 +73,7 @@ private struct RawAgentHarness {
     ///
     /// - Throws: Any transport failure.
     func cancelPermissionRequest() async throws {
-        try await send(RawPeerEnvelope.cancelRequest(for: permissionRequestId), over: agentEnd)
+        try await send(RawPeerEnvelope.cancelRequest(for: permissionRequestId), over: connection.agentEnd)
     }
 
     /// Sends the probe request.
@@ -105,7 +82,7 @@ private struct RawAgentHarness {
     func sendProbe() async throws {
         try await send(
             RawPeerEnvelope.request(id: probeRequestId, method: probeMethod, params: .object([:])),
-            over: agentEnd
+            over: connection.agentEnd
         )
     }
 
@@ -119,8 +96,8 @@ private struct RawAgentHarness {
 
     /// Opens the gate, and closes the client side.
     func close() async {
-        gate.open()
-        await client.close()
+        connection.gate.open()
+        await connection.client.close()
     }
 }
 
@@ -137,9 +114,9 @@ private struct RawAgentHarness {
         try await harness.sendPermissionRequest()
 
         try await harness.cancelPermissionRequest()
-        var cancelled = harness.cancelled.makeAsyncIterator()
+        var cancelled = harness.connection.cancelled.makeAsyncIterator()
         _ = try #require(await cancelled.next())
-        harness.gate.open()
+        harness.connection.gate.open()
 
         let expectedAnswer = errorEnvelope(id: permissionRequestId, error: .requestCancelled)
         #expect(try await harness.nextFrame() == expectedAnswer)
@@ -151,7 +128,7 @@ private struct RawAgentHarness {
         let harness = await RawAgentHarness.connect()
         try await harness.sendPermissionRequest()
         let cancel = CancelSessionNotification(sessionId: permissionSession)
-        try await harness.client.sessionCancel(cancel)
+        try await harness.connection.client.sessionCancel(cancel)
         let expectedCancel = notificationEnvelope(
             method: sessionCancelMethod, params: try JSONValue.encode(result: cancel))
         #expect(try await harness.nextFrame() == expectedCancel)

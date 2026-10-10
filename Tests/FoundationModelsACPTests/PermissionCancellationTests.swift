@@ -32,38 +32,24 @@ private struct PermissionHarness {
     /// The agent side, which sends `session/request_permission`.
     let agent: AgentSideConnection
 
-    /// The client side, whose outgoing frames go to `log`.
-    let client: ClientSideConnection
+    /// The client side, whose outgoing frames go to `log`, and the probes of
+    /// its permission handler.
+    let connection: GatedPermissionConnection
 
     /// Gets the kind of each frame that the client writes.
     let log: EventLog
 
-    /// The gate of the permission handler.
-    let gate: Gate
-
-    /// The sessions of the permission requests that reached the handler.
-    let entered: AsyncStream<SessionId>
-
-    /// One value for each permission handler that ended.
-    let exited: AsyncStream<Void>
-
     /// Connects a `StubAgent` to a `GatedPermissionClient` over
     /// `InMemoryTransport`.
+    ///
+    /// - Returns: The harness.
     static func connect() async -> PermissionHarness {
         let log = EventLog()
-        let gate = Gate()
-        let entered = AsyncStream<SessionId>.makeStream()
-        let exited = AsyncStream<Void>.makeStream()
-        let (clientEnd, agentEnd) = InMemoryTransport.pair()
-        let agent = await AgentSideConnection(stream: agentEnd) { _ in StubAgent() }
-        let client = await ClientSideConnection(stream: LoggingTransport(underlying: clientEnd, log: log)) { _ in
-            GatedPermissionClient(
-                entered: entered.continuation, exited: exited.continuation, gate: gate, outcome: selectedOutcome
-            )
+        let connection = await GatedPermissionConnection.connect(outcome: selectedOutcome) { clientEnd in
+            LoggingTransport(underlying: clientEnd, log: log)
         }
-        return PermissionHarness(
-            agent: agent, client: client, log: log, gate: gate, entered: entered.stream, exited: exited.stream
-        )
+        let agent = await connection.connectStubAgent()
+        return PermissionHarness(agent: agent, connection: connection, log: log)
     }
 
     /// Sends one permission request from the agent, and waits until the
@@ -74,7 +60,7 @@ private struct PermissionHarness {
     func sendPermissionRequest(for sessionId: SessionId) async throws -> Task<RequestPermissionResponse, any Error> {
         let agent = agent
         let answer = Task { try await agent.requestPermission(.stub(for: sessionId)) }
-        var started = entered.makeAsyncIterator()
+        var started = connection.entered.makeAsyncIterator()
         #expect(try #require(await started.next()) == sessionId)
         return answer
     }
@@ -100,13 +86,13 @@ private struct PermissionHarness {
     ///
     /// - Parameter sessionId: The session to cancel.
     func cancel(_ sessionId: SessionId) async throws {
-        try await client.sessionCancel(CancelSessionNotification(sessionId: sessionId))
+        try await connection.client.sessionCancel(CancelSessionNotification(sessionId: sessionId))
     }
 
     /// Opens the gate, and closes the two sides.
     func close() async {
-        gate.open()
-        await client.close()
+        connection.gate.open()
+        await connection.client.close()
         await agent.close()
     }
 }
@@ -148,11 +134,11 @@ private struct PermissionHarness {
         try await harness.cancel(cancelledSession)
         _ = try await harness.answer(to: answer)
 
-        harness.gate.open()
-        var ended = harness.exited.makeAsyncIterator()
+        harness.connection.gate.open()
+        var ended = harness.connection.exited.makeAsyncIterator()
         _ = try #require(await ended.next())
-        await harness.client.close()
-        _ = await harness.client.closed
+        await harness.connection.client.close()
+        _ = await harness.connection.client.closed
 
         #expect(await harness.log.events == [notificationFrame, responseFrame])
         await harness.agent.close()
@@ -166,7 +152,7 @@ private struct PermissionHarness {
 
         try await harness.cancel(cancelledSession)
         _ = try await harness.answer(to: cancelledAnswer)
-        harness.gate.open()
+        harness.connection.gate.open()
 
         #expect(try await harness.answer(to: otherAnswer).outcome == selectedOutcome)
         await harness.close()
@@ -176,7 +162,7 @@ private struct PermissionHarness {
     func aPermissionRequestAfterTheCancelReachesTheHandler() async throws {
         let harness = await PermissionHarness.connect()
         try await harness.cancel(cancelledSession)
-        harness.gate.open()
+        harness.connection.gate.open()
 
         let answer = try await harness.sendPermissionRequest(for: cancelledSession)
 

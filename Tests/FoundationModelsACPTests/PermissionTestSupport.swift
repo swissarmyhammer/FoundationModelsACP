@@ -67,44 +67,17 @@ struct GatedPermissionClient: Client {
     /// Gets the session of each permission request that the handler starts.
     let entered: AsyncStream<SessionId>.Continuation
 
-    /// Gets one value for each handler that ended, or `nil` when the test
-    /// does not watch the end of the handler.
-    let exited: AsyncStream<Void>.Continuation?
+    /// Gets one value for each handler that ended.
+    let exited: AsyncStream<Void>.Continuation
 
-    /// Gets one value for each handler whose task is cancelled, or `nil`
-    /// when the test does not watch the cancellation.
-    let cancelled: AsyncStream<Void>.Continuation?
+    /// Gets one value for each handler whose task is cancelled.
+    let cancelled: AsyncStream<Void>.Continuation
 
     /// The gate that each handler waits for.
     let gate: Gate
 
     /// The outcome that each handler gives after the gate opens.
     let outcome: RequestPermissionOutcome
-
-    /// Makes a client whose permission handler waits for `gate`.
-    ///
-    /// - Parameters:
-    ///   - entered: Gets the session of each permission request that the
-    ///     handler starts.
-    ///   - exited: Gets one value for each handler that ended. The default,
-    ///     `nil`, records nothing.
-    ///   - cancelled: Gets one value for each handler whose task is
-    ///     cancelled. The default, `nil`, records nothing.
-    ///   - gate: The gate that each handler waits for.
-    ///   - outcome: The outcome that each handler gives after the gate opens.
-    init(
-        entered: AsyncStream<SessionId>.Continuation,
-        exited: AsyncStream<Void>.Continuation? = nil,
-        cancelled: AsyncStream<Void>.Continuation? = nil,
-        gate: Gate,
-        outcome: RequestPermissionOutcome
-    ) {
-        self.entered = entered
-        self.exited = exited
-        self.cancelled = cancelled
-        self.gate = gate
-        self.outcome = outcome
-    }
 
     func sessionUpdate(_ notification: UpdateSessionNotification) async {}
 
@@ -119,9 +92,9 @@ struct GatedPermissionClient: Client {
         await withTaskCancellationHandler {
             await gate.wait()
         } onCancel: { [cancelled] in
-            cancelled?.yield()
+            cancelled.yield()
         }
-        exited?.yield()
+        exited.yield()
         try Task.checkCancellation()
         return RequestPermissionResponse(outcome: outcome)
     }
@@ -131,4 +104,65 @@ struct GatedPermissionClient: Client {
     }
 
     func elicitationComplete(_ notification: CompleteElicitationNotification) async {}
+}
+
+/// A `ClientSideConnection` that serves a `GatedPermissionClient`, the agent
+/// end of its transport, and the probes of the handler.
+///
+/// Each permission suite makes its connection with `connect(outcome:clientTransport:)`.
+/// A suite serves a `StubAgent` on `agentEnd` with `connectStubAgent()`, or
+/// reads and writes raw frames on it.
+struct GatedPermissionConnection {
+    /// The client side.
+    let client: ClientSideConnection
+
+    /// The agent end of the transport. No connection serves it yet.
+    let agentEnd: InMemoryTransport
+
+    /// The gate of the permission handler.
+    let gate: Gate
+
+    /// The sessions of the permission requests that reached the handler.
+    let entered: AsyncStream<SessionId>
+
+    /// One value for each permission handler that ended.
+    let exited: AsyncStream<Void>
+
+    /// One value for each permission handler whose task is cancelled.
+    let cancelled: AsyncStream<Void>
+
+    /// Connects a `GatedPermissionClient` to an `InMemoryTransport` pair.
+    ///
+    /// - Parameters:
+    ///   - outcome: The outcome that the handler gives after the gate opens.
+    ///   - clientTransport: Makes the transport of the client side from the
+    ///     client end of the pair. The default uses the client end as it is.
+    /// - Returns: The connection.
+    static func connect(
+        outcome: RequestPermissionOutcome,
+        clientTransport: (InMemoryTransport) -> any ACPTransport = { $0 }
+    ) async -> GatedPermissionConnection {
+        let gate = Gate()
+        let entered = AsyncStream<SessionId>.makeStream()
+        let exited = AsyncStream<Void>.makeStream()
+        let cancelled = AsyncStream<Void>.makeStream()
+        let (clientEnd, agentEnd) = InMemoryTransport.pair()
+        let client = await ClientSideConnection(stream: clientTransport(clientEnd)) { _ in
+            GatedPermissionClient(
+                entered: entered.continuation, exited: exited.continuation, cancelled: cancelled.continuation,
+                gate: gate, outcome: outcome
+            )
+        }
+        return GatedPermissionConnection(
+            client: client, agentEnd: agentEnd, gate: gate, entered: entered.stream, exited: exited.stream,
+            cancelled: cancelled.stream
+        )
+    }
+
+    /// Serves a `StubAgent` on `agentEnd`.
+    ///
+    /// - Returns: The agent side, which sends `session/request_permission`.
+    func connectStubAgent() async -> AgentSideConnection {
+        await AgentSideConnection(stream: agentEnd) { _ in StubAgent() }
+    }
 }
