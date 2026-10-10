@@ -115,8 +115,24 @@ comments:
     - evidence: 4 files — Tests/FoundationModelsACPTests/PermissionTestSupport.swift, Tests/FoundationModelsACPTests/PermissionCancelRequestTests.swift, Tests/FoundationModelsACPTests/PermissionCancellationTests.swift, Tests/FoundationModelsACPTests/PermissionRequestTests.swift; swift test --filter (3 permission suites) 13/13 passed, 0 warnings; 6/6 findings checked
     - next: /review
   timestamp: 2026-10-10T07:56:50.200806+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m4jd5rfwppc06d6r6j7jqyan
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (5598f41). 0 findings, 0 confirmed, 0 refuted. 7 validator runs, 0 failed. 4 files reviewed. 2 .kanban files not reviewed (.reviewignore). All 7 prior findings are checked.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-10T07:59:22.620176+00:00
+- actor: claude-code
+  id: 01m4jd5zvn94gszgg74gj8mjay
+  text: |-
+    ### finish iteration 4 — clean
+    - implement: changed — PermissionTestSupport.swift, PermissionCancelRequestTests.swift, PermissionCancellationTests.swift, PermissionRequestTests.swift (wait helpers and close on GatedPermissionConnection; renames)
+    - test: green — swift test 488 + 135 passed; IntegrationTests 7 passed; 0 warnings
+    - commit: 5598f41
+    - review: clean — 0 findings; 7/7 prior findings checked
+  timestamp: 2026-10-10T07:59:30.165755+00:00
+position_column: done
+position_ordinal: b280
 title: Decide the answer to $/cancel_request for a pending session/request_permission
 ---
 ## Problem
