@@ -58,6 +58,11 @@ final class Gate: Sendable {
 /// A client whose `requestPermission(_:)` handler tells the test that it
 /// started, waits for a gate, and then gives a fixed outcome. The gate stands
 /// for a human who still looks at the prompt.
+///
+/// When the task of a handler is cancelled, the handler tells the test, and
+/// still waits for the gate. After the gate opens, that handler throws
+/// `CancellationError`: it stands for a client that removes the prompt when
+/// the agent withdraws the request.
 struct GatedPermissionClient: Client {
     /// Gets the session of each permission request that the handler starts.
     let entered: AsyncStream<SessionId>.Continuation
@@ -65,6 +70,10 @@ struct GatedPermissionClient: Client {
     /// Gets one value for each handler that ended, or `nil` when the test
     /// does not watch the end of the handler.
     let exited: AsyncStream<Void>.Continuation?
+
+    /// Gets one value for each handler whose task is cancelled, or `nil`
+    /// when the test does not watch the cancellation.
+    let cancelled: AsyncStream<Void>.Continuation?
 
     /// The gate that each handler waits for.
     let gate: Gate
@@ -79,16 +88,20 @@ struct GatedPermissionClient: Client {
     ///     handler starts.
     ///   - exited: Gets one value for each handler that ended. The default,
     ///     `nil`, records nothing.
+    ///   - cancelled: Gets one value for each handler whose task is
+    ///     cancelled. The default, `nil`, records nothing.
     ///   - gate: The gate that each handler waits for.
     ///   - outcome: The outcome that each handler gives after the gate opens.
     init(
         entered: AsyncStream<SessionId>.Continuation,
         exited: AsyncStream<Void>.Continuation? = nil,
+        cancelled: AsyncStream<Void>.Continuation? = nil,
         gate: Gate,
         outcome: RequestPermissionOutcome
     ) {
         self.entered = entered
         self.exited = exited
+        self.cancelled = cancelled
         self.gate = gate
         self.outcome = outcome
     }
@@ -99,10 +112,17 @@ struct GatedPermissionClient: Client {
     ///
     /// - Parameter params: The permission request.
     /// - Returns: The response with `outcome`.
+    /// - Throws: `CancellationError` when the task of the handler was
+    ///   cancelled before the gate opened.
     func requestPermission(_ params: RequestPermissionRequest) async throws -> RequestPermissionResponse {
         entered.yield(params.sessionId)
-        await gate.wait()
+        await withTaskCancellationHandler {
+            await gate.wait()
+        } onCancel: { [cancelled] in
+            cancelled?.yield()
+        }
         exited?.yield()
+        try Task.checkCancellation()
         return RequestPermissionResponse(outcome: outcome)
     }
 

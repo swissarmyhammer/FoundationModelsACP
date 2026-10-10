@@ -192,7 +192,12 @@ public final class ClientSideConnection: Sendable {
     /// binding cannot be replaced by a runtime table over the routing metadata.
     ///
     /// A permission request goes through `permissions`, so that
-    /// ``sessionCancel(_:)`` can answer it before the handler returns.
+    /// ``sessionCancel(_:)`` can answer it before the handler returns. A
+    /// `$/cancel_request` for a permission request gets the answer of the
+    /// handler, or the `-32800` error when the handler throws
+    /// `CancellationError`. It never gets the `cancelled` outcome, as the ACP
+    /// v2 cancellation rules require
+    /// (https://agentclientprotocol.com/protocol/v2/cancellation).
     ///
     /// - Parameters:
     ///   - handler: The routing table's handler name for the method.

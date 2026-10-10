@@ -133,10 +133,26 @@ comments:
     - notes: No other test support file has a wrapper that records a frame kind and forwards. `CapturingTransport` (GoldenSessionEndToEndTests.swift) records raw bytes for a golden comparison, so the frame-kind hook does not apply.
     - next: /review
   timestamp: 2026-10-10T07:33:41.716690+00:00
+- actor: claude-code
+  id: 01m4jbtxa4aefazp14vf3bthtg
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (d340de8). 0 findings, 0 confirmed, 0 refuted. 7 validator runs, 0 failed. 2 files reviewed. All prior findings are checked.
+    - next: none. The task moved to done.
+  timestamp: 2026-10-10T07:35:58.532051+00:00
+- actor: claude-code
+  id: 01m4jbv535a26zqew7e0yd5a1t
+  text: |-
+    ### finish iteration 4 — clean
+    - implement: changed — WireOrderTestSupport.swift, UserMessageInsertionTests.swift (LoggingTransport per-frame hook; HistoryProbeTransport removed)
+    - test: green — swift test 486 + 135 passed; IntegrationTests 7 passed; 0 warnings
+    - commit: d340de8
+    - review: clean — 0 findings; both prior findings checked
+  timestamp: 2026-10-10T07:36:06.501858+00:00
 depends_on:
 - 01M4GH23E1QC4SW735FQR92KN3
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: b180
 title: Do not send the user_message echo when the prompt handler throws
 ---
 ## Problem

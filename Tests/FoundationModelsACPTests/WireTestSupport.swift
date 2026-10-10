@@ -109,6 +109,43 @@ func errorEnvelope(id: JSONValue, error: RequestError) -> JSONValue {
     ])
 }
 
+/// Builds the envelopes that a raw peer writes to send a request or to
+/// cancel one.
+enum RawPeerEnvelope {
+    /// The JSON-RPC version of each envelope.
+    static let jsonrpcVersion: JSONValue = .string("2.0")
+
+    /// The wire method of the protocol-level cancel notification.
+    static let cancelRequestMethod = "$/cancel_request"
+
+    /// The member of the `$/cancel_request` params that names the request.
+    static let requestIdKey = "requestId"
+
+    /// Frames a JSON-RPC request.
+    ///
+    /// - Parameters:
+    ///   - id: The wire id of the request.
+    ///   - method: The wire method of the request.
+    ///   - params: The raw request params.
+    /// - Returns: The request envelope ready to write over a transport.
+    static func request(id: JSONValue, method: String, params: JSONValue) -> JSONValue {
+        .object([
+            "jsonrpc": jsonrpcVersion,
+            "id": id,
+            "method": .string(method),
+            "params": params,
+        ])
+    }
+
+    /// Frames a `$/cancel_request` notification for one request.
+    ///
+    /// - Parameter requestId: The wire id of the request to cancel.
+    /// - Returns: The notification envelope ready to write over a transport.
+    static func cancelRequest(for requestId: JSONValue) -> JSONValue {
+        notificationEnvelope(method: cancelRequestMethod, params: .object([requestIdKey: requestId]))
+    }
+}
+
 /// Transport stub whose incoming stream and outgoing writes are both driven
 /// by the test: feed `bytes` via its continuation, observe writes on `written`.
 struct ScriptedTransport: ACPTransport {

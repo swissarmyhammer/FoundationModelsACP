@@ -17,8 +17,37 @@ comments:
     - https://agentclientprotocol.com/protocol/v2/tool-calls: the `cancelled` outcome is required when the active work is cancelled. Task ^qfa15v4 already does this on `session/cancel`.
     - Work: keep the current `-32800` answer. Add tests that pin it: (1) a `$/cancel_request` for a pending permission request gives `-32800`; (2) after `session/cancel` answered the request with `cancelled`, a later `$/cancel_request` for the same id gives no second response. Document the rule on the permission handling code.
   timestamp: 2026-10-10T07:21:04.490904+00:00
-position_column: todo
-position_ordinal: '8880'
+- actor: claude-code
+  id: 01m4jc1m9tm020f15aytwr9mvn
+  text: |-
+    ### research
+    - `Connection.handleCancelRequest` cancels `inboundTasks[id]`. `completeInbound` removes the id before it writes the response. Thus a `$/cancel_request` that comes after the `cancelled` answer finds no task and does nothing.
+    - `PendingPermissionRequests.answer(_:using:)` cancels the handler task when the dispatch task is cancelled, and then waits for the handler result. A handler that throws `CancellationError` gives `.requestCancelled` (`-32800`) through `Connection.outcome(of:method:params:)`.
+    - `GatedPermissionClient` ignores cancellation: `Gate.wait()` does not end on cancel, and the handler returns its outcome after the gate opens. To get `-32800`, the handler must throw `CancellationError`. Plan: the handler records its cancellation on an optional stream (so the test opens the gate only after the cancel arrived), and calls `Task.checkCancellation()` after the gate. The existing tests do not read the late result, so they do not change.
+    - Plan for the tests: a raw agent end (`InMemoryTransport` + `WireReader`) that writes the request, `$/cancel_request`, and a probe request with an unknown method. The probe answer shows that no other frame came first. Shared envelope builders go into `WireTestSupport.swift` in an enum namespace (the Swift rule forbids new top-level functions).
+  timestamp: 2026-10-10T07:39:38.682834+00:00
+- actor: claude-code
+  id: 01m4jc5gbc0e0kjxwj4y856ds1
+  text: |-
+    ### implement — changed
+    - Option A is kept. No change to behavior: the two new tests pass on the current code.
+    - New suite `PermissionCancelRequestTests` (Tests/FoundationModelsACPTests/PermissionCancelRequestTests.swift): (1) `aCancelRequestForAPendingPermissionRequestAnswersRequestCancelled` — a `$/cancel_request` for a pending `session/request_permission` gives the `-32800` error envelope; (2) `aCancelRequestAfterTheCancelledOutcomeSendsNoSecondResponse` — after `session/cancel` answered with `cancelled`, a later `$/cancel_request` for the same id gives no frame before the answer to a probe request.
+    - Mutation check: a temporary Option B change in `PendingPermissionRequests.answer` (map `CancellationError` to the `cancelled` outcome) made test (1) fail. The change is reverted.
+    - Test support: `GatedPermissionClient` gets an optional `cancelled` stream (the handler records the cancellation of its task) and calls `Task.checkCancellation()` after the gate. `WireTestSupport.swift` gets the `RawPeerEnvelope` namespace (`request(id:method:params:)`, `cancelRequest(for:)`).
+    - Docs: the rule, with the link https://agentclientprotocol.com/protocol/v2/cancellation, is on the `PendingPermissionRequests` type, on `answer(_:using:)`, and on `ClientSideConnection.serve`.
+    - Note: the older tests in PromptCancellationTests.swift and ConnectionTests.swift still build `$/cancel_request` envelopes inline. They were not changed (no unrelated refactor).
+    - evidence: `swift test` — 488 tests in 52 suites passed, 135 tests in 17 suites passed, 0 issues, 0 warnings.
+    - next: /review
+  timestamp: 2026-10-10T07:41:45.708309+00:00
+- actor: claude-code
+  id: 01m4jc7xs4hfktp121mqg6f8yj
+  text: |-
+    ### test — green
+    - evidence: swift test (root) 488 tests in 52 suites + 135 tests in 17 suites passed; IntegrationTests 7 passed; forced rebuild 0 warnings; PermissionCancelRequestTests + PermissionCancellationTests + PermissionRequestTests 5 runs, 13/13 passed each run.
+    - next: commit, then review.
+  timestamp: 2026-10-10T07:43:04.996500+00:00
+position_column: doing
+position_ordinal: '80'
 title: Decide the answer to $/cancel_request for a pending session/request_permission
 ---
 ## Problem

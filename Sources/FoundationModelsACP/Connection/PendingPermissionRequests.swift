@@ -13,6 +13,17 @@ import Synchronization
 /// The handler of each request runs in its own task, so that a cancel can
 /// answer the request before the handler returns. The connection then ignores
 /// the late result of the handler.
+///
+/// A `$/cancel_request` for a pending permission request has a different
+/// rule. The ACP v2 cancellation rules
+/// (https://agentclientprotocol.com/protocol/v2/cancellation) say that the
+/// receiver MUST send a valid response or a `-32800` error. Thus the
+/// connection cancels the handler task and sends the result of the handler:
+/// its answer, or `-32800` when it throws `CancellationError`. It does not
+/// send the `cancelled` outcome, which is the answer to `session/cancel`
+/// only. When `session/cancel` answered the request first, a later
+/// `$/cancel_request` for it finds no request, and the connection sends no
+/// second response.
 final class PendingPermissionRequests: Sendable {
     /// The handler that answers one permission request: the
     /// `Client.requestPermission(_:)` of the served client.
@@ -32,7 +43,9 @@ final class PendingPermissionRequests: Sendable {
     ///
     /// When the dispatch task is cancelled (for example, by a
     /// `$/cancel_request` from the agent), the handler task is cancelled too,
-    /// and the result of the handler is the answer, as before.
+    /// and the result of the handler is the answer. A `CancellationError`
+    /// from the handler gives the `-32800` error, not the `cancelled`
+    /// outcome (see the type documentation).
     ///
     /// When the cancel comes first, this method returns the `cancelled`
     /// outcome at once and cancels the handler task. The dispatch task then
