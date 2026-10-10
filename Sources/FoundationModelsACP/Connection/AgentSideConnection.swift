@@ -387,81 +387,98 @@ public final class AgentSideConnection: Sendable {
         insert(request, messageId: messageId) { _ in }
     }
 
-    /// Inserts the prompt as a user message, applies the echo to a retained
-    /// history, echoes the message to the client, and returns the identifier
-    /// of the message.
+    /// Inserts the prompt as a user message, echoes the message to the
+    /// client, gives the echo to a retained history, and returns the
+    /// identifier of the message.
     ///
     /// This method does the same steps as ``insertUserMessage(_:messageId:)``.
-    /// It also applies the `user_message` echo to `history` before it
-    /// returns. Thus, the transcript of the history has the message with the
-    /// same identifier, and a later `session/resume` replay keeps that
-    /// identifier.
+    /// It also gives the `user_message` echo to `history`. Thus, the
+    /// transcript of the history has the message with the same identifier,
+    /// and a later `session/resume` replay keeps that identifier.
     ///
-    /// The method is synchronous, so an agent can give it the history in a
-    /// lock or in actor-isolated state:
+    /// The history and the client get the message on the same condition.
+    /// After the connection writes the success response to the current
+    /// request, it calls `history` with the echo, and then sends the echo.
+    /// Thus `history` runs after this method returns:
     ///
     /// ```swift
-    /// let messageId = history.withLock { connection.insertUserMessage(params, into: &$0) }
+    /// let messageId = connection.insertUserMessage(params) { update in
+    ///     history.withLock { _ = $0.apply(update) }
+    /// }
     /// ```
+    ///
+    /// When the connection writes an error response, or writes no response,
+    /// it does not call `history` and does not send the echo. Thus a handler
+    /// that throws an error that is not a cancellation after this call
+    /// leaves the history without the message. Outside a request handler,
+    /// the method also does not call `history`.
     ///
     /// - Parameters:
     ///   - request: The prompt request. The echo carries its session and its
     ///     content.
     ///   - messageId: The identifier of the user message. When it is `nil`,
     ///     the method makes a new unique identifier.
-    ///   - history: The retained history of the session. The method applies
-    ///     the echo to it.
+    ///   - history: Applies the echo to the retained history of the session.
+    ///     The connection calls it one time, after the success response and
+    ///     before the echo, or never.
     /// - Returns: The identifier of the user message. Return it in
     ///   ``PromptResponse/messageId``.
     @discardableResult
     public func insertUserMessage(
         _ request: PromptRequest,
         messageId: MessageId? = nil,
-        into history: inout SessionMergeEngine
+        into history: @escaping @Sendable (SessionUpdate) -> Void
     ) -> MessageId {
-        insert(request, messageId: messageId) { history.apply($0) }
+        insert(request, messageId: messageId, recording: history)
     }
 
-    /// Makes the `user_message` echo of a prompt, gives it to `record`,
-    /// accepts the current request, and sends the echo after the response to
-    /// the current request.
+    /// Makes the `user_message` echo of a prompt, accepts the current
+    /// request, and after the success response to the current request gives
+    /// the echo to `record` and sends it.
     ///
     /// - Parameters:
     ///   - request: The prompt request.
     ///   - messageId: The identifier of the user message, or `nil` for a new
     ///     unique identifier.
-    ///   - record: Gets the echo update before the method returns.
+    ///   - record: Gets the echo update after the success response and
+    ///     before the echo is sent.
     /// - Returns: The identifier of the user message.
     private func insert(
         _ request: PromptRequest,
         messageId: MessageId?,
-        recording record: (SessionUpdate) -> Void
+        recording record: @escaping @Sendable (SessionUpdate) -> Void
     ) -> MessageId {
         let insertedId = messageId ?? MessageId(rawValue: UUID().uuidString)
         let echo = UpdateSessionNotification(
             sessionId: request.sessionId,
             update: .userMessage(UserMessage(messageId: insertedId, content: .value(request.prompt)))
         )
-        record(echo.update)
-        acceptPrompt(naming: insertedId, echoing: echo)
+        acceptPrompt(naming: insertedId, echoing: echo, recording: record)
         return insertedId
     }
 
     /// Accepts the current request with a response that names the inserted
-    /// message, and sends a `user_message` echo after that response.
+    /// message. After that response, gives the `user_message` echo to
+    /// `record` and sends the echo.
     ///
     /// After this call, a cancellation of the handler does not give a
     /// `-32800` error: the connection sends the accepted response. After an
-    /// error response, the connection does not send the echo.
+    /// error response, the connection does not call `record` and does not
+    /// send the echo.
     ///
     /// With no current request, the echo cannot follow a response. This is
     /// an error of the caller: the method stops a debug build, logs the
-    /// error, and does not send the echo.
+    /// error, does not call `record`, and does not send the echo.
     ///
     /// - Parameters:
     ///   - messageId: The identifier of the inserted user message.
     ///   - echo: The echo notification.
-    private func acceptPrompt(naming messageId: MessageId, echoing echo: UpdateSessionNotification) {
+    ///   - record: Gets the echo update before the echo is sent.
+    private func acceptPrompt(
+        naming messageId: MessageId,
+        echoing echo: UpdateSessionNotification,
+        recording record: @escaping @Sendable (SessionUpdate) -> Void
+    ) {
         guard let hooks = Connection.currentResponseHooks else {
             assertionFailure("insertUserMessage must run in the handler of a request")
             logger.log(
@@ -472,6 +489,7 @@ public final class AgentSideConnection: Sendable {
         }
         accept(PromptResponse(messageId: messageId), in: hooks)
         hooks.appendSuccessOnly { [self] in
+            record(echo.update)
             do {
                 try await sessionUpdate(echo)
             } catch {

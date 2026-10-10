@@ -62,9 +62,12 @@ struct LoggingTransport: ACPTransport {
     /// `session/request_permission`) also has an `id`, so the `method` check
     /// is necessary.
     ///
+    /// Other test transports also use this method to classify the frames
+    /// that they write.
+    ///
     /// - Parameter data: The outgoing bytes of one frame.
     /// - Returns: `"update"`, `"response"`, or `"other"`.
-    private static func classify(_ data: Data) -> String {
+    static func classify(_ data: Data) -> String {
         guard
             let value = try? JSONDecoder().decode(JSONValue.self, from: data),
             case .object(let fields) = value

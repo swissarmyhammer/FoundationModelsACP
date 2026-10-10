@@ -69,6 +69,37 @@ comments:
     - implement: stuck — no files changed. `insertUserMessage(_:messageId:into:)` takes `inout SessionMergeEngine`. The success-only work cannot get to that value after the method returns. To fix the finding at AgentSideConnection.swift:452, the public signature must change. A person must choose: (A) an `@escaping @Sendable (SessionUpdate) -> Void` parameter, (B) a new `SessionHistory: Sendable` class that holds `Mutex<SessionMergeEngine>`, or (C) another form.
     - next: wait for the user decision, then run /implement again.
   timestamp: 2026-10-09T21:04:38.882727+00:00
+- actor: claude-code
+  id: 01m4jazh6rcy7bpywsn9wwg2fg
+  text: |-
+    ### decision — option A
+    The user selected option A: change the parameter to `into history: @escaping @Sendable (SessionUpdate) -> Void`. The connection calls the closure in the success-only work, after the response and before the echo. Update the doc comments and the doc example. Add the `.recordInHistory` test that throws after insertion and expects an empty history.
+  timestamp: 2026-10-10T07:21:01.400144+00:00
+- actor: claude-code
+  id: 01m4jb2swddzbz00hdb7md2fjp
+  text: |-
+    Research for option A:
+    - `ResponseHooks.runAll(responseSucceeded:)` runs the success-only entries in registration order after the response is written. When the connection writes no response, `discardAll()` releases them. Thus with option A, the history gets the message only after a success response, and never when no response is written.
+    - Plan: `insert(_:messageId:recording:)` takes an `@escaping @Sendable (SessionUpdate) -> Void`. `acceptPrompt` calls it in the success-only work, before `sessionUpdate(echo)`. The overload without history passes a closure that does nothing.
+    - Outside a request handler, the history also does not get the message (before, it did).
+    - The test `theEchoEntersTheHistoryWithTheMessageIdThatTheResponseNames` must wait for the echo before it reads the history, because the history now gets the message after the response.
+    - The ordering test uses a transport wrapper that records, for each written frame, its kind and the number of history entries. Expected: response with 0 entries, then the echo with 1 entry.
+  timestamp: 2026-10-10T07:22:48.589947+00:00
+- actor: claude-code
+  id: 01m4jb97373zncmqs2dvs4dtbw
+  text: |-
+    ### implement — changed
+    - evidence: 3 files — Sources/FoundationModelsACP/Connection/AgentSideConnection.swift, Tests/FoundationModelsACPTests/UserMessageInsertionTests.swift, Tests/FoundationModelsACPTests/WireOrderTestSupport.swift. `insertUserMessage(_:messageId:into:)` now takes `into history: @escaping @Sendable (SessionUpdate) -> Void`. The success-only work calls it after the response and before the echo. RED (old API): `aHandlerThatThrowsAfterTheInsertionLeavesTheHistoryEmpty` failed (entryCount 1), `theHistoryGetsTheMessageAfterTheResponseAndBeforeTheEcho` failed (response frame saw 1 entry). GREEN: both pass. Full `swift test`: 486 tests in 51 suites and 135 tests in 17 suites pass, 0 warnings. Finding flipped to [x].
+    - notes: The doc example uses `history.withLock { _ = $0.apply(update) }`. The form without `_ =` gives the warning "result of call to 'withLock' is unused", because `apply` returns `Change`. `LoggingTransport.classify(_:)` is now internal so that the new `HistoryProbeTransport` can use it. The existing test `theEchoEntersTheHistoryWithTheMessageIdThatTheResponseNames` now waits for the echo before it reads the history. Outside a request handler, the history does not get the message now. IntegrationTests were not run (no caller of `insertUserMessage` there).
+    - next: /review
+  timestamp: 2026-10-10T07:26:18.727131+00:00
+- actor: claude-code
+  id: 01m4jbcj8wr7cs3ztvgdtaej73
+  text: |-
+    ### test — green
+    - evidence: swift test (root) 486 tests in 51 suites + 135 tests in 17 suites passed; IntegrationTests 7 passed; forced recompile 0 warnings; UserMessageInsertionTests + ResponseHooksTests + PromptCancellationTests 5 runs, 28/28 passed each run.
+    - next: commit, then review.
+  timestamp: 2026-10-10T07:28:08.476094+00:00
 depends_on:
 - 01M4GH23E1QC4SW735FQR92KN3
 position_column: doing
@@ -100,4 +131,4 @@ title: Do not send the user_message echo when the prompt handler throws
 > 4 file(s) not reviewed — excluded by an ignore rule:
 > - `.kanban/ (from .reviewignore)` — 4 file(s)
 
-- [ ] `Sources/FoundationModelsACP/Connection/AgentSideConnection.swift:452` `completeness/invariant-propagation` — The success-only gate covers only the user_message echo. The history record at line 423 still runs unconditionally, before the handler's error is known. When a handler calls insertUserMessage(_:messageId:into:) and then throws, the retained history keeps the user message, but the client gets an error response and no echo. The client and the history now disagree. Before this change, the echo went out on error, so both sides agreed. Move the history record into the success-only work, or otherwise gate it on the response outcome, so the history and the echo follow the same rule. Update the doc of `insertUserMessage(_:messageId:into:)` to say what happens to the history on an error response. Add a test for `.recordInHistory` with a throw after insertion that asserts the history is empty.
+- [x] `Sources/FoundationModelsACP/Connection/AgentSideConnection.swift:452` `completeness/invariant-propagation` — The success-only gate covers only the user_message echo. The history record at line 423 still runs unconditionally, before the handler's error is known. When a handler calls insertUserMessage(_:messageId:into:) and then throws, the retained history keeps the user message, but the client gets an error response and no echo. The client and the history now disagree. Before this change, the echo went out on error, so both sides agreed. Move the history record into the success-only work, or otherwise gate it on the response outcome, so the history and the echo follow the same rule. Update the doc of `insertUserMessage(_:messageId:into:)` to say what happens to the history on an error response. Add a test for `.recordInHistory` with a throw after insertion that asserts the history is empty.

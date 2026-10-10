@@ -37,8 +37,24 @@ comments:
     - evidence: swift test (root) 484 tests in 51 suites + 135 tests in 17 suites passed; IntegrationTests 7 passed; build with -warnings-as-errors clean; filter ElicitationLifecycle|SessionCancelDecoding|SessionUpdateStream 5 runs, 33/33 passed each run.
     - next: commit, then review.
   timestamp: 2026-10-09T22:48:19.414001+00:00
-position_column: doing
-position_ordinal: '8180'
+- actor: claude-code
+  id: 01m4hdq76rz0m6krjy095asfrx
+  text: |-
+    ### review — clean
+    - evidence: review sha HEAD~1..HEAD (517c6e6). 7 files reviewed. 0 findings, 0 confirmed, 0 refuted, 0 failed. 4 .kanban files are not reviewed because of .reviewignore.
+    - next: None. The task is in done.
+  timestamp: 2026-10-09T22:49:40.312892+00:00
+- actor: claude-code
+  id: 01m4hdqfgnrt6xj4mzzeh3251y
+  text: |-
+    ### finish iteration 1 — clean
+    - implement: changed — RoleDispatch.swift, ClientSideConnection.swift, AgentSideConnection.swift, ElicitationLifecycleTests.swift, SessionCancelDecodingTests.swift (new), PromptTestSupport.swift, WireTestSupport.swift
+    - test: green — swift test 484 + 135 passed; IntegrationTests 7 passed; 0 warnings
+    - commit: 517c6e6
+    - review: clean — 0 findings
+  timestamp: 2026-10-09T22:49:48.821408+00:00
+position_column: done
+position_ordinal: b080
 title: Log the other inbound notifications whose payload does not decode
 ---
 ## Problem

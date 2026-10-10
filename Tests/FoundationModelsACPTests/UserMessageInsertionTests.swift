@@ -21,6 +21,22 @@ private enum InsertionMode: Sendable {
     /// work that yields to `deferredWorkRan`, and throws
     /// `insertionFailure`.
     case throwAfterInsertion(deferredWorkRan: AsyncStream<Void>.Continuation)
+
+    /// The helper also applies the echo to the history of the agent. Then the
+    /// handler defers work that yields to `deferredWorkRan`, and throws
+    /// `insertionFailure`.
+    case recordInHistoryThenThrow(deferredWorkRan: AsyncStream<Void>.Continuation)
+
+    /// The continuation that the deferred work of a handler that throws
+    /// yields to, or `nil` when the handler does not throw.
+    var deferredWorkRanBeforeThrow: AsyncStream<Void>.Continuation? {
+        switch self {
+        case .throwAfterInsertion(let deferredWorkRan), .recordInHistoryThenThrow(let deferredWorkRan):
+            deferredWorkRan
+        case .newMessageId, .callerMessageId, .recordInHistory:
+            nil
+        }
+    }
 }
 
 /// The retained history of `InsertingAgent`. The test reads it after the
@@ -28,6 +44,11 @@ private enum InsertionMode: Sendable {
 private final class AgentHistory: Sendable {
     /// The merge engine that holds the history.
     let engine = Mutex(SessionMergeEngine())
+
+    /// The number of entries in the history.
+    var entryCount: Int {
+        engine.withLock { $0.entries.count }
+    }
 }
 
 /// An agent that inserts each prompt as a user message with
@@ -40,7 +61,8 @@ private struct InsertingAgent: Agent {
     /// How the agent calls the helper.
     let mode: InsertionMode
 
-    /// The retained history, for `InsertionMode.recordInHistory`.
+    /// The retained history, for `InsertionMode.recordInHistory` and
+    /// `InsertionMode.recordInHistoryThenThrow`.
     let history: AgentHistory
 
     func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
@@ -70,15 +92,17 @@ private struct InsertingAgent: Agent {
     /// Inserts the prompt as a user message, and names that message in the
     /// response.
     ///
-    /// In `InsertionMode.throwAfterInsertion`, the method defers work after
+    /// In `InsertionMode.throwAfterInsertion` and
+    /// `InsertionMode.recordInHistoryThenThrow`, the method defers work after
     /// the insertion, and then throws.
     ///
     /// - Parameter params: The prompt request.
     /// - Returns: The response that names the inserted user message.
-    /// - Throws: `insertionFailure` in `InsertionMode.throwAfterInsertion`.
+    /// - Throws: `insertionFailure` in `InsertionMode.throwAfterInsertion` and
+    ///   `InsertionMode.recordInHistoryThenThrow`.
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {
         let messageId = insert(params)
-        if case .throwAfterInsertion(let deferredWorkRan) = mode {
+        if let deferredWorkRan = mode.deferredWorkRanBeforeThrow {
             connection.afterRespondingToCurrentRequest { deferredWorkRan.yield() }
             throw insertionFailure
         }
@@ -97,8 +121,10 @@ private struct InsertingAgent: Agent {
             connection.insertUserMessage(request)
         case .callerMessageId(let messageId):
             connection.insertUserMessage(request, messageId: messageId)
-        case .recordInHistory:
-            history.engine.withLock { connection.insertUserMessage(request, into: &$0) }
+        case .recordInHistory, .recordInHistoryThenThrow:
+            connection.insertUserMessage(request) { update in
+                history.engine.withLock { _ = $0.apply(update) }
+            }
         }
     }
 }
@@ -141,7 +167,8 @@ private let orderingRepetitions = 50
 private let insertionTestTimeout = 1
 
 /// The error that `InsertingAgent` throws after the insertion, in
-/// `InsertionMode.throwAfterInsertion`.
+/// `InsertionMode.throwAfterInsertion` and
+/// `InsertionMode.recordInHistoryThenThrow`.
 private let insertionFailure = RequestError.internalError(detail: "the prompt failed after the insertion")
 
 /// The kind that `LoggingTransport` records for a response frame.
@@ -162,6 +189,67 @@ private struct ConnectionPair {
     func close() async {
         await agent.close()
         await client.close()
+    }
+}
+
+/// One frame that `HistoryProbeTransport` saw the agent write.
+private struct WrittenFrame: Equatable, Sendable {
+    /// The kind of the frame, from `LoggingTransport.classify(_:)`.
+    let kind: String
+
+    /// The number of entries in the history of the agent when the agent
+    /// wrote the frame.
+    let historyEntryCount: Int
+}
+
+/// Wraps the agent end of the transport. Before each write, it records the
+/// kind of the frame and the number of entries in the history of the agent.
+///
+/// The record and the write occur in the same task, and the history closure
+/// of `insertUserMessage` runs synchronously. Thus the count shows if the
+/// history got the message before or after each frame.
+private final class HistoryProbeTransport: ACPTransport {
+    /// The real transport.
+    private let underlying: any ACPTransport
+
+    /// The history that the probe counts.
+    private let history: AgentHistory
+
+    /// The frames that the agent wrote, in order.
+    private let written = Mutex<[WrittenFrame]>([])
+
+    /// Makes a probe.
+    ///
+    /// - Parameters:
+    ///   - underlying: The real transport.
+    ///   - history: The history that the probe counts.
+    init(underlying: any ACPTransport, history: AgentHistory) {
+        self.underlying = underlying
+        self.history = history
+    }
+
+    /// The incoming bytes of the real transport.
+    var bytes: AsyncThrowingStream<Data, any Error> { underlying.bytes }
+
+    /// The frames that the agent wrote since the last `reset()`.
+    var frames: [WrittenFrame] {
+        written.withLock { $0 }
+    }
+
+    /// Records the frame, then writes it to the real transport.
+    ///
+    /// - Parameter data: The outgoing bytes.
+    /// - Throws: Any error from the real transport.
+    func write(_ data: Data) async throws {
+        let frame = WrittenFrame(kind: LoggingTransport.classify(data), historyEntryCount: history.entryCount)
+        written.withLock { $0.append(frame) }
+        try await underlying.write(data)
+    }
+
+    /// Removes the recorded frames. Then the setup traffic is not in a
+    /// measurement that starts later.
+    func reset() {
+        written.withLock { $0.removeAll() }
     }
 }
 
@@ -235,8 +323,11 @@ private struct ConnectionPair {
     func theEchoEntersTheHistoryWithTheMessageIdThatTheResponseNames() async throws {
         let history = AgentHistory()
         let pair = try await connect(mode: .recordInHistory, history: history)
+        var updates = pair.client.subscribe(to: insertionSessionId).updates.makeAsyncIterator()
 
         let response = try await pair.client.prompt(insertionPrompt)
+        // The history gets the message before the echo is written.
+        _ = try #require(await updates.nextUpdate())
 
         let recorded = history.engine.withLock { $0.entries }
         let message = SessionEntry.Message(messageId: response.messageId, content: promptContent)
@@ -279,6 +370,52 @@ private struct ConnectionPair {
 
         let frameKinds = await log.events
         #expect(frameKinds == [responseFrameKind])
+        await pair.close()
+    }
+
+    @Test(.timeLimit(.minutes(insertionTestTimeout)))
+    func aHandlerThatThrowsAfterTheInsertionLeavesTheHistoryEmpty() async throws {
+        let history = AgentHistory()
+        let (deferredWorkRan, deferredWorkContinuation) = AsyncStream<Void>.makeStream()
+        let pair = try await connect(
+            mode: .recordInHistoryThenThrow(deferredWorkRan: deferredWorkContinuation),
+            history: history
+        )
+
+        await #expect(throws: insertionFailure) {
+            try await pair.client.prompt(insertionPrompt)
+        }
+        // The deferred work of the handler runs after the history would get
+        // the message.
+        var ran = deferredWorkRan.makeAsyncIterator()
+        _ = try #require(await ran.next())
+
+        #expect(history.entryCount == 0)
+        await pair.close()
+    }
+
+    @Test(.timeLimit(.minutes(insertionTestTimeout)))
+    func theHistoryGetsTheMessageAfterTheResponseAndBeforeTheEcho() async throws {
+        let history = AgentHistory()
+        var probe: HistoryProbeTransport?
+        let pair = try await connect(mode: .recordInHistory, history: history) { agentEnd in
+            let transport = HistoryProbeTransport(underlying: agentEnd, history: history)
+            probe = transport
+            return transport
+        }
+        let transport = try #require(probe)
+        transport.reset()
+        var updates = pair.client.subscribe(to: insertionSessionId).updates.makeAsyncIterator()
+
+        _ = try await pair.client.prompt(insertionPrompt)
+        // When the client has the echo, the agent wrote both frames.
+        _ = try #require(await updates.nextUpdate())
+
+        #expect(
+            transport.frames == [
+                WrittenFrame(kind: responseFrameKind, historyEntryCount: 0),
+                WrittenFrame(kind: updateFrameKind, historyEntryCount: 1),
+            ])
         await pair.close()
     }
 
