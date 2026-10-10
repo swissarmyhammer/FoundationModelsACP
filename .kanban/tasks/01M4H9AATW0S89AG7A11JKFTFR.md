@@ -79,6 +79,42 @@ comments:
     - evidence: 4 files — Tests/FoundationModelsACPTests/PermissionTestSupport.swift, Tests/FoundationModelsACPTests/PermissionCancelRequestTests.swift, Tests/FoundationModelsACPTests/PermissionCancellationTests.swift, Tests/FoundationModelsACPTests/PermissionRequestTests.swift; swift test --filter (3 permission suites) 13/13 passed, 0 warnings
     - next: /review
   timestamp: 2026-10-10T07:48:42.659068+00:00
+- actor: claude-code
+  id: 01m4jctm81742h8ttd8j4xgg6h
+  text: |-
+    ### review — findings
+    - evidence: review sha HEAD~1..HEAD (2f1228c); 6 findings (6 confirmed, 4 refuted) — Tests/FoundationModelsACPTests/PermissionCancelRequestTests.swift:68, Tests/FoundationModelsACPTests/PermissionCancelRequestTests.swift:99 (2 findings), Tests/FoundationModelsACPTests/PermissionCancellationTests.swift:94, Tests/FoundationModelsACPTests/PermissionRequestTests.swift:120, Tests/FoundationModelsACPTests/PermissionRequestTests.swift:152. The prior finding at PermissionCancelRequestTests.swift:65 is checked.
+    - next: Add waitUntilEntered() and close() to GatedPermissionConnection in PermissionTestSupport.swift. Call them from the three permission suites. Rename agentConn to agentConnection. Then review again.
+  timestamp: 2026-10-10T07:53:17.825237+00:00
+- actor: claude-code
+  id: 01m4jcv3gymd8qftzxzwnknr08
+  text: |-
+    ### finish iteration 3 — findings
+    - implement: changed — PermissionTestSupport.swift, PermissionCancelRequestTests.swift, PermissionCancellationTests.swift, PermissionRequestTests.swift (shared GatedPermissionConnection setup)
+    - test: green — swift test 488 + 135 passed; IntegrationTests 7 passed; 0 warnings
+    - commit: 2f1228c
+    - review: findings — PermissionCancelRequestTests.swift:68 (reuse/reuse), PermissionCancelRequestTests.swift:99 (duplication/duplication), PermissionCancelRequestTests.swift:99 (reuse/reuse), PermissionCancellationTests.swift:94 (duplication/duplication), PermissionRequestTests.swift:120 (swift/naming-clarity), PermissionRequestTests.swift:152 (duplication/duplication); prior finding :65 checked
+  timestamp: 2026-10-10T07:53:33.470543+00:00
+- actor: claude-code
+  id: 01m4jd11j7hgreehqnp5xzk78w
+  text: |-
+    ### implement — changed
+    - `GatedPermissionConnection` (PermissionTestSupport.swift) now owns the shared waits and the teardown: `waitUntilEntered() -> SessionId?`, `waitUntilCancelled() -> Bool`, `waitUntilExited() -> Bool` (all through one private `nextValue(of:)`), and `close()` (open the gate, then close the client).
+    - Copies removed: the iterator waits in the three suites, `RawAgentHarness.close()` (the tests call `harness.connection.close()`), the gate-open and client-close pair in `PermissionHarness.close()` and in `PermissionRequestTests`. `theLateResultOfTheHandlerIsIgnored` keeps its gate open, exit wait and `closed` check in the test, and uses `connection.close()` for the client close.
+    - The `selectedOutcome` constant was copied in two suites. It is now `RequestPermissionOutcome.selectedStubOption` in PermissionTestSupport.swift.
+    - Names: `agentConn` -> `agentConnection`; the local `params` -> `request` in `RawAgentHarness.sendPermissionRequest()`; the handler parameters `params` -> `request` in `GatedPermissionClient`. The `params:` labels of `RawPeerEnvelope` and the envelope builders are not changed: they are in WireTestSupport.swift and mirror the JSON-RPC field name.
+    - `PermissionRequestTests` now checks the session that `waitUntilEntered()` gives, in place of `_ =`.
+    - No TDD red step: test-support refactor with no new behavior. The 13 tests of the three suites are the check.
+    - evidence: `timeout 900 swift test --filter 'PermissionCancelRequestTests|PermissionCancellationTests|PermissionRequestTests'` — 13 tests in 3 suites passed, 0 warnings, 0 errors.
+    - next: /review
+  timestamp: 2026-10-10T07:56:48.071329+00:00
+- actor: claude-code
+  id: 01m4jd13mr04zn0n3qygrg4b9n
+  text: |-
+    ### implement — changed
+    - evidence: 4 files — Tests/FoundationModelsACPTests/PermissionTestSupport.swift, Tests/FoundationModelsACPTests/PermissionCancelRequestTests.swift, Tests/FoundationModelsACPTests/PermissionCancellationTests.swift, Tests/FoundationModelsACPTests/PermissionRequestTests.swift; swift test --filter (3 permission suites) 13/13 passed, 0 warnings; 6/6 findings checked
+    - next: /review
+  timestamp: 2026-10-10T07:56:50.200806+00:00
 position_column: doing
 position_ordinal: '80'
 title: Decide the answer to $/cancel_request for a pending session/request_permission
@@ -106,3 +142,17 @@ A person must select the option. Then add tests for the selected behavior.
 > - `.kanban/ (from .reviewignore)` — 4 file(s)
 
 - [x] `Tests/FoundationModelsACPTests/PermissionCancelRequestTests.swift:65` `reuse/reuse` — The new `RawAgentHarness.connect()` repeats the connection setup of `PermissionHarness.connect()`. This creates a second copy of the same wiring that the test suite already has. Call the existing `PermissionHarness.connect()` and add only the raw agent end, or move the shared wiring into `PermissionTestSupport.swift` so that all permission harnesses use it.
+
+## Review Findings (2026-10-10 02:50)
+
+> Scope: `review sha HEAD~1..HEAD` — reviewed the diffs only — lines this change added or modified. 4 file(s) reviewed, 2 not reviewed.
+
+> 2 file(s) not reviewed — excluded by an ignore rule:
+> - `.kanban/ (from .reviewignore)` — 2 file(s)
+
+- [x] `Tests/FoundationModelsACPTests/PermissionCancelRequestTests.swift:68` `reuse/reuse` — The helper exposes the raw entered stream, and every suite then makes its own iterator and waits for the first value. The same wait is repeated in each suite, so the helper should offer the wait. Add an async method to GatedPermissionConnection, for example waitUntilEntered() -> SessionId?, that makes the iterator and returns its next value. Call it from each suite.
+- [x] `Tests/FoundationModelsACPTests/PermissionCancelRequestTests.swift:99` `duplication/duplication` — The teardown body of RawAgentHarness.close() repeats the same two statements as PermissionCancellationTests.close(): open the gate, then close the client. The copies can drift apart. Move the shared body into GatedPermissionConnection as one close() method. Add `func close() async { gate.open(); await client.close() }` to GatedPermissionConnection in PermissionTestSupport.swift. Make RawAgentHarness.close() call `connection.close()`, and make PermissionHarness.close() call `connection.close()` before `agent.close()`.
+- [x] `Tests/FoundationModelsACPTests/PermissionCancelRequestTests.swift:99` `reuse/reuse` — The teardown of the new GatedPermissionConnection is copied into each suite. It opens the gate and closes the client, and the helper has no method for it. The helper should own this teardown. Add an async close() method to GatedPermissionConnection that opens the gate and closes the client. Call it from each suite's close() or teardown. Keep any extra steps, such as the exited/closed checks in theLateResultOfTheHandlerIsIgnored, in that test.
+- [x] `Tests/FoundationModelsACPTests/PermissionCancellationTests.swift:94` `duplication/duplication` — The gate-open and client-close pair in PermissionHarness.close() is a copy of the same pair in RawAgentHarness.close(). Keep one shared teardown on GatedPermissionConnection. Replace lines 94-95 with one call to a `close()` method on GatedPermissionConnection, which owns the gate and the client. Add that method once in PermissionTestSupport.swift, as described for the other site.
+- [x] `Tests/FoundationModelsACPTests/PermissionRequestTests.swift:120` `swift/naming-clarity` — The new local name `agentConn` abbreviates `connection`. The naming-clarity rule asks for full words over abbreviations, so the name should be `agentConnection`. The rule bans names such as `cnt`, `idx`, `usr` and `mgr`, and `agentConn` is the same kind of short form. This line is added or modified by the change, so the name is in scope. Rename the local to `agentConnection` at line 120, and rename its uses in the same test (line 127 `agentConn.requestPermission`, line 140 `agentConn.sessionUpdate`, line 151 `agentConn.close()`).
+- [x] `Tests/FoundationModelsACPTests/PermissionRequestTests.swift:152` `duplication/duplication` — The teardown at the end of the test repeats the same close step used by the other two permission suites. The test opens the gate earlier (line 147) and then closes the client here, so the teardown is split across the body. Copies of this teardown can drift apart. Move it into GatedPermissionConnection as one close() method, as in the earlier finding. Replace the gate-open and client-close pair with one call to a `close()` method on GatedPermissionConnection in PermissionTestSupport.swift. Use that call at this site, and at the sites named in the earlier findings.

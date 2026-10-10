@@ -21,12 +21,6 @@ private let cancelledSession = StubAgent.sessionId
 /// A session that the client does not cancel.
 private let otherSession = SessionId(rawValue: "other-session")
 
-/// The outcome that the handler of `GatedPermissionClient` gives in this
-/// suite: it selects the one option of `RequestPermissionRequest.stub(for:)`.
-private let selectedOutcome = RequestPermissionOutcome.selected(
-    SelectedPermissionOutcome(optionId: RequestPermissionRequest.stubOptionId)
-)
-
 /// The two ends of one test connection, and the probes of the client.
 private struct PermissionHarness {
     /// The agent side, which sends `session/request_permission`.
@@ -45,7 +39,7 @@ private struct PermissionHarness {
     /// - Returns: The harness.
     static func connect() async -> PermissionHarness {
         let log = EventLog()
-        let connection = await GatedPermissionConnection.connect(outcome: selectedOutcome) { clientEnd in
+        let connection = await GatedPermissionConnection.connect(outcome: .selectedStubOption) { clientEnd in
             LoggingTransport(underlying: clientEnd, log: log)
         }
         let agent = await connection.connectStubAgent()
@@ -60,8 +54,7 @@ private struct PermissionHarness {
     func sendPermissionRequest(for sessionId: SessionId) async throws -> Task<RequestPermissionResponse, any Error> {
         let agent = agent
         let answer = Task { try await agent.requestPermission(.stub(for: sessionId)) }
-        var started = connection.entered.makeAsyncIterator()
-        #expect(try #require(await started.next()) == sessionId)
+        #expect(try #require(await connection.waitUntilEntered()) == sessionId)
         return answer
     }
 
@@ -91,8 +84,7 @@ private struct PermissionHarness {
 
     /// Opens the gate, and closes the two sides.
     func close() async {
-        connection.gate.open()
-        await connection.client.close()
+        await connection.close()
         await agent.close()
     }
 }
@@ -135,9 +127,8 @@ private struct PermissionHarness {
         _ = try await harness.answer(to: answer)
 
         harness.connection.gate.open()
-        var ended = harness.connection.exited.makeAsyncIterator()
-        _ = try #require(await ended.next())
-        await harness.connection.client.close()
+        try #require(await harness.connection.waitUntilExited())
+        await harness.connection.close()
         _ = await harness.connection.client.closed
 
         #expect(await harness.log.events == [notificationFrame, responseFrame])
@@ -154,7 +145,7 @@ private struct PermissionHarness {
         _ = try await harness.answer(to: cancelledAnswer)
         harness.connection.gate.open()
 
-        #expect(try await harness.answer(to: otherAnswer).outcome == selectedOutcome)
+        #expect(try await harness.answer(to: otherAnswer).outcome == .selectedStubOption)
         await harness.close()
     }
 
@@ -166,7 +157,7 @@ private struct PermissionHarness {
 
         let answer = try await harness.sendPermissionRequest(for: cancelledSession)
 
-        #expect(try await harness.answer(to: answer).outcome == selectedOutcome)
+        #expect(try await harness.answer(to: answer).outcome == .selectedStubOption)
         await harness.close()
     }
 }

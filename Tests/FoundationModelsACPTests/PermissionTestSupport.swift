@@ -20,6 +20,16 @@ extension RequestPermissionRequest {
     }
 }
 
+/// The outcome that the permission suites expect from a handler that is not
+/// cancelled.
+extension RequestPermissionOutcome {
+    /// Selects the one option of `RequestPermissionRequest.stub(for:)`. It is
+    /// not `cancelled`, so a test can tell the two outcomes apart.
+    static let selectedStubOption = RequestPermissionOutcome.selected(
+        SelectedPermissionOutcome(optionId: RequestPermissionRequest.stubOptionId)
+    )
+}
+
 /// A release that each waiting task gets one time. A cancellation of a
 /// waiting task does not end its wait, so a handler that waits here stands
 /// for a handler that ignores cancellation.
@@ -83,12 +93,12 @@ struct GatedPermissionClient: Client {
 
     /// Waits for the gate, and then gives `outcome`.
     ///
-    /// - Parameter params: The permission request.
+    /// - Parameter request: The permission request.
     /// - Returns: The response with `outcome`.
     /// - Throws: `CancellationError` when the task of the handler was
     ///   cancelled before the gate opened.
-    func requestPermission(_ params: RequestPermissionRequest) async throws -> RequestPermissionResponse {
-        entered.yield(params.sessionId)
+    func requestPermission(_ request: RequestPermissionRequest) async throws -> RequestPermissionResponse {
+        entered.yield(request.sessionId)
         await withTaskCancellationHandler {
             await gate.wait()
         } onCancel: { [cancelled] in
@@ -99,7 +109,7 @@ struct GatedPermissionClient: Client {
         return RequestPermissionResponse(outcome: outcome)
     }
 
-    func createElicitation(_ params: CreateElicitationRequest) async throws -> CreateElicitationResponse {
+    func createElicitation(_ request: CreateElicitationRequest) async throws -> CreateElicitationResponse {
         throw RequestError.methodNotFound("createElicitation")
     }
 
@@ -164,5 +174,43 @@ struct GatedPermissionConnection {
     /// - Returns: The agent side, which sends `session/request_permission`.
     func connectStubAgent() async -> AgentSideConnection {
         await AgentSideConnection(stream: agentEnd) { _ in StubAgent() }
+    }
+
+    /// Waits until the next permission request reaches the handler.
+    ///
+    /// - Returns: The session of the request, or `nil` when `entered` ended.
+    func waitUntilEntered() async -> SessionId? {
+        await Self.nextValue(of: entered)
+    }
+
+    /// Waits until the task of the next permission handler is cancelled.
+    ///
+    /// - Returns: `true` when a handler task is cancelled, or `false` when
+    ///   `cancelled` ended.
+    func waitUntilCancelled() async -> Bool {
+        await Self.nextValue(of: cancelled) != nil
+    }
+
+    /// Waits until the next permission handler ends.
+    ///
+    /// - Returns: `true` when a handler ended, or `false` when `exited` ended.
+    func waitUntilExited() async -> Bool {
+        await Self.nextValue(of: exited) != nil
+    }
+
+    /// Opens the gate, and closes the client side. The open gate lets each
+    /// waiting handler end, so the close does not wait for a human.
+    func close() async {
+        gate.open()
+        await client.close()
+    }
+
+    /// Waits for the next value of a probe stream.
+    ///
+    /// - Parameter stream: The probe stream.
+    /// - Returns: The next value, or `nil` when the stream ended.
+    private static func nextValue<Element>(of stream: AsyncStream<Element>) async -> Element? {
+        var iterator = stream.makeAsyncIterator()
+        return await iterator.next()
     }
 }
