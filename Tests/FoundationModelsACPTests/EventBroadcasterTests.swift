@@ -1,3 +1,5 @@
+import Dispatch
+import Synchronization
 import Testing
 
 @testable import FoundationModelsACP
@@ -144,5 +146,71 @@ import Testing
         await consumer.value
 
         #expect(!broadcaster.withState { $0.publish("after", to: Self.topic) })
+    }
+
+    /// The number of rounds that the deadlock test runs. Each round has one
+    /// chance to cancel the consumer while a yield resumes it.
+    private static let cancelRaceRounds = 2_000
+
+    /// The time that the deadlock test waits for all its rounds.
+    private static let cancelRaceDeadline = Duration.seconds(30)
+
+    /// A cancel of the consumer on one thread, while a yield on a different
+    /// thread resumes that consumer, must not cause a deadlock.
+    ///
+    /// The cancel holds the task lock of the consumer and runs
+    /// `onTermination`, which detaches the subscriber. The yield needs the
+    /// same task lock. Thus the broadcaster must not hold its lock while it
+    /// yields, because the detach waits for that lock.
+    ///
+    /// The rounds run on Dispatch threads, not in the cooperative pool. Thus a
+    /// deadlock stops only those threads, and the test fails at its deadline.
+    @Test func aCancelWhileAYieldResumesTheConsumerDoesNotDeadlock() async throws {
+        let progress = RoundCounter()
+        DispatchQueue.global().async {
+            for _ in 0..<Self.cancelRaceRounds {
+                Self.runOneCancelRaceRound()
+                progress.increment()
+            }
+        }
+
+        let clock = ContinuousClock()
+        let deadline = clock.now + Self.cancelRaceDeadline
+        while progress.value < Self.cancelRaceRounds, clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(
+            progress.value == Self.cancelRaceRounds,
+            "Only \(progress.value) of \(Self.cancelRaceRounds) rounds ended: a cancel and a yield are in a deadlock"
+        )
+    }
+
+    /// Runs one round of the deadlock test: a consumer waits for events, one
+    /// thread cancels it, and this thread publishes until the subscriber is
+    /// detached.
+    private static func runOneCancelRaceRound() {
+        let broadcaster = Broadcaster(context: [])
+        let events = subscribeLive(broadcaster, to: topic)
+        let consumer = Task.detached {
+            for await _ in events {}
+        }
+        DispatchQueue.global().async {
+            consumer.cancel()
+        }
+        while broadcaster.withState({ $0.publish("tick", to: topic) }) {}
+    }
+}
+
+/// A thread-safe count of the finished rounds of the deadlock test.
+private final class RoundCounter: Sendable {
+    /// The count.
+    private let count = Atomic<Int>(0)
+
+    /// The number of finished rounds.
+    var value: Int { count.load(ordering: .acquiring) }
+
+    /// Adds one finished round.
+    func increment() {
+        count.add(1, ordering: .releasing)
     }
 }
