@@ -1,6 +1,14 @@
 ---
 assignees:
 - claude-code
+comments:
+- actor: claude-code
+  id: 01m4ncdzjzk7c7e9y8e00aejzb
+  text: |-
+    ### commit — changed
+    - evidence: 5f94484 fix(broadcaster): yield events outside the state lock. Pushed to origin/main. Before the fix, the new test stopped after 2 of 2000 rounds. After the fix: 489 + 135 tests pass.
+    - next: AgentViewKit updates its dependency to 5f94484.
+  timestamp: 2026-10-11T11:44:06.751859+00:00
 position_column: done
 position_ordinal: b380
 title: 'Fix ABBA deadlock: EventBroadcaster yields under its Mutex'
