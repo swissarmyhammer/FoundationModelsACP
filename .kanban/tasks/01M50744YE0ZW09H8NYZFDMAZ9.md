@@ -9,8 +9,16 @@ comments:
     - evidence: one full run of `swift test`, exit 0. FoundationModelsACPTests: 494 tests in 53 suites passed. ACPGenerateTests: 135 tests in 17 suites passed. NewSessionResponseHookTests: 5 of 5 passed. The build has no warnings.
     - next: commit, push to main, report the head commit and the CI result to the requester.
   timestamp: 2026-10-15T16:47:31.291623+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m507fgbg3pdc0mxgscht640f
+  text: |-
+    ### commit — changed
+    - evidence: 8412ad1 feat(client): add newSession(_:onResponse:) reader hook. Pushed to main (7570149..8412ad1).
+    - CI: run 38771961915 passed. Codegen diff gate, Build and test (with DocC build), and Integration all passed.
+    - next: none. The requester gets the head commit and the CI result.
+  timestamp: 2026-10-15T16:49:12.560947+00:00
+position_column: done
+position_ordinal: b480
 title: Add a reader hook that runs when a newSession response is decoded
 ---
 Requested by FoundationModelsACPClient (its card ^hfby9sz).
