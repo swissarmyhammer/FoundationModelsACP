@@ -109,6 +109,31 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
         )
     }
 
+    /// Issues an outbound peer request, decodes its typed response, and gives
+    /// the decoded response to `onResponse` in the read loop, before the read
+    /// loop dispatches the next frame.
+    ///
+    /// - Parameters:
+    ///   - handler: The Swift handler name of the peer method to call.
+    ///   - params: The typed request parameters.
+    ///   - responseType: The expected response model type.
+    ///   - onResponse: Runs one time with the decoded response. It does not
+    ///     run on an error response, a response that does not decode, a
+    ///     timeout, a cancel or a close.
+    /// - Returns: The decoded response.
+    /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
+    ///   disconnect.
+    func call<Request: Encodable, Response: Decodable & Sendable>(
+        _ handler: String,
+        _ params: Request,
+        returning responseType: Response.Type,
+        onResponse: @escaping @Sendable (Response) -> Void
+    ) async throws -> Response {
+        try await RoleDispatch.callResult(
+            connection, handler: handler, on: peerSide, params, returning: responseType, onResponse: onResponse
+        )
+    }
+
     /// Sends an outbound peer notification.
     ///
     /// - Parameters:

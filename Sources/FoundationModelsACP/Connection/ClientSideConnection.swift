@@ -360,6 +360,47 @@ public final class ClientSideConnection: Sendable {
         try await core.call("newSession", params, returning: NewSessionResponse.self)
     }
 
+    /// Creates a new session on the agent, and gives the response to
+    /// `onResponse` before the connection dispatches the next inbound frame.
+    ///
+    /// Use this when the agent can send a request for the new session (for
+    /// example `session/request_permission` or `elicitation/create`) directly
+    /// after the `session/new` response. This call returns on a different
+    /// task, so a handler for that request can start before this call
+    /// returns. `onResponse` runs before that handler starts. Thus the client
+    /// can record "this session is opening" in `onResponse`, and a handler can
+    /// find that record.
+    ///
+    /// The contract of `onResponse`:
+    /// - It is synchronous, and it must not block. The connection reads no
+    ///   frame while it runs.
+    /// - It runs on the actor of the connection, in the read loop, in frame
+    ///   order. It does not run on the main actor. Record state that a
+    ///   handler reads in a store that is safe from any thread, for example a
+    ///   `Mutex`.
+    /// - It runs before the connection dispatches the next frame, and before
+    ///   this call returns.
+    /// - It runs at most one time, and only for the response to this call.
+    ///   A concurrent `newSession` call does not cause it to run.
+    /// - It does not run on an error response, a response that does not
+    ///   decode, a timeout, a cancel or a close. In each of these cases this
+    ///   call throws.
+    ///
+    /// - Parameters:
+    ///   - params: The new-session request.
+    ///   - onResponse: Gets the decoded response, as described above.
+    /// - Returns: The new session's identity and configuration. It is the
+    ///   same value that `onResponse` got.
+    /// - Throws: `RequestError` on a peer error, `ConnectionError` on
+    ///   disconnect, `CancellationError` when the calling task is cancelled,
+    ///   or a decode failure on a malformed response.
+    public func newSession(
+        _ params: NewSessionRequest,
+        onResponse: @escaping @Sendable (NewSessionResponse) -> Void
+    ) async throws -> NewSessionResponse {
+        try await core.call("newSession", params, returning: NewSessionResponse.self, onResponse: onResponse)
+    }
+
     /// Lists sessions on the agent.
     ///
     /// - Parameter params: The list-sessions request.

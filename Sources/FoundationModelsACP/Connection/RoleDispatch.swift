@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 // MARK: - Typed coding helpers
 
@@ -155,6 +156,25 @@ enum RoleRouting {
 
 // MARK: - Inbound / outbound dispatch helpers
 
+/// Holds the response that the read loop decoded for one call, so that the
+/// call returns that value and does not decode it again.
+private final class DecodedResponseSlot<Value: Sendable>: Sendable {
+    /// The decoded response, or `nil` before the read loop stores one.
+    private let slot = Mutex<Value?>(nil)
+
+    /// The decoded response, or `nil` when the read loop stored none.
+    var value: Value? {
+        slot.withLock { $0 }
+    }
+
+    /// Stores the decoded response.
+    ///
+    /// - Parameter value: The decoded response.
+    func store(_ value: Value) {
+        slot.withLock { $0 = value }
+    }
+}
+
 /// Decode-call-encode helpers shared by both connection roles.
 ///
 /// Inbound helpers decode parameters, invoke a role handler, and encode the
@@ -267,6 +287,50 @@ enum RoleDispatch {
         returning responseType: Response.Type
     ) async throws -> Response {
         try await call(connection, handler: handler, on: side, params).decoded(as: Response.self)
+    }
+
+    /// Issues an outbound request, decodes its typed response, and gives the
+    /// decoded response to `onResponse` in the read loop of the connection,
+    /// before the read loop dispatches the next frame.
+    ///
+    /// The read loop decodes the response one time. `onResponse` gets that
+    /// value, and this call returns the same value.
+    ///
+    /// - Parameters:
+    ///   - connection: The underlying full-duplex connection.
+    ///   - handler: The Swift handler name to resolve to a wire method.
+    ///   - side: The serving side of the target method.
+    ///   - params: The typed request parameters.
+    ///   - responseType: The expected response model type.
+    ///   - onResponse: Runs one time with the decoded response. It does not
+    ///     run on an error response, a response that does not decode, a
+    ///     timeout, a cancel or a close.
+    /// - Returns: The decoded response.
+    /// - Throws: `RequestError` on a peer error, `ConnectionError` on
+    ///   disconnect, or a decode failure on a malformed response.
+    static func callResult<Request: Encodable, Response: Decodable & Sendable>(
+        _ connection: Connection,
+        handler: String,
+        on side: MethodSide,
+        _ params: Request,
+        returning responseType: Response.Type,
+        onResponse: @escaping @Sendable (Response) -> Void
+    ) async throws -> Response {
+        let wire = try wireCall(handler: handler, on: side, params)
+        let decoded = DecodedResponseSlot<Response>()
+        let result = try await connection.request(
+            method: wire.method, params: wire.params, timeout: nil
+        ) { result in
+            // A result that does not decode skips the hook. The caller then
+            // decodes again below, and gets the decode failure.
+            guard let response = try? result.decoded(as: Response.self) else { return }
+            decoded.store(response)
+            onResponse(response)
+        }
+        if let response = decoded.value {
+            return response
+        }
+        return try result.decoded(as: Response.self)
     }
 
     /// Sends an outbound notification; no response is expected.

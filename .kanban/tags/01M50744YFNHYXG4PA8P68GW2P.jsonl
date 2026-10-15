@@ -1,0 +1,1 @@
+{"id":"01M50744YJE1XTS04BPV2AN35Q","timestamp":"2026-10-15T16:43:00.434746Z","op":"create","item_id":"01M50744YFNHYXG4PA8P68GW2P","forward_patch":"--- original\n+++ modified\n@@ -0,0 +1,2 @@\n+color: 006b75\n+tag_name: defect\n","reverse_patch":"--- original\n+++ modified\n@@ -1,2 +0,0 @@\n-color: 006b75\n-tag_name: defect\n","transaction_id":null}

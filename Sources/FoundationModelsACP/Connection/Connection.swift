@@ -404,6 +404,11 @@ public actor Connection {
     /// (`cancelOutbound`) so both agree on the same field name.
     private static let requestIdKey = "requestId"
 
+    /// A closure that gets the `result` of one successful response. It runs
+    /// on this actor, in the read loop, before the caller resumes and before
+    /// the read loop dispatches the next frame.
+    typealias ResultHook = @Sendable (JSONValue) -> Void
+
     /// One outbound request awaiting its response.
     private struct PendingRequest {
         /// Resumed with the response's `result`, or throwing on error.
@@ -411,6 +416,9 @@ public actor Connection {
         /// Rejects the request with `ConnectionError.timedOut` when it fires;
         /// cancelled as soon as the request resolves.
         let timeout: Task<Void, Never>?
+        /// Gets the `result` of a successful response before `continuation`
+        /// resumes. `nil` for no hook.
+        let onResult: ResultHook?
     }
 
     /// One in-flight batch call's response collector: how many owed responses
@@ -595,6 +603,29 @@ public actor Connection {
         params: JSONValue? = nil,
         timeout: Duration? = nil
     ) async throws -> JSONValue {
+        try await request(method: method, params: params, timeout: timeout, onResult: nil)
+    }
+
+    /// Sends one request and suspends until the peer responds. `onResult`
+    /// gets the `result` of a successful response in the read loop, before
+    /// this call returns and before the read loop dispatches the next frame.
+    ///
+    /// - Parameters:
+    ///   - method: The JSON-RPC method name.
+    ///   - params: The request parameters, passed through verbatim.
+    ///   - timeout: Overrides the connection's default request timeout when
+    ///     non-`nil`.
+    ///   - onResult: Runs one time with the `result` of a successful
+    ///     response. It does not run on an error response, a timeout, a
+    ///     cancel or a close. `nil` for no hook.
+    /// - Returns: The response's `result` value.
+    /// - Throws: The same errors as `request(method:params:timeout:)`.
+    func request(
+        method: String,
+        params: JSONValue?,
+        timeout: Duration?,
+        onResult: ResultHook?
+    ) async throws -> JSONValue {
         guard !isClosed else { throw ConnectionError.closed }
         let id: RequestId = .number(Double(nextRequestID))
         nextRequestID += 1
@@ -616,7 +647,7 @@ public actor Connection {
                     return
                 }
                 let timeoutTask = makeTimeoutTask(for: id, after: limit)
-                pending[id] = PendingRequest(continuation: continuation, timeout: timeoutTask)
+                pending[id] = PendingRequest(continuation: continuation, timeout: timeoutTask, onResult: onResult)
                 outgoingRequests.start(id: id, method: method, params: params)
                 // Write only after registering, so a response arriving
                 // immediately always finds its continuation, and a peer
@@ -1132,7 +1163,11 @@ public actor Connection {
         if let error {
             entry.continuation.resume(throwing: RequestError(wire: error))
         } else {
-            entry.continuation.resume(returning: fields[Self.resultKey, default: .null])
+            let result = fields[Self.resultKey, default: .null]
+            // The hook runs here, synchronously in the read loop, so it comes
+            // before the read loop dispatches the next frame.
+            entry.onResult?(result)
+            entry.continuation.resume(returning: result)
         }
     }
 
