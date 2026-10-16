@@ -41,6 +41,13 @@ comments:
     - evidence: one full run. `swift test`: 506 tests in 54 suites passed, and 135 tests in 17 suites passed. IntegrationTests: 7 tests passed. DocC with `--warnings-as-errors`: exit 0. New test `permissionCancelMetaReachesTheClientHandler`: a reason set before the cancel reaches the client handler, with `cancelledByPeer` true.
     - next: commit, push, watch CI.
   timestamp: 2026-10-16T14:18:35.959223+00:00
+- actor: claude-code
+  id: 01m52h8kxrgftg0s5drwhk2cpm
+  text: |-
+    ### commit — changed
+    - evidence: d72f388 feat(agent): add requestPermission(_:cancellation:) to carry a cancel reason
+    - next: push, watch CI.
+  timestamp: 2026-10-16T14:18:41.464345+00:00
 position_column: done
 position_ordinal: b580
 title: Carry an optional _meta on $/cancel_request (elicitation plan task 50)
