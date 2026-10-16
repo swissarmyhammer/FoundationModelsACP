@@ -15,8 +15,9 @@ import Testing
     // MARK: - Fixtures
 
     /// The timeout of the request in the timeout test. The raw agent end
-    /// never answers that request.
-    private static let shortRequestTimeout: Duration = .milliseconds(50)
+    /// never answers that request. No clock measures it: the test makes the
+    /// timeout fire by hand.
+    private static let testRequestTimeout: Duration = .seconds(7)
 
     /// The wire method of the request that a request-scoped elicitation
     /// names in the elicitation test.
@@ -106,17 +107,19 @@ import Testing
     // MARK: - Timeout and subscription edges
 
     @Test func timedOutCallFinishes() async throws {
-        let peer = await RawAgentPeer(requestTimeout: Self.shortRequestTimeout)
+        let timeouts = ManualRequestTimeouts()
+        let peer = await RawAgentPeer(requestTimeout: Self.testRequestTimeout, timeouts: timeouts)
         defer { await peer.close() }
         var events = peer.client.subscribeToOutgoingRequests().makeAsyncIterator()
+        let caller = peer.startCall { _ = try await $0.logoutAuth(LogoutAuthRequest()) }
 
-        // A timeout proves that the client wrote the request. Any other end
-        // fails the test here, before it waits for the request on the wire.
-        try await #require(throws: ConnectionError.timedOut) {
-            _ = try await peer.client.logoutAuth(LogoutAuthRequest())
-        }
         let request = try await peer.nextRequest()
         #expect(await events.next() == .started(id: request.id, method: request.method))
+
+        // The timeout fails the request before `expireAll()` returns. When it
+        // does not, the test fails here and does not wait for the caller.
+        try #require(await timeouts.expireAll() == [Self.testRequestTimeout])
+        await #expect(throws: ConnectionError.timedOut) { try await caller.value }
         #expect(await events.next() == .finished(id: request.id))
     }
 
@@ -355,15 +358,18 @@ private final class RawAgentPeer {
 
     /// Opens a transport pair and a client connection on one end.
     ///
-    /// - Parameter requestTimeout: The default timeout of each outbound
-    ///   request of the client; `nil` waits forever.
-    init(requestTimeout: Duration? = nil) async {
+    /// - Parameters:
+    ///   - requestTimeout: The default timeout of each outbound request of
+    ///     the client; `nil` waits forever.
+    ///   - timeouts: Starts the request timeouts of the client. The test
+    ///     makes them fire by hand.
+    init(requestTimeout: Duration? = nil, timeouts: ManualRequestTimeouts = ManualRequestTimeouts()) async {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let served = AsyncStream<CreateElicitationRequest>.makeStream()
         self.agentEnd = agentEnd
         reader = WireReader(agentEnd)
         elicitations = served.stream.makeAsyncIterator()
-        let client = await ClientSideConnection(stream: clientEnd, requestTimeout: requestTimeout) { _ in
+        let client = await timeouts.clientConnection(over: clientEnd, requestTimeout: requestTimeout) { _ in
             ElicitationRecordingClient(served: served.continuation)
         }
         self.client = client

@@ -601,12 +601,10 @@ private let resumeWireMethod = RoleRouting.wireMethod(for: "resumeSession", on: 
 /// The wire method of `session/prompt`, from the routing table.
 private let promptWireMethod = RoleRouting.wireMethod(for: "prompt", on: .agent)
 
-/// The timeout, in milliseconds, of the request in the timeout test.
-private let shortRequestTimeoutMilliseconds = 50
-
 /// The timeout of the request in the timeout test. The raw agent end never
-/// answers that request.
-private let shortRequestTimeout: Duration = .milliseconds(shortRequestTimeoutMilliseconds)
+/// answers that request. No clock measures it: the test makes the timeout
+/// fire by hand.
+private let testRequestTimeout: Duration = .seconds(7)
 
 /// Starts `session/resume` of `sessionOne` and returns its wire id, so a test
 /// can script the replay and the response by hand.
@@ -680,7 +678,8 @@ func anErrorResponseYieldsAFailedMarker() async throws {
 @Test
 func aTimedOutRequestYieldsAFailedMarker() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
-    let client = await ClientSideConnection(stream: clientEnd, requestTimeout: shortRequestTimeout) { _ in
+    let timeouts = ManualRequestTimeouts()
+    let client = await timeouts.clientConnection(over: clientEnd, requestTimeout: testRequestTimeout) { _ in
         MinimalClient()
     }
     defer {
@@ -691,7 +690,9 @@ func aTimedOutRequestYieldsAFailedMarker() async throws {
 
     var events = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
     let (prompt, id) = try await startPrompt(on: client, session: sessionOne, reader: reader)
-
+    // The timeout fails the request before `expireAll()` returns. When it does
+    // not, the test fails here and does not wait for the prompt.
+    try #require(await timeouts.expireAll() == [testRequestTimeout])
     await #expect(throws: ConnectionError.timedOut) { try await prompt.value }
     #expect(await events.next() == failedPromptMarker(id: id))
 }

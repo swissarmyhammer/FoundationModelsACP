@@ -163,51 +163,66 @@ import FoundationModelsACP
 
 // MARK: - Timeout
 
+// The tests drive each timeout by hand with `ManualRequestTimeouts`, so no
+// test reads a clock. The peer end never answers the request. The request
+// frame on the wire shows that the timeout started, because the connection
+// starts it before it writes the frame. Each test requires that the timeout
+// failed the request before it waits for the caller, so a broken timeout
+// fails the test at once.
+
+/// The time limit in the timeout tests. No clock measures it.
+private let testRequestTimeout: Duration = .seconds(7)
+
 @Test func perRequestTimeoutFiresWhenPeerNeverAnswers() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
-    let client = await Connection(transport: clientEnd)
-    defer {
-        await client.close()
-        agentEnd.close()
-    }
-
-    await #expect(throws: ConnectionError.timedOut) {
-        _ = try await client.request(method: "hang", timeout: .milliseconds(50))
-    }
-    _ = agentEnd  // keep the peer end alive so EOF does not race the timeout
-}
-
-@Test func connectionDefaultTimeoutApplies() async throws {
-    let (clientEnd, agentEnd) = InMemoryTransport.pair()
-    let client = await Connection(transport: clientEnd, requestTimeout: .milliseconds(50))
-    defer {
-        await client.close()
-        agentEnd.close()
-    }
-
-    await #expect(throws: ConnectionError.timedOut) {
-        _ = try await client.request(method: "hang")
-    }
-    _ = agentEnd
-}
-
-@Test func lateResponseAfterTimeoutIsIgnored() async throws {
-    let (clientEnd, agentEnd) = InMemoryTransport.pair()
-    let client = await Connection(transport: clientEnd)
+    let timeouts = ManualRequestTimeouts()
+    let client = await timeouts.connection(over: clientEnd)
     defer {
         await client.close()
         agentEnd.close()
     }
     let reader = WireReader(agentEnd)
 
-    await #expect(throws: ConnectionError.timedOut) {
-        _ = try await client.request(method: "slow", timeout: .milliseconds(30))
+    let caller = Task { try await client.request(method: "hang", timeout: testRequestTimeout) }
+    _ = try #require(requestID(of: try await reader.next()))
+    try #require(await timeouts.expireAll() == [testRequestTimeout])
+    await #expect(throws: ConnectionError.timedOut) { try await caller.value }
+}
+
+@Test func connectionDefaultTimeoutApplies() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let timeouts = ManualRequestTimeouts()
+    let client = await timeouts.connection(over: clientEnd, requestTimeout: testRequestTimeout)
+    defer {
+        await client.close()
+        agentEnd.close()
     }
+    let reader = WireReader(agentEnd)
+
+    let caller = Task { try await client.request(method: "hang") }
+    _ = try #require(requestID(of: try await reader.next()))
+    try #require(await timeouts.expireAll() == [testRequestTimeout])
+    await #expect(throws: ConnectionError.timedOut) { try await caller.value }
+}
+
+@Test func lateResponseAfterTimeoutIsIgnored() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let timeouts = ManualRequestTimeouts()
+    let client = await timeouts.connection(over: clientEnd)
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
+    let reader = WireReader(agentEnd)
+
+    let caller = Task { try await client.request(method: "slow", timeout: testRequestTimeout) }
+    let first = try await reader.next()
+    let firstID = try #require(requestID(of: first))
+    try #require(await timeouts.expireAll() == [testRequestTimeout])
+    await #expect(throws: ConnectionError.timedOut) { try await caller.value }
 
     // Answer the timed-out request after the fact; the connection must drop
     // the response and stay fully usable for the next exchange.
-    let first = try await reader.next()
-    let firstID = try #require(requestID(of: first))
     try await send(
         .object(["jsonrpc": .string("2.0"), "id": firstID, "result": .string("too late")]),
         over: agentEnd

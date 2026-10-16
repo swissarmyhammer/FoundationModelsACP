@@ -47,6 +47,9 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
     ///   - outgoingRequests: The tracker that records the start and the finish
     ///     of each outbound request. The owner gives a tracker with a session
     ///     observer when it needs the finish of each session request.
+    ///   - scheduleRequestTimeout: Starts the timeout of each outbound request
+    ///     that has a time limit. Only a test gives a value that is not the
+    ///     default.
     init(
         stream: any ACPTransport,
         logger: ACPLogger,
@@ -56,7 +59,8 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
         dispatchRequest: @escaping RequestDispatch,
         dispatchNotification: @escaping NotificationDispatch,
         onClose: Connection.CloseHandler? = nil,
-        outgoingRequests: OutgoingRequestTracker = OutgoingRequestTracker()
+        outgoingRequests: OutgoingRequestTracker = OutgoingRequestTracker(),
+        scheduleRequestTimeout: @escaping Connection.RequestTimeoutScheduler = Connection.startRequestTimeout
     ) async {
         self.peerSide = peerSide
         let holder = RoleHolder<Role>()
@@ -78,7 +82,8 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
                 await dispatchNotification(info.handlerName, params, role)
             },
             onClose: onClose,
-            outgoingRequests: outgoingRequests
+            outgoingRequests: outgoingRequests,
+            scheduleRequestTimeout: scheduleRequestTimeout
         )
         self.holder = holder
     }

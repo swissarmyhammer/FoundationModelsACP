@@ -46,11 +46,43 @@ public final class ClientSideConnection: Sendable {
     ///     the connection keeps for sessions with no subscriber. See
     ///     ``subscribe(to:)``.
     ///   - factory: Builds the client from this connection.
-    public init(
+    public convenience init(
         stream: any ACPTransport,
         logger: ACPLogger = .disabled,
         requestTimeout: Duration? = nil,
         bufferLimits: SessionUpdateBufferLimits = .default,
+        _ factory: @Sendable (ClientSideConnection) -> any Client
+    ) async {
+        await self.init(
+            stream: stream,
+            logger: logger,
+            requestTimeout: requestTimeout,
+            bufferLimits: bufferLimits,
+            scheduleRequestTimeout: Connection.startRequestTimeout,
+            factory
+        )
+    }
+
+    /// Creates the connection with a given start of each request timeout,
+    /// wires the factory's client, and starts serving.
+    ///
+    /// - Parameters:
+    ///   - stream: The bidirectional transport to run over.
+    ///   - logger: Diagnostic sink; never stdout.
+    ///   - requestTimeout: Default outbound request timeout; `nil` waits
+    ///     forever.
+    ///   - bufferLimits: The limits on the `session/update` notifications that
+    ///     the connection keeps for sessions with no subscriber.
+    ///   - scheduleRequestTimeout: Starts the timeout of each outbound request
+    ///     that has a time limit. A test gives a scheduler that it drives by
+    ///     hand.
+    ///   - factory: Builds the client from this connection.
+    init(
+        stream: any ACPTransport,
+        logger: ACPLogger,
+        requestTimeout: Duration?,
+        bufferLimits: SessionUpdateBufferLimits,
+        scheduleRequestTimeout: @escaping Connection.RequestTimeoutScheduler,
         _ factory: @Sendable (ClientSideConnection) -> any Client
     ) async {
         // The router is captured by the notification dispatcher and by the
@@ -80,7 +112,8 @@ public final class ClientSideConnection: Sendable {
                 router.finishAll()
                 promptEchoes.finishAll()
             },
-            outgoingRequests: outgoingRequests
+            outgoingRequests: outgoingRequests,
+            scheduleRequestTimeout: scheduleRequestTimeout
         )
         self.router = router
         self.permissions = permissions

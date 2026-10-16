@@ -426,6 +426,25 @@ public actor Connection {
         Task { await work() }
     }
 
+    /// Starts the timeout of one outbound request. It calls `expire` when
+    /// `limit` elapses, and returns a task that the connection cancels when
+    /// the request ends first. `expire` returns `true` when it failed the
+    /// request, and `false` when the request ended before. The default uses
+    /// the clock. A test gives a scheduler that keeps `expire`, to call it by
+    /// hand.
+    typealias RequestTimeoutScheduler =
+        @Sendable (_ limit: Duration, _ expire: @escaping @Sendable () async -> Bool) -> Task<Void, Never>
+
+    /// The default `RequestTimeoutScheduler`: a new `Task` sleeps for `limit`,
+    /// then calls `expire` when nothing cancelled it.
+    static let startRequestTimeout: RequestTimeoutScheduler = { limit, expire in
+        Task {
+            try? await Task.sleep(for: limit)
+            guard !Task.isCancelled else { return }
+            _ = await expire()
+        }
+    }
+
     /// One outbound request awaiting its response.
     private struct PendingRequest {
         /// Resumed with the response's `result`, or throwing on error.
@@ -489,6 +508,8 @@ public actor Connection {
     /// Starts the frame write of each outbound request, and the work after
     /// the cancel of its caller.
     private let scheduleRequestWork: RequestWorkScheduler
+    /// Starts the timeout of each outbound request that has a time limit.
+    private let scheduleRequestTimeout: RequestTimeoutScheduler
 
     /// Monotonic id for outbound requests.
     private var nextRequestID = 1
@@ -588,6 +609,9 @@ public actor Connection {
     ///   - scheduleRequestWork: Starts the frame write of each outbound
     ///     request, and the work after the cancel of its caller. Only a test
     ///     gives a value that is not the default.
+    ///   - scheduleRequestTimeout: Starts the timeout of each outbound request
+    ///     that has a time limit. Only a test gives a value that is not the
+    ///     default.
     init(
         transport: any ACPTransport,
         logger: ACPLogger,
@@ -596,7 +620,8 @@ public actor Connection {
         notificationHandler: NotificationHandler?,
         onClose: CloseHandler?,
         outgoingRequests: OutgoingRequestTracker,
-        scheduleRequestWork: @escaping RequestWorkScheduler = Connection.startRequestWork
+        scheduleRequestWork: @escaping RequestWorkScheduler = Connection.startRequestWork,
+        scheduleRequestTimeout: @escaping RequestTimeoutScheduler = Connection.startRequestTimeout
     ) async {
         self.transport = transport
         self.logger = logger
@@ -606,6 +631,7 @@ public actor Connection {
         self.onClose = onClose
         self.outgoingRequests = outgoingRequests
         self.scheduleRequestWork = scheduleRequestWork
+        self.scheduleRequestTimeout = scheduleRequestTimeout
         readTask = Task { await self.readLoop() }
     }
 
@@ -1314,12 +1340,8 @@ public actor Connection {
         after limit: Duration?
     ) -> Task<Void, Never>? {
         guard let limit else { return nil }
-        // Created in actor-isolated context, so the task inherits the actor
-        // and `fail` is a synchronous same-actor call.
-        return Task {
-            try? await Task.sleep(for: limit)
-            guard !Task.isCancelled else { return }
-            self.fail(id: id, with: ConnectionError.timedOut)
+        return scheduleRequestTimeout(limit) {
+            await self.fail(id: id, with: ConnectionError.timedOut)
         }
     }
 

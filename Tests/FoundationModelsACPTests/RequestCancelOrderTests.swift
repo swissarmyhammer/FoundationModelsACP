@@ -187,7 +187,8 @@ private final class HeldWriteTransport: ACPTransport {
             try #require(await arrivals.next() != nil)
             let frameWrite = try #require(work.take())
             caller.cancel()
-            try #require(await arrivals.next() != nil)
+            // `cancel()` runs the cancel handler of the request before it returns,
+            // so the cancel work is held now, with no wait.
             let cancelWork = try #require(work.take())
 
             await cancelWork()
@@ -222,7 +223,8 @@ private final class HeldWriteTransport: ACPTransport {
             }
             try #require(await entries.next() != nil)
             caller.cancel()
-            try #require(await arrivals.next() != nil)
+            // `cancel()` runs the cancel handler of the request before it returns,
+            // so the cancel work is held now, with no wait.
             let cancelWork = try #require(work.take())
 
             await cancelWork()
@@ -253,7 +255,8 @@ private final class HeldWriteTransport: ACPTransport {
             let frameWrite = try #require(work.take())
             await frameWrite()
             caller.cancel()
-            try #require(await arrivals.next() != nil)
+            // `cancel()` runs the cancel handler of the request before it returns,
+            // so the cancel work is held now, with no wait.
             let cancelWork = try #require(work.take())
 
             await cancelWork()
