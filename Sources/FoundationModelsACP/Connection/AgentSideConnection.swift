@@ -176,6 +176,44 @@ public final class AgentSideConnection: Sendable {
         try await core.call("requestPermission", params, returning: RequestPermissionResponse.self)
     }
 
+    /// Requests permission from the client mid-turn, and sends the `_meta`
+    /// of `cancellation` in the `$/cancel_request` when the task of the
+    /// caller is cancelled.
+    ///
+    /// Use it to tell the client why the agent withdrew the permission
+    /// request, for example with the reason under
+    /// ``CancelRequestNotification/reasonMetaKey``:
+    ///
+    /// ```swift
+    /// let cancellation = OutboundCancellation()
+    /// let call = Task { try await connection.requestPermission(request, cancellation: cancellation) }
+    /// cancellation.setMeta(.object([CancelRequestNotification.reasonMetaKey: .string("run cancelled")]))
+    /// call.cancel()
+    /// ```
+    ///
+    /// Contract: call ``OutboundCancellation/setMeta(_:)`` before
+    /// `Task.cancel()`. The connection reads the box one time, when it
+    /// writes the `$/cancel_request`. When the response, a timeout or a close
+    /// comes first, the connection sends no `$/cancel_request`, and the meta
+    /// is not used. The client reads the meta with
+    /// ``ClientSideConnection/cancelRequestMeta``, and
+    /// ``ClientSideConnection/cancelledByPeer`` is `true`.
+    ///
+    /// - Parameters:
+    ///   - params: The permission request.
+    ///   - cancellation: Gives the `_meta` of the `$/cancel_request`.
+    /// - Returns: The user's permission decision.
+    /// - Throws: `RequestError` on a peer error, `ConnectionError` on
+    ///   disconnect, or `CancellationError` when the task of the caller is
+    ///   cancelled.
+    public func requestPermission(
+        _ params: RequestPermissionRequest,
+        cancellation: OutboundCancellation
+    ) async throws -> RequestPermissionResponse {
+        try await core.call(
+            "requestPermission", params, returning: RequestPermissionResponse.self, cancellation: cancellation)
+    }
+
     /// Requests structured user input from the client.
     ///
     /// Long-lived like `requestPermission`: it genuinely waits on a human —

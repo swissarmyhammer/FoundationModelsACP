@@ -62,7 +62,7 @@ private enum ClientEvent: Sendable, Equatable {
 
 /// A `Client` whose `createElicitation` waits for its cancel when the
 /// message starts with ``waitPrefix``, and answers `decline` at once when it
-/// does not.
+/// does not. Its `requestPermission` always waits for its cancel.
 private struct CancelProbeClient: Client {
     /// The message prefix of a request that waits for its cancel.
     static let waitPrefix = "wait"
@@ -72,8 +72,14 @@ private struct CancelProbeClient: Client {
 
     func sessionUpdate(_ notification: UpdateSessionNotification) async {}
 
+    /// Waits for its cancel, with the title of the request as the event name.
     func requestPermission(_ params: RequestPermissionRequest) async throws -> RequestPermissionResponse {
-        RequestPermissionResponse(outcome: .cancelled)
+        let name = params.title
+        events.yield(.entered(name))
+        await CancelGate().waitForCancel()
+        events.yield(
+            .cancelled(name, ClientSideConnection.cancelRequestMeta, byPeer: ClientSideConnection.cancelledByPeer))
+        throw CancellationError()
     }
 
     func createElicitation(_ params: CreateElicitationRequest) async throws -> CreateElicitationResponse {
@@ -246,6 +252,28 @@ private struct IdleAgent: Agent {
                     params: .object(["requestId": id, "_meta": Self.runCancelledMeta])
                 ))
         await Self.expectCancelled(call)
+    }
+
+    @Test func permissionCancelMetaReachesTheClientHandler() async throws {
+        let pair = await Self.connectEndToEnd()
+        var events = pair.events.makeAsyncIterator()
+        let cancellation = OutboundCancellation()
+        let agent = pair.agent
+        let request = RequestPermissionRequest.stub(for: SessionId(rawValue: "session-1"))
+        let call = Task { try await agent.requestPermission(request, cancellation: cancellation) }
+
+        #expect(await events.next() == .entered("Permission needed"))
+        cancellation.setMeta(Self.runCancelledMeta)
+        call.cancel()
+
+        #expect(await events.next() == .cancelled("Permission needed", Self.runCancelledMeta, byPeer: true))
+        let result = await call.result
+        guard case .failure(let error) = result else {
+            Issue.record("expected the call to throw, got \(result)")
+            return
+        }
+        #expect(error is CancellationError)
+        _ = pair.client
     }
 
     // MARK: - T2: no meta
