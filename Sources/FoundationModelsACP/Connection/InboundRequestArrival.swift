@@ -43,6 +43,16 @@ extension ClientSideConnection {
     public static var cancelRequestMeta: JSONValue? {
         Connection.cancelRequestMeta
     }
+
+    /// Whether a `$/cancel_request` from the agent cancelled the inbound
+    /// request that the current task handles. `false` for a close, no
+    /// cancel, or no handler. See ``Connection/cancelledByPeer``.
+    ///
+    /// Read it in the task of the handler, after the handler sees the
+    /// cancel. Do not read it in an `onCancel` closure.
+    public static var cancelledByPeer: Bool {
+        Connection.cancelledByPeer
+    }
 }
 
 extension AgentSideConnection {
@@ -62,5 +72,15 @@ extension AgentSideConnection {
     /// cancel. Do not read it in an `onCancel` closure.
     public static var cancelRequestMeta: JSONValue? {
         Connection.cancelRequestMeta
+    }
+
+    /// Whether a `$/cancel_request` from the client cancelled the inbound
+    /// request that the current task handles. `false` for a close, no
+    /// cancel, or no handler. See ``Connection/cancelledByPeer``.
+    ///
+    /// Read it in the task of the handler, after the handler sees the
+    /// cancel. Do not read it in an `onCancel` closure.
+    public static var cancelledByPeer: Bool {
+        Connection.cancelledByPeer
     }
 }

@@ -51,11 +51,13 @@ private final class CancelGate: Sendable {
 private enum ClientEvent: Sendable, Equatable {
     /// A handler that waits for its cancel started.
     case entered(String)
-    /// A handler saw its cancel, and read this `cancelRequestMeta`.
-    case cancelled(String, JSONValue?)
+    /// A handler saw its cancel, and read this `cancelRequestMeta` and this
+    /// `cancelledByPeer`.
+    case cancelled(String, JSONValue?, byPeer: Bool)
     /// A handler answered at once. It read this arrival number as its first
-    /// statement, and this `cancelRequestMeta` before it answered.
-    case answered(String, arrival: UInt64?, meta: JSONValue?)
+    /// statement, and this `cancelRequestMeta` and `cancelledByPeer` before it
+    /// answered.
+    case answered(String, arrival: UInt64?, meta: JSONValue?, byPeer: Bool)
 }
 
 /// A `Client` whose `createElicitation` waits for its cancel when the
@@ -77,12 +79,17 @@ private struct CancelProbeClient: Client {
     func createElicitation(_ params: CreateElicitationRequest) async throws -> CreateElicitationResponse {
         let arrival = ClientSideConnection.currentRequestArrival
         guard params.message.hasPrefix(Self.waitPrefix) else {
-            events.yield(.answered(params.message, arrival: arrival, meta: ClientSideConnection.cancelRequestMeta))
+            events.yield(
+                .answered(
+                    params.message, arrival: arrival, meta: ClientSideConnection.cancelRequestMeta,
+                    byPeer: ClientSideConnection.cancelledByPeer))
             return .object(["action": .string("decline")])
         }
         events.yield(.entered(params.message))
         await CancelGate().waitForCancel()
-        events.yield(.cancelled(params.message, ClientSideConnection.cancelRequestMeta))
+        events.yield(
+            .cancelled(
+                params.message, ClientSideConnection.cancelRequestMeta, byPeer: ClientSideConnection.cancelledByPeer))
         throw CancellationError()
     }
 
@@ -214,7 +221,7 @@ private struct IdleAgent: Agent {
         cancellation.setMeta(Self.runCancelledMeta)
         call.cancel()
 
-        #expect(await events.next() == .cancelled("wait-1", Self.runCancelledMeta))
+        #expect(await events.next() == .cancelled("wait-1", Self.runCancelledMeta, byPeer: true))
         await Self.expectCancelled(call)
         _ = pair.client
     }
@@ -291,7 +298,7 @@ private struct IdleAgent: Agent {
         #expect(await events.next() == .entered("wait-2"))
         call.cancel()
 
-        #expect(await events.next() == .cancelled("wait-2", nil))
+        #expect(await events.next() == .cancelled("wait-2", nil, byPeer: true))
         await Self.expectCancelled(call)
         _ = pair.client
     }
@@ -327,8 +334,8 @@ private struct IdleAgent: Agent {
 
         var seen: [String: JSONValue?] = [:]
         for _ in reasons {
-            guard case .cancelled(let message, let meta) = try #require(await events.next()) else {
-                Issue.record("expected a cancelled event")
+            guard case .cancelled(let message, let meta, byPeer: true) = try #require(await events.next()) else {
+                Issue.record("expected a cancelled event from the peer")
                 return
             }
             seen[message] = meta
@@ -351,12 +358,13 @@ private struct IdleAgent: Agent {
         let response = try await pair.agent.createElicitation(Self.request("answer-1"))
 
         #expect(response == .object(["action": .string("decline")]))
-        guard case .answered("answer-1", let arrival, let meta) = try #require(await events.next()) else {
+        guard case .answered("answer-1", let arrival, let meta, let byPeer) = try #require(await events.next()) else {
             Issue.record("expected an answered event")
             return
         }
         #expect(arrival != nil)
         #expect(meta == nil)
+        #expect(!byPeer)
         _ = pair.client
     }
 
@@ -364,6 +372,9 @@ private struct IdleAgent: Agent {
         #expect(Connection.cancelRequestMeta == nil)
         #expect(ClientSideConnection.cancelRequestMeta == nil)
         #expect(AgentSideConnection.cancelRequestMeta == nil)
+        #expect(!Connection.cancelledByPeer)
+        #expect(!ClientSideConnection.cancelledByPeer)
+        #expect(!AgentSideConnection.cancelledByPeer)
         #expect(Connection.currentRequestArrival == nil)
         #expect(ClientSideConnection.currentRequestArrival == nil)
         #expect(AgentSideConnection.currentRequestArrival == nil)
@@ -390,7 +401,7 @@ private struct IdleAgent: Agent {
             ),
             over: agentEnd
         )
-        #expect(await iterator.next() == .cancelled("wait-raw", .string("plain text")))
+        #expect(await iterator.next() == .cancelled("wait-raw", .string("plain text"), byPeer: true))
 
         let response = try #require(try await reader.next())
         #expect(requestID(of: response) == .number(7))
@@ -400,6 +411,28 @@ private struct IdleAgent: Agent {
         }
         #expect(error["code"] == .number(-32800))
         _ = client
+    }
+
+    // MARK: - A close is not a cancel of the peer
+
+    @Test func closeWithAnOpenHandlerIsNotACancelOfThePeer() async throws {
+        let events = AsyncStream<ClientEvent>.makeStream()
+        let (clientEnd, agentEnd) = InMemoryTransport.pair()
+        let client = await ClientSideConnection(stream: clientEnd) { _ in
+            CancelProbeClient(events: events.continuation)
+        }
+        var iterator = events.stream.makeAsyncIterator()
+
+        try await send(Self.requestFrame(id: 9, message: "wait-close"), over: agentEnd)
+        #expect(await iterator.next() == .entered("wait-close"))
+
+        agentEnd.close()
+
+        #expect(await iterator.next() == .cancelled("wait-close", nil, byPeer: false))
+        guard case .endOfInput = await client.closed else {
+            Issue.record("expected the close reason endOfInput")
+            return
+        }
     }
 
     // MARK: - Arrival number
@@ -419,7 +452,7 @@ private struct IdleAgent: Agent {
 
         var arrivals: [String: UInt64] = [:]
         for _ in 0..<2 {
-            guard case .answered(let message, let arrival?, _) = try #require(await iterator.next()) else {
+            guard case .answered(let message, let arrival?, _, _) = try #require(await iterator.next()) else {
                 Issue.record("expected an answered event with an arrival number")
                 return
             }

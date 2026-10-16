@@ -47,24 +47,38 @@ public final class OutboundCancellation: Sendable {
     }
 }
 
-/// Holds the `_meta` of the `$/cancel_request` that cancelled one inbound
-/// request. The connection binds one box for each inbound request in the
-/// task of its handler (`Connection.currentInboundCancellation`).
+/// Holds what the `$/cancel_request` that cancelled one inbound request
+/// told. The connection binds one box for each inbound request in the task
+/// of its handler (`Connection.currentInboundCancellation`).
 final class InboundCancellation: Sendable {
-    /// The received `_meta`, or `nil` when no cancel with a `_meta` came.
-    private let storage = Mutex<JSONValue?>(nil)
+    /// What a `$/cancel_request` for the request told.
+    private struct Received {
+        /// Whether a `$/cancel_request` named the request.
+        var byPeer = false
+        /// The `_meta` of that `$/cancel_request`, or `nil`.
+        var meta: JSONValue?
+    }
+
+    /// The received cancel, shared by the connection and the handler task.
+    private let storage = Mutex(Received())
 
     /// The received `_meta`, or `nil`.
     var meta: JSONValue? {
-        storage.withLock { $0 }
+        storage.withLock { $0.meta }
     }
 
-    /// Stores the received `_meta`. The connection calls it before it
-    /// cancels the task of the handler.
+    /// Whether a `$/cancel_request` named the request. A close, a timeout
+    /// or no cancel leaves it `false`.
+    var cancelledByPeer: Bool {
+        storage.withLock { $0.byPeer }
+    }
+
+    /// Records a `$/cancel_request` for the request, with its `_meta`. The
+    /// connection calls it before it cancels the task of the handler.
     ///
-    /// - Parameter meta: The `_meta` of the `$/cancel_request`.
-    func store(_ meta: JSONValue?) {
-        storage.withLock { $0 = meta }
+    /// - Parameter meta: The `_meta` of the `$/cancel_request`, or `nil`.
+    func recordPeerCancel(meta: JSONValue?) {
+        storage.withLock { $0 = Received(byPeer: true, meta: meta) }
     }
 }
 
@@ -102,5 +116,23 @@ extension Connection {
     /// cancels, where the value of the handler task is not available.
     public static var cancelRequestMeta: JSONValue? {
         currentInboundCancellation?.meta
+    }
+
+    /// Whether a `$/cancel_request` from the peer cancelled the inbound
+    /// request that the current task handles.
+    ///
+    /// It is `true` only when the peer sent a `$/cancel_request` for the
+    /// request, also when that notification had no `_meta`. It is `false`
+    /// when a close of the connection cancelled the handler, when there was
+    /// no cancel, and when the current task handles no inbound request.
+    /// Thus a handler can tell a cancel of the peer from a close, also when
+    /// ``cancelRequestMeta`` is `nil`.
+    ///
+    /// Contract: the same as ``cancelRequestMeta``. Read it in the task of
+    /// the handler, after the handler sees the cancel. The connection sets
+    /// it before it cancels the task. Do not read it in an `onCancel`
+    /// closure.
+    public static var cancelledByPeer: Bool {
+        currentInboundCancellation?.cancelledByPeer ?? false
     }
 }

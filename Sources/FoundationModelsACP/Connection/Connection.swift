@@ -993,7 +993,7 @@ public actor Connection {
             return
         }
         guard let entry = inboundTasks[requestId] else { return }
-        entry.cancellation.store(fields[Self.metaKey])
+        entry.cancellation.recordPeerCancel(meta: fields[Self.metaKey])
         entry.task.cancel()
     }
 

@@ -17,6 +17,15 @@ comments:
     - evidence: 7d78473 feat(connection): carry _meta on $/cancel_request and give the inbound arrival number
     - next: push in one batch with this kanban record, then watch CI.
   timestamp: 2026-10-16T12:57:07.937766+00:00
+- actor: claude-code
+  id: 01m52e1k58fc86rvg2wq01v6ht
+  text: |-
+    ### implement and test — green (follow-up: cancelledByPeer)
+    - request from the peer after the ACPClient check of 97a9d5e: a handler could not tell a `$/cancel_request` with no `_meta` from a close, because `cancelRequestMeta` is nil in both cases.
+    - change: public static `cancelledByPeer: Bool` on `Connection`, `ClientSideConnection` and `AgentSideConnection`. `handleCancelRequest` sets it in the same receiver box, before it cancels the task, on the connection actor. It is false for a close, a timeout, no cancel, or outside a handler.
+    - evidence: one full run. `swift test`: 505 tests in 54 suites passed, and 135 tests in 17 suites passed. IntegrationTests: 7 tests passed. DocC with `--warnings-as-errors`: exit 0. New test `closeWithAnOpenHandlerIsNotACancelOfThePeer`. The other tests now also check the flag: true for a peer cancel with no `_meta` (with a nil meta), false for a handler with no cancel, and false outside a handler.
+    - next: commit, push, watch CI.
+  timestamp: 2026-10-16T13:22:25.576615+00:00
 position_column: done
 position_ordinal: b580
 title: Carry an optional _meta on $/cancel_request (elicitation plan task 50)
