@@ -414,6 +414,18 @@ public actor Connection {
     /// the read loop dispatches the next frame.
     typealias ResultHook = @Sendable (JSONValue) -> Void
 
+    /// Starts one unit of outbound request work: the write of a request
+    /// frame, or the work after the cancel of the caller of a request.
+    /// The default starts a `Task`. A test gives a scheduler that holds the
+    /// work, to run it in a fixed order.
+    typealias RequestWorkScheduler = @Sendable (@escaping @Sendable () async -> Void) -> Void
+
+    /// The default `RequestWorkScheduler`: it starts each unit of work in a
+    /// new `Task`.
+    static let startRequestWork: RequestWorkScheduler = { work in
+        Task { await work() }
+    }
+
     /// One outbound request awaiting its response.
     private struct PendingRequest {
         /// Resumed with the response's `result`, or throwing on error.
@@ -427,6 +439,21 @@ public actor Connection {
         /// Gives the `_meta` of the `$/cancel_request` when the task of the
         /// caller is cancelled. `nil` for no `_meta`.
         let cancellation: OutboundCancellation?
+    }
+
+    /// The state of the frame write of one outbound request. It gives a fixed
+    /// order to the request frame and its `$/cancel_request` (rule R2: a
+    /// connection writes no request after its own cancel).
+    private enum RequestFrameWrite {
+        /// The write did not start. A cancel now removes the write: the
+        /// connection writes neither the request nor its `$/cancel_request`.
+        case queued
+        /// The write started. A cancel now cannot be written at once,
+        /// because two transport writes can overlap. `cancelMeta` holds the
+        /// `_meta` of the `$/cancel_request` to write after the request
+        /// frame: `nil` for no cancel, and `.some(nil)` for a cancel with no
+        /// `_meta`.
+        case writing(cancelMeta: JSONValue??)
     }
 
     /// One inbound request handler that runs.
@@ -459,12 +486,18 @@ public actor Connection {
     private let requestHandler: RequestHandler?
     private let notificationHandler: NotificationHandler?
     private let onClose: CloseHandler?
+    /// Starts the frame write of each outbound request, and the work after
+    /// the cancel of its caller.
+    private let scheduleRequestWork: RequestWorkScheduler
 
     /// Monotonic id for outbound requests.
     private var nextRequestID = 1
     /// Outbound requests awaiting a response, keyed by their wire id.
     /// Each change to this map is also recorded in `outgoingRequests`.
     private var pending: [RequestId: PendingRequest] = [:]
+    /// The frame write state of each outbound request whose write did not
+    /// end, keyed by its wire id.
+    private var requestFrameWrites: [RequestId: RequestFrameWrite] = [:]
     /// The outbound requests that wait for a response, and the events that
     /// tell when each one starts and finishes. The connection records a start
     /// before it writes the request, and a finish before it resumes the
@@ -552,6 +585,9 @@ public actor Connection {
     ///     requests are rejected; when `nil`, shutdown notifies no one.
     ///   - outgoingRequests: The tracker that records the start and the finish
     ///     of each outgoing request.
+    ///   - scheduleRequestWork: Starts the frame write of each outbound
+    ///     request, and the work after the cancel of its caller. Only a test
+    ///     gives a value that is not the default.
     init(
         transport: any ACPTransport,
         logger: ACPLogger,
@@ -559,7 +595,8 @@ public actor Connection {
         requestHandler: RequestHandler?,
         notificationHandler: NotificationHandler?,
         onClose: CloseHandler?,
-        outgoingRequests: OutgoingRequestTracker
+        outgoingRequests: OutgoingRequestTracker,
+        scheduleRequestWork: @escaping RequestWorkScheduler = Connection.startRequestWork
     ) async {
         self.transport = transport
         self.logger = logger
@@ -568,6 +605,7 @@ public actor Connection {
         self.notificationHandler = notificationHandler
         self.onClose = onClose
         self.outgoingRequests = outgoingRequests
+        self.scheduleRequestWork = scheduleRequestWork
         readTask = Task { await self.readLoop() }
     }
 
@@ -614,7 +652,9 @@ public actor Connection {
     ///   disconnected; `ConnectionError.timedOut` when the timeout fires;
     ///   `CancellationError` when the awaiting `Task` is cancelled — in which
     ///   case a best-effort `$/cancel_request` notifies the peer too, so it
-    ///   can stop working on a result nobody is waiting for.
+    ///   can stop working on a result nobody is waiting for. The
+    ///   `$/cancel_request` never goes before its request. When the cancel
+    ///   comes before the request is written, the connection writes neither.
     public func request(
         method: String,
         params: JSONValue? = nil,
@@ -631,7 +671,8 @@ public actor Connection {
     /// `Task.cancel()`. The connection reads the box one time, when it writes
     /// the `$/cancel_request`. When the response, a timeout or a close comes
     /// first, the connection sends no `$/cancel_request`, and the meta is not
-    /// used.
+    /// used. When the cancel comes before the request is written, the
+    /// connection writes neither the request nor the `$/cancel_request`.
     ///
     /// - Parameters:
     ///   - method: The JSON-RPC method name.
@@ -697,14 +738,15 @@ public actor Connection {
                 pending[id] = PendingRequest(
                     continuation: continuation, timeout: timeoutTask, onResult: onResult, cancellation: cancellation)
                 outgoingRequests.start(id: id, method: method, params: params)
+                requestFrameWrites[id] = .queued
                 // Write only after registering, so a response arriving
                 // immediately always finds its continuation, and a peer
                 // message that names this id always comes after its start
                 // event.
-                Task { await self.write(frame, failing: id) }
+                scheduleRequestWork { await self.write(frame, failing: id) }
             }
         } onCancel: {
-            Task { await self.cancelOutbound(id: id) }
+            scheduleRequestWork { await self.cancelOutbound(id: id) }
         }
     }
 
@@ -1281,15 +1323,30 @@ public actor Connection {
     /// Writes one outbound request frame; a write failure rejects that
     /// request's pending continuation immediately.
     ///
+    /// When a cancel, a timeout or a close came before the write starts, the
+    /// request is not pending, and this writes nothing. When the caller is
+    /// cancelled during the write, this writes the `$/cancel_request` after
+    /// the request frame.
+    ///
     /// - Parameters:
     ///   - frame: The encoded request line.
     ///   - id: The pending entry to reject if the write fails.
     private func write(_ frame: Data, failing id: RequestId) async {
+        guard case .queued = requestFrameWrites[id], pending[id] != nil else {
+            requestFrameWrites[id] = nil
+            return
+        }
+        requestFrameWrites[id] = .writing(cancelMeta: nil)
         do {
             try await transport.write(frame)
         } catch {
+            // The peer can have no part of the frame, so it gets no cancel.
+            requestFrameWrites[id] = nil
             fail(id: id, with: error)
+            return
         }
+        guard case .writing(let cancelMeta?) = requestFrameWrites.removeValue(forKey: id) else { return }
+        await writeCancelRequest(id: id, meta: cancelMeta)
     }
 
     /// Rejects one pending request, if still pending; no-op otherwise, so
@@ -1331,10 +1388,33 @@ public actor Connection {
     /// `OutboundCancellation`, read here one time. With no box, or a box
     /// with a `nil` meta, it has no `_meta` member.
     ///
+    /// The notification never goes before its request (rule R2). When the
+    /// request frame write did not start, the connection writes neither
+    /// frame, because the peer does not know the request. When the write is
+    /// in progress, `write(_:failing:)` writes the notification after it.
+    ///
     /// - Parameter id: The cancelled request's wire id.
     private func cancelOutbound(id: RequestId) async {
         let meta = pending[id]?.cancellation?.meta
         guard fail(id: id, with: CancellationError()) else { return }
+        switch requestFrameWrites[id] {
+        case .queued:
+            requestFrameWrites[id] = nil
+        case .writing:
+            requestFrameWrites[id] = .writing(cancelMeta: .some(meta))
+        case nil:
+            await writeCancelRequest(id: id, meta: meta)
+        }
+    }
+
+    /// Writes the `$/cancel_request` of one outbound request, as best effort.
+    /// It writes nothing after a close.
+    ///
+    /// - Parameters:
+    ///   - id: The cancelled request's wire id.
+    ///   - meta: The `_meta` of the notification, or `nil` for no `_meta`
+    ///     member.
+    private func writeCancelRequest(id: RequestId, meta: JSONValue?) async {
         guard !isClosed else { return }
         var params: [String: JSONValue] = [Self.requestIdKey: id]
         params[Self.metaKey] = meta
@@ -1368,6 +1448,7 @@ public actor Connection {
         readTask = nil
         let rejected = pending
         pending = [:]
+        requestFrameWrites = [:]
         outgoingRequests.finishAll()
         for entry in rejected.values {
             entry.timeout?.cancel()
