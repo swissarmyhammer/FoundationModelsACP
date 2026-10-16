@@ -25,6 +25,10 @@ private func collectMessages(from transport: some ACPTransport) async throws -> 
 
 @Test func pairExchangesFramedMessagesInBothDirectionsConcurrently() async throws {
     let (client, agent) = InMemoryTransport.pair()
+    defer {
+        client.close()
+        agent.close()
+    }
     let clientToAgent = (0..<25).map { JSONValue.object(["method": .string("client/\($0)")]) }
     let agentToClient = (0..<25).map { JSONValue.object(["method": .string("agent/\($0)")]) }
 
@@ -33,16 +37,18 @@ private func collectMessages(from transport: some ACPTransport) async throws -> 
 
     try await withThrowingTaskGroup(of: Void.self) { group in
         group.addTask {
+            // Each writer closes its end also when a write fails. Thus the
+            // reader of the other end always gets the end of its stream.
+            defer { client.close() }
             for message in clientToAgent {
                 try await client.write(NDJSONCodec.encode(message))
             }
-            client.close()
         }
         group.addTask {
+            defer { agent.close() }
             for message in agentToClient {
                 try await agent.write(NDJSONCodec.encode(message))
             }
-            agent.close()
         }
         try await group.waitForAll()
     }
@@ -53,6 +59,10 @@ private func collectMessages(from transport: some ACPTransport) async throws -> 
 
 @Test func closeDeliversPendingWritesThenFinishesPeerStream() async throws {
     let (a, b) = InMemoryTransport.pair()
+    defer {
+        a.close()
+        b.close()
+    }
     try await a.write(Data("{\"a\":1}\n".utf8))
     a.close()
     // Returning at all proves b's stream finished; the buffered write still arrives.
@@ -62,6 +72,10 @@ private func collectMessages(from transport: some ACPTransport) async throws -> 
 
 @Test func closeLeavesOppositeDirectionOpen() async throws {
     let (a, b) = InMemoryTransport.pair()
+    defer {
+        a.close()
+        b.close()
+    }
     a.close()
     // Half-close: a can no longer send, but b -> a still works.
     try await b.write(Data("{\"b\":2}\n".utf8))
@@ -71,7 +85,8 @@ private func collectMessages(from transport: some ACPTransport) async throws -> 
 }
 
 @Test func writeAfterCloseThrowsClosedError() async throws {
-    let (a, _) = InMemoryTransport.pair()
+    let (a, b) = InMemoryTransport.pair()
+    defer { b.close() }
     a.close()
     await #expect(throws: InMemoryTransport.ClosedError.self) {
         try await a.write(Data("late".utf8))
@@ -80,6 +95,10 @@ private func collectMessages(from transport: some ACPTransport) async throws -> 
 
 @Test func aReaderThatStopsEndsThePeerStream() async throws {
     let (a, b) = InMemoryTransport.pair()
+    defer {
+        a.close()
+        b.close()
+    }
     let reader = Task { try await collectMessages(from: a) }
     reader.cancel()
     _ = try? await reader.value
@@ -90,6 +109,10 @@ private func collectMessages(from transport: some ACPTransport) async throws -> 
 
 @Test func closeIsStillAHalfClose() async throws {
     let (a, b) = InMemoryTransport.pair()
+    defer {
+        a.close()
+        b.close()
+    }
     a.close()
     // b's stream finishes, but a's stream stays open: b -> a still works.
     #expect(try await collectMessages(from: b).isEmpty)
@@ -101,6 +124,10 @@ private func collectMessages(from transport: some ACPTransport) async throws -> 
 
 @Test func aNormalEndDoesNotCloseTheOtherDirection() async throws {
     let (a, b) = InMemoryTransport.pair()
+    defer {
+        a.close()
+        b.close()
+    }
     b.close()
     // a's stream ends normally. That must not close the a -> b direction.
     #expect(try await collectMessages(from: a).isEmpty)
@@ -114,6 +141,10 @@ private func collectMessages(from transport: some ACPTransport) async throws -> 
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await AgentSideConnection(stream: agentEnd) { _ in StubAgent() }
     let client = await ClientSideConnection(stream: clientEnd) { _ in HandshakeClient() }
+    defer {
+        await client.close()
+        await agent.close()
+    }
 
     await client.close()
 

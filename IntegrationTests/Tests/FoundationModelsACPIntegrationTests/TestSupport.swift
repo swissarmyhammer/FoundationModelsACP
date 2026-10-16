@@ -79,6 +79,10 @@ final class LiveAgentProcess: @unchecked Sendable {
     /// The stdout chunks of the agent. It ends at the end of stdout.
     private let stdoutChunks: AsyncStream<Data>
 
+    /// The exit of the agent. The termination handler, set before launch,
+    /// records it. Thus an exit before `shutdown()` is not lost.
+    private let childExit = ProcessExit()
+
     /// Launches `acp-test-agent`.
     ///
     /// - Throws: An error when the process fails to launch.
@@ -109,6 +113,10 @@ final class LiveAgentProcess: @unchecked Sendable {
             }
             continuation.yield(chunk)
         }
+
+        // Set before launch, so the handler sees each exit, also an early one.
+        let childExit = childExit
+        process.terminationHandler = { _ in childExit.record() }
 
         try process.run()
     }
@@ -169,8 +177,9 @@ final class LiveAgentProcess: @unchecked Sendable {
 
     private func send(_ envelope: [String: Any]) throws {
         let data = try JSONSerialization.data(withJSONObject: envelope, options: [.fragmentsAllowed])
-        stdin.fileHandleForWriting.write(data)
-        stdin.fileHandleForWriting.write(Data([Self.lineTerminator]))
+        // The throwing write fails when the agent is gone. Thus the test
+        // fails at the send, and does not wait for a reply that cannot come.
+        try stdin.fileHandleForWriting.write(contentsOf: data + Data([Self.lineTerminator]))
     }
 
     /// Reads stdout until a line satisfying `predicate` decodes, buffering
@@ -203,11 +212,56 @@ final class LiveAgentProcess: @unchecked Sendable {
     }
 
     /// Terminates the child process and awaits its exit.
+    ///
+    /// The wait ends also when the child exited before this call: the
+    /// termination handler recorded that exit.
     func shutdown() async {
-        await withCheckedContinuation { continuation in
-            process.terminationHandler = { _ in continuation.resume() }
+        let process = process
+        await childExit.wait {
             if process.isRunning {
                 process.terminate()
+            }
+        }
+    }
+}
+
+/// The exit of a child process, as its termination handler records it.
+///
+/// A waiter that starts after the exit ends at once. It uses no clock.
+private final class ProcessExit: Sendable {
+    /// `true` after the exit, and the callers of `wait(stopping:)` that wait
+    /// for it.
+    private let state = Mutex<(exited: Bool, waiters: [CheckedContinuation<Void, Never>])>((false, []))
+
+    /// Records the exit, and resumes each waiter.
+    func record() {
+        let waiters = state.withLock { state in
+            state.exited = true
+            defer { state.waiters = [] }
+            return state.waiters
+        }
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    /// Waits until the exit. When the child still runs, it calls `stop`
+    /// after the waiter is registered, so the exit cannot come between the
+    /// check and the wait.
+    ///
+    /// - Parameter stop: Tells the child to exit.
+    func wait(stopping stop: () -> Void) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let exited = state.withLock { state -> Bool in
+                if !state.exited {
+                    state.waiters.append(continuation)
+                }
+                return state.exited
+            }
+            if exited {
+                continuation.resume()
+            } else {
+                stop()
             }
         }
     }

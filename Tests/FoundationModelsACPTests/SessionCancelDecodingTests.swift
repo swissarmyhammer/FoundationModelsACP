@@ -36,6 +36,17 @@ import Testing
         let agent = await AgentSideConnection(stream: agentEnd, logger: log.logger) { _ in
             StubAgent(onSessionCancel: { cancelled.yield($0) })
         }
+        // The closes run also when the test body throws.
+        defer {
+            await agent.close()
+            clientEnd.close()
+        }
+        // When the agent side closes, no cancel comes after it. The end of the
+        // stream then ends the wait below.
+        Task {
+            _ = await agent.closed
+            cancelled.finish()
+        }
 
         try await send(notificationEnvelope(method: Self.cancelMethod, params: Self.malformedCancelParams), over: clientEnd)
         try await send(
@@ -52,7 +63,5 @@ import Testing
         let warning = try #require(warnings.first)
         #expect(warning.contains(Self.cancelMethod))
         #expect(warning.contains(Self.sessionIdField))
-
-        await agent.close()
     }
 }

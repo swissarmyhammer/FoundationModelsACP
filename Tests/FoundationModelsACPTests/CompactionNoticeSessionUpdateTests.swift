@@ -63,6 +63,10 @@ import Testing
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agent = await Connection(transport: agentEnd)
         let client = await ClientSideConnection(stream: clientEnd) { _ in HandshakeClient() }
+        defer {
+            await client.close()
+            await agent.close()
+        }
         var updates = client.subscribe(to: Self.sessionId).updates.makeAsyncIterator()
 
         let notification = UpdateSessionNotification(sessionId: Self.sessionId, update: .compactionUpdate(Self.compaction))
@@ -70,8 +74,5 @@ import Testing
 
         let received = try #require(await updates.nextUpdate())
         #expect(received == .compactionUpdate(Self.compaction))
-
-        await client.close()
-        await agent.close()
     }
 }

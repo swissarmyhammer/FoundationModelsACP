@@ -65,6 +65,9 @@ private struct OutboundHarness {
     /// The agent side, which sends `session/update`.
     let agent: AgentSideConnection
 
+    /// The raw client end of the transport.
+    let clientEnd: InMemoryTransport
+
     /// Reads the frames that reach the client end of the transport.
     let reader: WireReader
 
@@ -72,7 +75,7 @@ private struct OutboundHarness {
     static func connect() async -> OutboundHarness {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agent = await AgentSideConnection(stream: agentEnd) { _ in StubAgent() }
-        return OutboundHarness(agent: agent, reader: WireReader(clientEnd))
+        return OutboundHarness(agent: agent, clientEnd: clientEnd, reader: WireReader(clientEnd))
     }
 
     /// Reads the next frame from the wire, and decodes its parameters as a
@@ -112,9 +115,11 @@ private struct OutboundHarness {
         #expect(try await nextSentUpdate() == update)
     }
 
-    /// Closes the agent side.
+    /// Closes the agent side and the raw client end. The close of the agent
+    /// ends the stream that `reader` reads.
     func close() async {
         await agent.close()
+        clientEnd.close()
     }
 }
 
@@ -130,23 +135,23 @@ struct OutboundStopReasonRuleTests {
     @Test(arguments: [StopReason.endTurn, .cancelled, .unknown("_vendor_paused")])
     func aStopReasonThatACPDefinesOrACustomOneIsSent(reason: StopReason) async throws {
         let harness = await OutboundHarness.connect()
+        defer { await harness.close() }
         try await harness.expectSent(idleUpdate(stoppedBy: reason))
-        await harness.close()
     }
 
     @Test func anUnknownCaseThatHoldsAnACPValueIsSentAsThatValue() async throws {
         let harness = await OutboundHarness.connect()
+        defer { await harness.close() }
         try await harness.agent.sessionUpdate(idleUpdate(stoppedBy: .unknown(StopReason.endTurn.wireValue)))
         #expect(try await harness.nextSentUpdate() == idleUpdate(stoppedBy: .endTurn))
-        await harness.close()
     }
 
     @Test(arguments: ["paused", "", "vendor_paused"])
     func aReservedStopReasonIsRefused(value: String) async throws {
         let harness = await OutboundHarness.connect()
+        defer { await harness.close() }
         let description = try await harness.refusal(of: idleUpdate(stoppedBy: .unknown(value)))
         #expect(description.contains("stopReason"))
-        await harness.close()
     }
 }
 
@@ -160,38 +165,38 @@ struct OutboundStopReasonRuleTests {
 struct OutboundUsageRuleTests {
     @Test func usageWithCountsOfZeroOrMoreIsSent() async throws {
         let harness = await OutboundHarness.connect()
+        defer { await harness.close() }
         try await harness.expectSent(usageUpdate(UsageUpdate(size: windowSize, used: tokensUsed)))
         try await harness.expectSent(usageUpdate(UsageUpdate(size: 0, used: 0)))
-        await harness.close()
     }
 
     @Test func aNegativeUsedCountIsRefused() async throws {
         let harness = await OutboundHarness.connect()
+        defer { await harness.close() }
         let update = usageUpdate(UsageUpdate(size: windowSize, used: negativeTokenCount))
         let description = try await harness.refusal(of: update)
         #expect(description.contains("used"))
-        await harness.close()
     }
 
     @Test func aNegativeSizeIsRefused() async throws {
         let harness = await OutboundHarness.connect()
+        defer { await harness.close() }
         let update = usageUpdate(UsageUpdate(size: negativeTokenCount, used: tokensUsed))
         let description = try await harness.refusal(of: update)
         #expect(description.contains("size"))
-        await harness.close()
     }
 
     @Test func aCostWithAnISO4217CurrencyIsSent() async throws {
         let harness = await OutboundHarness.connect()
+        defer { await harness.close() }
         try await harness.expectSent(usageUpdate(costIn: validCurrency))
-        await harness.close()
     }
 
     @Test(arguments: ["usd", "US", "USDX", "U$D", "", "ÄBC"])
     func aCurrencyThatIsNotThreeUpperCaseLettersIsRefused(currency: String) async throws {
         let harness = await OutboundHarness.connect()
+        defer { await harness.close() }
         let description = try await harness.refusal(of: usageUpdate(costIn: currency))
         #expect(description.contains("currency"))
-        await harness.close()
     }
 }

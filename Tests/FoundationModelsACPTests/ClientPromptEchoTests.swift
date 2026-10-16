@@ -115,6 +115,13 @@ private struct EchoHarness {
     func sendFailure(id: JSONValue) async throws {
         try await send(errorEnvelope(id: id, error: echoPromptFailure), over: agentEnd)
     }
+
+    /// Closes the client and the raw agent end. The close of the client ends
+    /// each prompt task that still waits.
+    func close() async {
+        await client.close()
+        agentEnd.close()
+    }
 }
 
 // MARK: - Tests
@@ -136,30 +143,31 @@ private struct EchoHarness {
     @Test
     func anEchoBeforeTheResponseGivesTheMessageIdAndTheEcho() async throws {
         let harness = await EchoHarness.connect()
+        defer { await harness.close() }
         let (prompt, id) = try await harness.startPrompt()
 
         try await harness.sendUpdate(promptEcho)
         try await harness.sendResponse(id: id)
 
         expectLinkedToPromptEcho(try await prompt.value)
-        await harness.client.close()
     }
 
     @Test
     func anEchoAfterTheResponseGivesTheMessageIdAndTheEcho() async throws {
         let harness = await EchoHarness.connect()
+        defer { await harness.close() }
         let (prompt, id) = try await harness.startPrompt()
 
         try await harness.sendResponse(id: id)
         try await harness.sendUpdate(promptEcho)
 
         expectLinkedToPromptEcho(try await prompt.value)
-        await harness.client.close()
     }
 
     @Test
     func aUserMessageChunkEchoGivesTheFirstChunk() async throws {
         let harness = await EchoHarness.connect()
+        defer { await harness.close() }
         let (prompt, id) = try await harness.startPrompt()
 
         try await harness.sendUpdate(firstEchoChunk)
@@ -169,12 +177,12 @@ private struct EchoHarness {
         let result = try await prompt.value
         #expect(result.messageId == echoMessageId)
         #expect(result.echo == firstEchoChunk)
-        await harness.client.close()
     }
 
     @Test
     func anEchoOfAnotherMessageDoesNotCompleteThePrompt() async throws {
         let harness = await EchoHarness.connect()
+        defer { await harness.close() }
         let (prompt, id) = try await harness.startPrompt()
 
         try await harness.sendUpdate(userMessageEcho(foreignMessageId, content: foreignContent))
@@ -183,12 +191,12 @@ private struct EchoHarness {
         try await harness.sendUpdate(promptEcho)
 
         expectLinkedToPromptEcho(try await prompt.value)
-        await harness.client.close()
     }
 
     @Test
     func anEchoInAnotherSessionDoesNotCompleteThePrompt() async throws {
         let harness = await EchoHarness.connect()
+        defer { await harness.close() }
         let (prompt, id) = try await harness.startPrompt()
 
         try await harness.sendUpdate(userMessageEcho(echoMessageId, content: foreignContent), in: otherSessionId)
@@ -196,24 +204,24 @@ private struct EchoHarness {
         try await harness.sendUpdate(promptEcho)
 
         expectLinkedToPromptEcho(try await prompt.value)
-        await harness.client.close()
     }
 
     @Test
     func anErrorResponseThrowsTheError() async throws {
         let harness = await EchoHarness.connect()
+        defer { await harness.close() }
         let (prompt, id) = try await harness.startPrompt()
 
         try await harness.sendUpdate(promptEcho)
         try await harness.sendFailure(id: id)
 
         await #expect(throws: echoPromptFailure) { try await prompt.value }
-        await harness.client.close()
     }
 
     @Test
     func aConnectionCloseBeforeTheEchoThrowsClosed() async throws {
         let harness = await EchoHarness.connect()
+        defer { await harness.close() }
         let (prompt, id) = try await harness.startPrompt()
 
         try await harness.sendResponse(id: id)
@@ -225,12 +233,12 @@ private struct EchoHarness {
     @Test
     func aCancelledTaskBeforeTheEchoThrowsCancellationError() async throws {
         let harness = await EchoHarness.connect()
+        defer { await harness.close() }
         let (prompt, id) = try await harness.startPrompt()
 
         try await harness.sendResponse(id: id)
         prompt.cancel()
 
         await #expect(throws: CancellationError.self) { try await prompt.value }
-        await harness.client.close()
     }
 }

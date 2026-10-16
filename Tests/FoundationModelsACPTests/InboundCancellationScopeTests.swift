@@ -52,7 +52,10 @@ private struct LateRead: Sendable {
                     LateRead(meta: Connection.cancelRequestMeta, byPeer: Connection.cancelledByPeer))
                 entered.continuation.finish()
                 throw CancellationError()
-            }
+            },
+            // A close before the handler starts also ends the wait of the
+            // test for the first event.
+            onClose: { entered.continuation.finish() }
         )
         let reader = WireReader(peerEnd)
 

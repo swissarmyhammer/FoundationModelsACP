@@ -22,7 +22,8 @@ import Testing
     @Test func realAgentTrafficAcrossTheStableMethodsValidatesAgainstTheSchema() async throws {
         let validator = try Self.validator()
         let agent = try LiveAgentProcess()
-        defer { Task { await agent.shutdown() } }
+        // The test waits for the exit of the agent, also when the body throws.
+        defer { await agent.shutdown() }
 
         var everyMessage: [(label: String, message: [String: Any])] = []
 

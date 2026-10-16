@@ -112,11 +112,13 @@ private actor RecordingElicitationClient: Client {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { _ in PassiveElicitationAgent() }
         let clientConn = await ClientSideConnection(stream: clientEnd, logger: logger) { _ in client }
+        // The two closes run also when the body throws.
+        defer {
+            await agentConn.close()
+            await clientConn.close()
+        }
 
         try await body(agentConn, agentEnd)
-
-        await agentConn.close()
-        await clientConn.close()
     }
 
     // MARK: - elicitation/create round trips

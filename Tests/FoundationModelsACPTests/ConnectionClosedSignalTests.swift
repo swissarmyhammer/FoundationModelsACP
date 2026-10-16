@@ -98,6 +98,11 @@ private struct ScriptedPeer: Sendable {
         input.yield(try NDJSONCodec.encode(message))
     }
 
+    /// Ends the input stream of the connection. A second call has no effect.
+    func finishInput() {
+        input.finish()
+    }
+
     /// Closes the connection in the way that `trigger` names.
     ///
     /// - Parameters:
@@ -235,6 +240,7 @@ private func slowHandler(
     @Test(arguments: CloseTrigger.allCases)
     func everyWaiterGetsTheReasonOfTheFirstClose(trigger: CloseTrigger) async {
         let peer = ScriptedPeer()
+        defer { peer.finishInput() }
         let connection = await Connection(transport: peer.transport)
         let earlyWaiter = Task { await connection.closed }
 
@@ -251,6 +257,7 @@ private func slowHandler(
     func transportFailureGivesTheErrorOfTheInputStream() async throws {
         let peer = ScriptedPeer()
         let connection = await Connection(transport: peer.transport)
+        defer { await connection.close() }
 
         await peer.close(by: .transportFailure, connection)
         let reason = await connection.closed
@@ -264,13 +271,19 @@ private func slowHandler(
         let peer = ScriptedPeer()
         let started = AsyncStream<Void>.makeStream()
         let work = WorkPastCancellation()
+        defer { peer.finishInput() }
+        // The test releases the work also when it fails.
+        defer { work.release() }
         let connection = await Connection(
             transport: peer.transport,
-            requestHandler: slowHandler(started: started.continuation, work: work)
+            requestHandler: slowHandler(started: started.continuation, work: work),
+            // The close ends the wait of the test for the start.
+            onClose: { started.continuation.finish() }
         )
+        defer { await connection.close() }
         try peer.send(.object(["jsonrpc": .string("2.0"), "id": .number(1), "method": .string("slow")]))
         var startedIterator = started.stream.makeAsyncIterator()
-        _ = await startedIterator.next()
+        try #require(await startedIterator.next() != nil)
 
         await peer.close(by: trigger, connection)
         work.release()
@@ -300,6 +313,11 @@ private func slowHandler(
                 .object(["jsonrpc": .string("2.0"), "method": .string("stop")]),
                 .object(["jsonrpc": .string("2.0"), "id": .number(1), "method": .string("late")]),
             ]))
+        // The read loop dispatches the batch before it reads the end of the
+        // input, so the notification closes the connection first. When the
+        // notification does not close it, the end of the input closes it,
+        // and the wait below ends. Then the reason check fails.
+        peer.finishInput()
         let reason = await connection.closed
 
         #expect(reason.kind == .closedLocally)
@@ -316,6 +334,7 @@ private func slowHandler(
     func agentSideConnectionGivesEndOfInputWhenTheClientCloses() async {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let connection = await AgentSideConnection(stream: agentEnd) { SignalTestAgent(connection: $0) }
+        defer { await connection.close() }
 
         clientEnd.close()
 
@@ -325,12 +344,12 @@ private func slowHandler(
     @Test
     func agentSideConnectionGivesClosedLocallyAfterClose() async {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
+        defer { clientEnd.close() }
         let connection = await AgentSideConnection(stream: agentEnd) { SignalTestAgent(connection: $0) }
 
         await connection.close()
 
         #expect(await connection.closed.kind == .closedLocally)
-        _ = clientEnd
     }
 
     @Test
@@ -338,16 +357,22 @@ private func slowHandler(
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let started = AsyncStream<Void>.makeStream()
         let work = WorkPastCancellation()
+        // The test releases the work also when it fails.
+        defer { work.release() }
         let agent = await AgentSideConnection(stream: agentEnd) { connection in
             SignalTestAgent(connection: connection) {
                 started.continuation.yield(())
                 await work.run()
             }
         }
+        defer { await agent.close() }
+        // The close of the agent ends the wait of the test for the start.
+        finishStream(started.continuation) { _ = await agent.closed }
         let client = await ClientSideConnection(stream: clientEnd) { _ in HandshakeClient() }
+        defer { await client.close() }
         _ = try await client.prompt(signalTestPrompt)
         var startedIterator = started.stream.makeAsyncIterator()
-        _ = await startedIterator.next()
+        try #require(await startedIterator.next() != nil)
 
         await agent.close()
         work.release()
@@ -355,13 +380,13 @@ private func slowHandler(
 
         #expect(reason.kind == .closedLocally)
         #expect(work.record.isSet)
-        await client.close()
     }
 
     @Test
     func clientSideConnectionGivesEndOfInputWhenTheAgentCloses() async {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let connection = await ClientSideConnection(stream: clientEnd) { _ in HandshakeClient() }
+        defer { await connection.close() }
 
         agentEnd.close()
 
@@ -371,11 +396,11 @@ private func slowHandler(
     @Test
     func clientSideConnectionGivesClosedLocallyAfterClose() async {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
+        defer { agentEnd.close() }
         let connection = await ClientSideConnection(stream: clientEnd) { _ in HandshakeClient() }
 
         await connection.close()
 
         #expect(await connection.closed.kind == .closedLocally)
-        _ = agentEnd
     }
 }

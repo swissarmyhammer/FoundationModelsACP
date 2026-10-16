@@ -96,6 +96,14 @@ private actor SessionRegistry {
         return task
     }
 
+    /// Cancels the in-flight work of each session, and frees each slot.
+    func cancelAllWork() {
+        for id in sessions.keys {
+            sessions[id]?.activeWork?.cancel()
+            sessions[id]?.activeWork = nil
+        }
+    }
+
     /// Removes a session outright, so it no longer appears in `listSessions`.
     ///
     /// Distinct from freeing a session's active work: this drops the whole
@@ -166,9 +174,18 @@ private final class SessionManagingAgent: Agent {
     ///   - initialConfigOptions: The options every session created through
     ///     this agent starts with.
     init(connection: AgentSideConnection, initialConfigOptions: [SessionConfigOption] = []) {
+        let registry = SessionRegistry()
         self.connection = connection
-        self.registry = SessionRegistry()
+        self.registry = registry
         self.initialConfigOptions = initialConfigOptions
+        // The work of a prompt is not an inbound handler, so the close of the
+        // connection does not cancel it. This task cancels that work when the
+        // connection closes. Thus the work also ends when a test fails before
+        // it closes the session.
+        Task {
+            _ = await connection.closed
+            await registry.cancelAllWork()
+        }
     }
 
     func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
@@ -233,7 +250,8 @@ private final class SessionManagingAgent: Agent {
         _ = try await registry.session(params.sessionId)
         let task = Task<Void, Never> {
             // Stands in for real foreground work: it ends only when
-            // `session/cancel` or `session/close` cancels it.
+            // `session/cancel` or `session/close` cancels it, or when the
+            // connection closes.
             await waitForTaskCancellation()
         }
         try await registry.beginWork(params.sessionId, task)
@@ -412,6 +430,10 @@ private let selectConfigOption = SessionConfigOption(
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
 
         let cwd = AbsolutePath(rawValue: "/work/one")
         let created = try await client.newSession(NewSessionRequest(cwd: cwd))
@@ -419,9 +441,6 @@ private let selectConfigOption = SessionConfigOption(
         let listed = try await client.listSessions(ListSessionsRequest())
         #expect(listed.sessions.map(\.sessionId) == [created.sessionId])
         #expect(listed.sessions.first?.cwd == cwd)
-
-        await agentConn.close()
-        await client.close()
     }
 
     @Test
@@ -429,6 +448,10 @@ private let selectConfigOption = SessionConfigOption(
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
 
         let cwdOne = AbsolutePath(rawValue: "/work/one")
         let cwdTwo = AbsolutePath(rawValue: "/work/two")
@@ -437,9 +460,6 @@ private let selectConfigOption = SessionConfigOption(
 
         let filtered = try await client.listSessions(ListSessionsRequest(cwd: cwdOne))
         #expect(filtered.sessions.map(\.sessionId) == [sessionOne])
-
-        await agentConn.close()
-        await client.close()
     }
 
     // MARK: session/resume, replayFrom
@@ -451,6 +471,10 @@ private let selectConfigOption = SessionConfigOption(
             SessionManagingAgent(connection: conn, initialConfigOptions: [primaryConfigOption])
         }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
 
         let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
@@ -486,9 +510,6 @@ private let selectConfigOption = SessionConfigOption(
             return
         }
         #expect(secondUpdate.configOptions.first?.type == .boolean(SessionConfigBoolean(currentValue: false)))
-
-        await agentConn.close()
-        await client.close()
     }
 
     @Test
@@ -498,6 +519,10 @@ private let selectConfigOption = SessionConfigOption(
             SessionManagingAgent(connection: conn, initialConfigOptions: [primaryConfigOption])
         }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
 
         let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
@@ -526,9 +551,6 @@ private let selectConfigOption = SessionConfigOption(
             return
         }
         #expect(update.configOptions.first?.type == .boolean(SessionConfigBoolean(currentValue: false)))
-
-        await agentConn.close()
-        await client.close()
     }
 
     @Test
@@ -536,6 +558,10 @@ private let selectConfigOption = SessionConfigOption(
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
 
         let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
@@ -552,9 +578,6 @@ private let selectConfigOption = SessionConfigOption(
             #expect(error.code == .invalidParams)
             #expect(error.data == payload)
         }
-
-        await agentConn.close()
-        await client.close()
     }
 
     @Test
@@ -562,6 +585,10 @@ private let selectConfigOption = SessionConfigOption(
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
 
         let cwd = AbsolutePath(rawValue: "/work")
         let otherCwd = AbsolutePath(rawValue: "/elsewhere")
@@ -570,9 +597,6 @@ private let selectConfigOption = SessionConfigOption(
         await #expect(throws: RequestError.self) {
             _ = try await client.resumeSession(ResumeSessionRequest(cwd: otherCwd, sessionId: session))
         }
-
-        await agentConn.close()
-        await client.close()
     }
 
     // MARK: session/close
@@ -582,6 +606,10 @@ private let selectConfigOption = SessionConfigOption(
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
 
         let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
@@ -601,9 +629,6 @@ private let selectConfigOption = SessionConfigOption(
         // Close is not delete: the session survives in a later listing.
         let listed = try await client.listSessions(ListSessionsRequest())
         #expect(listed.sessions.map(\.sessionId) == [session])
-
-        await agentConn.close()
-        await client.close()
     }
 
     @Test
@@ -614,6 +639,10 @@ private let selectConfigOption = SessionConfigOption(
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
 
         let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
@@ -632,9 +661,6 @@ private let selectConfigOption = SessionConfigOption(
 
         let listed = try await client.listSessions(ListSessionsRequest())
         #expect(listed.sessions.map(\.sessionId) == [session])
-
-        await agentConn.close()
-        await client.close()
     }
 
     @Test
@@ -642,13 +668,14 @@ private let selectConfigOption = SessionConfigOption(
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
 
         await #expect(throws: RequestError.self) {
             _ = try await client.closeSession(CloseSessionRequest(sessionId: SessionId(rawValue: "no-such-session")))
         }
-
-        await agentConn.close()
-        await client.close()
     }
 
     // MARK: session/delete
@@ -658,6 +685,10 @@ private let selectConfigOption = SessionConfigOption(
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
 
         let cwd = AbsolutePath(rawValue: "/work")
         let toDelete = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
@@ -674,9 +705,6 @@ private let selectConfigOption = SessionConfigOption(
         await #expect(throws: RequestError.self) {
             _ = try await client.closeSession(CloseSessionRequest(sessionId: toDelete))
         }
-
-        await agentConn.close()
-        await client.close()
     }
 
     @Test
@@ -684,6 +712,10 @@ private let selectConfigOption = SessionConfigOption(
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { _ in SessionBaselineOnlyAgent() }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
 
         do {
             _ = try await client.deleteSession(DeleteSessionRequest(sessionId: SessionId(rawValue: "session-1")))
@@ -692,9 +724,6 @@ private let selectConfigOption = SessionConfigOption(
             #expect(error.code == .methodNotFound)
             #expect(error.data == .object(["method": .string("session/delete")]))
         }
-
-        await agentConn.close()
-        await client.close()
     }
 
     // MARK: session/set_config_option, config_option_update
@@ -706,6 +735,10 @@ private let selectConfigOption = SessionConfigOption(
             SessionManagingAgent(connection: conn, initialConfigOptions: fourCategoryConfigOptions)
         }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
 
         let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
@@ -726,9 +759,6 @@ private let selectConfigOption = SessionConfigOption(
             }
             #expect(configUpdate.configOptions == response.configOptions)
         }
-
-        await agentConn.close()
-        await client.close()
     }
 
     @Test
@@ -743,6 +773,10 @@ private let selectConfigOption = SessionConfigOption(
             SessionManagingAgent(connection: conn, initialConfigOptions: [selectConfigOption])
         }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
 
         let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
@@ -775,9 +809,6 @@ private let selectConfigOption = SessionConfigOption(
             return
         }
         #expect(configUpdate.configOptions == response.configOptions)
-
-        await agentConn.close()
-        await client.close()
     }
 
     @Test
@@ -787,6 +818,10 @@ private let selectConfigOption = SessionConfigOption(
             SessionManagingAgent(connection: conn, initialConfigOptions: [primaryConfigOption])
         }
         let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
 
         let cwd = AbsolutePath(rawValue: "/work")
         let session = try await client.newSession(NewSessionRequest(cwd: cwd)).sessionId
@@ -798,9 +833,6 @@ private let selectConfigOption = SessionConfigOption(
                 )
             )
         }
-
-        await agentConn.close()
-        await client.close()
     }
 
     // MARK: The cwd is carried as sent; the agent validates it

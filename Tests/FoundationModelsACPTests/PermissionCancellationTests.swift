@@ -50,7 +50,17 @@ private struct PermissionHarness {
     /// - Returns: The task that gives the answer of the client.
     func sendPermissionRequest(for sessionId: SessionId) async throws -> Task<RequestPermissionResponse, any Error> {
         let agent = agent
-        let answer = Task { try await agent.requestPermission(.stub(for: sessionId)) }
+        let connection = connection
+        let answer = Task {
+            do {
+                return try await agent.requestPermission(.stub(for: sessionId))
+            } catch {
+                // The handler step does not come after a failed request, so
+                // the wait below must not wait for it.
+                connection.endWaits()
+                throw error
+            }
+        }
         #expect(try #require(await connection.waitUntilEntered()) == sessionId)
         return answer
     }
@@ -79,7 +89,8 @@ private struct PermissionHarness {
         try await connection.client.sessionCancel(CancelSessionNotification(sessionId: sessionId))
     }
 
-    /// Opens the gate, and closes the two sides.
+    /// Opens the gate, and closes the two sides. Each test calls it in a
+    /// `defer`, so that it runs also when the test body throws.
     func close() async {
         await connection.close()
         await agent.close()
@@ -96,29 +107,30 @@ private struct PermissionHarness {
     @Test
     func sessionCancelAnswersAPendingPermissionRequestWithCancelled() async throws {
         let harness = await PermissionHarness.connect()
+        defer { await harness.close() }
         let answer = try await harness.sendPermissionRequest(for: cancelledSession)
 
         try await harness.cancel(cancelledSession)
 
         #expect(try await harness.answer(to: answer).outcome == .cancelled)
-        await harness.close()
     }
 
     @Test
     func theCancelNotificationIsWrittenBeforeTheCancelledAnswer() async throws {
         let harness = await PermissionHarness.connect()
+        defer { await harness.close() }
         let answer = try await harness.sendPermissionRequest(for: cancelledSession)
 
         try await harness.cancel(cancelledSession)
         _ = try await harness.answer(to: answer)
 
         #expect(await harness.log.events == [notificationFrame, responseFrame])
-        await harness.close()
     }
 
     @Test
     func theLateResultOfTheHandlerIsIgnored() async throws {
         let harness = await PermissionHarness.connect()
+        defer { await harness.close() }
         let answer = try await harness.sendPermissionRequest(for: cancelledSession)
         try await harness.cancel(cancelledSession)
         _ = try await harness.answer(to: answer)
@@ -135,6 +147,7 @@ private struct PermissionHarness {
     @Test
     func aPermissionRequestOfAnotherSessionStaysWithTheHandler() async throws {
         let harness = await PermissionHarness.connect()
+        defer { await harness.close() }
         let cancelledAnswer = try await harness.sendPermissionRequest(for: cancelledSession)
         let otherAnswer = try await harness.sendPermissionRequest(for: otherSession)
 
@@ -143,18 +156,17 @@ private struct PermissionHarness {
         harness.connection.gate.open()
 
         #expect(try await harness.answer(to: otherAnswer).outcome == .selectedStubOption)
-        await harness.close()
     }
 
     @Test
     func aPermissionRequestAfterTheCancelReachesTheHandler() async throws {
         let harness = await PermissionHarness.connect()
+        defer { await harness.close() }
         try await harness.cancel(cancelledSession)
         harness.connection.gate.open()
 
         let answer = try await harness.sendPermissionRequest(for: cancelledSession)
 
         #expect(try await harness.answer(to: answer).outcome == .selectedStubOption)
-        await harness.close()
     }
 }

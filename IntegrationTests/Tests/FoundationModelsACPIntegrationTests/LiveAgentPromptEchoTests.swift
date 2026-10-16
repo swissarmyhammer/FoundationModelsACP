@@ -7,7 +7,8 @@ import Testing
 @Suite struct LiveAgentPromptEchoTests {
     @Test func thePromptEchoCarriesTheMessageIdThatThePromptResponseNames() async throws {
         let agent = try LiveAgentProcess()
-        defer { Task { await agent.shutdown() } }
+        // The test waits for the exit of the agent, also when the body throws.
+        defer { await agent.shutdown() }
 
         _ = try await agent.request(
             id: 1,

@@ -49,14 +49,15 @@ private struct RawAgentHarness {
 
     /// Sends the permission request, and waits until the handler started.
     ///
-    /// - Throws: Any encoding or transport failure.
+    /// - Throws: Any encoding or transport failure, or a failure of the
+    ///   test when the handler did not start.
     func sendPermissionRequest() async throws {
         let request = try JSONValue.encode(result: RequestPermissionRequest.stub(for: permissionSession))
         try await send(
             RawPeerEnvelope.request(id: permissionRequestId, method: requestPermissionMethod, params: request),
             over: connection.agentEnd
         )
-        #expect(await connection.waitUntilEntered() == permissionSession)
+        #expect(try #require(await connection.waitUntilEntered()) == permissionSession)
     }
 
     /// Sends a `$/cancel_request` for the permission request.
@@ -95,6 +96,7 @@ private struct RawAgentHarness {
     @Test
     func aCancelRequestForAPendingPermissionRequestAnswersRequestCancelled() async throws {
         let harness = await RawAgentHarness.connect()
+        defer { await harness.connection.close() }
         try await harness.sendPermissionRequest()
 
         try await harness.cancelPermissionRequest()
@@ -103,12 +105,12 @@ private struct RawAgentHarness {
 
         let expectedAnswer = errorEnvelope(id: permissionRequestId, error: .requestCancelled)
         #expect(try await harness.nextFrame() == expectedAnswer)
-        await harness.connection.close()
     }
 
     @Test
     func aCancelRequestAfterTheCancelledOutcomeSendsNoSecondResponse() async throws {
         let harness = await RawAgentHarness.connect()
+        defer { await harness.connection.close() }
         try await harness.sendPermissionRequest()
         let cancel = CancelSessionNotification(sessionId: permissionSession)
         try await harness.connection.client.sessionCancel(cancel)
@@ -123,6 +125,5 @@ private struct RawAgentHarness {
         try await harness.sendProbe()
 
         #expect(requestID(of: try await harness.nextFrame()) == probeRequestId)
-        await harness.connection.close()
     }
 }

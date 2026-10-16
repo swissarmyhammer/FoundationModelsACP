@@ -8,6 +8,10 @@ import FoundationModelsACP
 @Test func eofRejectsEveryPendingRequest() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     let pending = (0..<3).map { n in
@@ -30,9 +34,16 @@ import FoundationModelsACP
     struct WireFailure: Error {}
     let incoming = AsyncThrowingStream<Data, any Error>.makeStream()
     let writes = AsyncStream<Data>.makeStream()
+    // The close of the connection finishes the stream of writes. Thus the
+    // wait for a write also ends when the connection closes first.
     let client = await Connection(
-        transport: ScriptedTransport(bytes: incoming.stream, written: writes.continuation)
+        transport: ScriptedTransport(bytes: incoming.stream, written: writes.continuation),
+        onClose: { writes.continuation.finish() }
     )
+    defer {
+        await client.close()
+        incoming.continuation.finish()
+    }
 
     let caller = Task { try await client.request(method: "hang") }
     var writeIterator = writes.stream.makeAsyncIterator()
@@ -47,6 +58,7 @@ import FoundationModelsACP
 @Test func requestAfterDisconnectFailsImmediately() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
+    defer { await client.close() }
     agentEnd.close()
 
     // The first failure proves EOF was processed; everything after must fail
@@ -65,6 +77,10 @@ import FoundationModelsACP
 @Test func closeRejectsPendingAndRefusesNewRequests() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     let caller = Task { try await client.request(method: "hang") }
@@ -88,6 +104,9 @@ import FoundationModelsACP
     let agent = await Connection(
         transport: agentEnd,
         requestHandler: { _, _ in
+            // The end of the handler finishes the stream of cancels. Thus
+            // the wait for the cancel also ends when the handler ends.
+            defer { cancelled.continuation.finish() }
             started.continuation.yield(())
             await withTaskCancellationHandler {
                 await waitForTaskCancellation()
@@ -95,20 +114,27 @@ import FoundationModelsACP
                 cancelled.continuation.yield(())
             }
             return .bool(true)
-        }
+        },
+        // The close of the connection finishes the stream of starts. Thus
+        // the wait for the start also ends when the connection closes first.
+        onClose: { started.continuation.finish() }
     )
+    defer {
+        await agent.close()
+        clientEnd.close()
+    }
 
     try await send(
         .object(["jsonrpc": .string("2.0"), "id": .number(1), "method": .string("slow")]),
         over: clientEnd
     )
     var startedIterator = started.stream.makeAsyncIterator()
-    _ = await startedIterator.next()
+    try #require(await startedIterator.next() != nil)
 
     await agent.close()
 
     var cancelledIterator = cancelled.stream.makeAsyncIterator()
-    _ = await cancelledIterator.next()
+    try #require(await cancelledIterator.next() != nil)
 }
 
 @Test func closeFinishesStreamsDerivedFromOnClose() async throws {
@@ -120,11 +146,19 @@ import FoundationModelsACP
         transport: clientEnd,
         onClose: { closed.continuation.yield(()) }
     )
+    defer { await client.close() }
+    // The connection calls `onClose` before it gives the close reason. This
+    // task finishes the stream after the close reason comes. Thus the wait
+    // below also ends when the connection closes but does not call `onClose`.
+    let finisher = Task {
+        _ = await client.closed
+        closed.continuation.finish()
+    }
     agentEnd.close()
 
     var iterator = closed.stream.makeAsyncIterator()
-    _ = await iterator.next()
-    _ = client
+    try #require(await iterator.next() != nil)
+    await finisher.value
 }
 
 // MARK: - Timeout
@@ -132,6 +166,10 @@ import FoundationModelsACP
 @Test func perRequestTimeoutFiresWhenPeerNeverAnswers() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
 
     await #expect(throws: ConnectionError.timedOut) {
         _ = try await client.request(method: "hang", timeout: .milliseconds(50))
@@ -142,6 +180,10 @@ import FoundationModelsACP
 @Test func connectionDefaultTimeoutApplies() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd, requestTimeout: .milliseconds(50))
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
 
     await #expect(throws: ConnectionError.timedOut) {
         _ = try await client.request(method: "hang")
@@ -152,6 +194,10 @@ import FoundationModelsACP
 @Test func lateResponseAfterTimeoutIsIgnored() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     await #expect(throws: ConnectionError.timedOut) {
@@ -167,7 +213,7 @@ import FoundationModelsACP
         over: agentEnd
     )
 
-    async let second = client.request(method: "prompt", timeout: .seconds(10))
+    async let second = client.request(method: "prompt")
     let request = try await reader.next()
     let secondID = try #require(requestID(of: request))
     try await send(
@@ -182,6 +228,10 @@ import FoundationModelsACP
 @Test func cancellingCallerTaskUnblocksPendingRequest() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     let caller = Task { try await client.request(method: "hang") }
@@ -203,6 +253,10 @@ import FoundationModelsACP
     // doing work nobody is waiting for anymore.
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     let caller = Task { try await client.request(method: "hang") }
@@ -235,6 +289,10 @@ import FoundationModelsACP
     // finished — and no pending entry survives to look up anyway.
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     let caller = Task { try await client.request(method: "quick") }

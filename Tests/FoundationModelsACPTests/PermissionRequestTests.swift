@@ -115,19 +115,31 @@ import Testing
         let session = StubAgent.sessionId
         let connection = await GatedPermissionConnection.connect(outcome: .cancelled)
         let agentConnection = await connection.connectStubAgent()
+        // The two closes run also when the test body throws.
+        defer {
+            await agentConnection.close()
+            await connection.close()
+        }
         var updates = connection.client.subscribe(to: session).updates.makeAsyncIterator()
 
         // Fires `session/request_permission`; the client's handler suspends on
         // the gate rather than answering, so this stays pending for the rest
         // of the test until the gate is released below.
         let permission = Task {
-            try await agentConnection.requestPermission(.stub(for: session))
+            do {
+                return try await agentConnection.requestPermission(.stub(for: session))
+            } catch {
+                // The handler does not start after a failed request, so the
+                // wait below must not wait for it.
+                connection.endWaits()
+                throw error
+            }
         }
 
         // Wait until the client's handler is definitely running before
         // sending more traffic, so the notification below demonstrably
         // arrives while the permission request is still outstanding.
-        #expect(await connection.waitUntilEntered() == session)
+        #expect(try #require(await connection.waitUntilEntered()) == session)
 
         // A concurrent `session/update`, sent over the very same connection
         // while the permission request is still pending, must still be
@@ -143,8 +155,5 @@ import Testing
         connection.gate.open()
         let response = try await permission.value
         #expect(response.outcome == .cancelled)
-
-        await agentConnection.close()
-        await connection.close()
     }
 }

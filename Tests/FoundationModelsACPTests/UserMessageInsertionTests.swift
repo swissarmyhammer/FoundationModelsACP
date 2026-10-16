@@ -120,7 +120,12 @@ private struct InsertingAgent: Agent {
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {
         let messageId = insert(params)
         if let deferredWorkRan = mode.deferredWorkRanBeforeThrow {
-            connection.afterRespondingToCurrentRequest { deferredWorkRan.yield() }
+            // A discard of the work ends the stream. Then the test does not
+            // wait for work that never runs.
+            connection.afterRespondingToCurrentRequest(
+                { deferredWorkRan.yield() },
+                onDiscard: { deferredWorkRan.finish() }
+            )
             throw insertionFailure
         }
         return PromptResponse(messageId: messageId)
@@ -239,13 +244,20 @@ private struct ConnectionPair {
             InsertingAgent(connection: connection, mode: mode, history: history)
         }
         let client = await ClientSideConnection(stream: clientEnd) { _ in ObservingClient() }
-        _ = try await client.newSession(NewSessionRequest(cwd: insertionWorkingDirectory))
-        return ConnectionPair(agent: agent, client: client)
+        let pair = ConnectionPair(agent: agent, client: client)
+        do {
+            _ = try await client.newSession(NewSessionRequest(cwd: insertionWorkingDirectory))
+            return pair
+        } catch {
+            await pair.close()
+            throw error
+        }
     }
 
     @Test
     func theEchoCarriesThePromptAndTheMessageIdThatTheResponseNames() async throws {
         let pair = try await connect(mode: .newMessageId)
+        defer { await pair.close() }
         var updates = pair.client.subscribe(to: insertionSessionId).updates.makeAsyncIterator()
 
         let response = try await pair.client.prompt(insertionPrompt)
@@ -253,37 +265,37 @@ private struct ConnectionPair {
         #expect(!response.messageId.rawValue.isEmpty)
         let echo = UserMessage(messageId: response.messageId, content: .value(promptContent))
         #expect(await updates.nextUpdate() == .userMessage(echo))
-        await pair.close()
     }
 
     @Test
     func eachPromptGetsANewMessageId() async throws {
         let pair = try await connect(mode: .newMessageId)
+        defer { await pair.close() }
 
         let first = try await pair.client.prompt(insertionPrompt)
         let second = try await pair.client.prompt(insertionPrompt)
 
         #expect(first.messageId != second.messageId)
-        await pair.close()
     }
 
     @Test
     func aMessageIdFromTheCallerIsTheIdOfTheResponseAndTheEcho() async throws {
         let callerId = MessageId(rawValue: "caller-msg-1")
         let pair = try await connect(mode: .callerMessageId(callerId))
+        defer { await pair.close() }
         var updates = pair.client.subscribe(to: insertionSessionId).updates.makeAsyncIterator()
 
         let response = try await pair.client.prompt(insertionPrompt)
 
         #expect(response.messageId == callerId)
         #expect(await updates.nextUpdate() == .userMessage(UserMessage(messageId: callerId, content: .value(promptContent))))
-        await pair.close()
     }
 
     @Test
     func theEchoEntersTheHistoryWithTheMessageIdThatTheResponseNames() async throws {
         let history = AgentHistory()
         let pair = try await connect(mode: .recordInHistory, history: history)
+        defer { await pair.close() }
         var updates = pair.client.subscribe(to: insertionSessionId).updates.makeAsyncIterator()
 
         let response = try await pair.client.prompt(insertionPrompt)
@@ -293,7 +305,6 @@ private struct ConnectionPair {
         let recorded = history.engine.withLock { $0.entries }
         let message = SessionEntry.Message(messageId: response.messageId, content: promptContent)
         #expect(recorded == [SessionEntry(id: .userMessage(response.messageId), kind: .userMessage(message))])
-        await pair.close()
     }
 
     @Test
@@ -301,6 +312,7 @@ private struct ConnectionPair {
         for _ in 0..<orderingRepetitions {
             let log = EventLog()
             let pair = try await connect(mode: .newMessageId) { LoggingTransport(underlying: $0, log: log) }
+            defer { await pair.close() }
             await log.reset()
             var updates = pair.client.subscribe(to: insertionSessionId).updates.makeAsyncIterator()
 
@@ -309,7 +321,6 @@ private struct ConnectionPair {
             _ = try #require(await updates.nextUpdate())
 
             #expect(await log.events == [responseFrameKind, updateFrameKind])
-            await pair.close()
         }
     }
 
@@ -320,6 +331,7 @@ private struct ConnectionPair {
         let pair = try await connect(mode: .throwAfterInsertion(deferredWorkRan: deferredWorkContinuation)) {
             LoggingTransport(underlying: $0, log: log)
         }
+        defer { await pair.close() }
         await log.reset()
 
         await #expect(throws: insertionFailure) {
@@ -331,7 +343,6 @@ private struct ConnectionPair {
 
         let frameKinds = await log.events
         #expect(frameKinds == [responseFrameKind])
-        await pair.close()
     }
 
     @Test
@@ -342,6 +353,7 @@ private struct ConnectionPair {
             mode: .recordInHistoryThenThrow(deferredWorkRan: deferredWorkContinuation),
             history: history
         )
+        defer { await pair.close() }
 
         await #expect(throws: insertionFailure) {
             try await pair.client.prompt(insertionPrompt)
@@ -352,7 +364,6 @@ private struct ConnectionPair {
         _ = try #require(await ran.next())
 
         #expect(history.entryCount == historyEntriesWithoutTheMessage)
-        await pair.close()
     }
 
     @Test
@@ -364,6 +375,7 @@ private struct ConnectionPair {
                 AgentHistory.frameEvent(kind: kind, entryCount: history.entryCount)
             }
         }
+        defer { await pair.close() }
         await log.reset()
         var updates = pair.client.subscribe(to: insertionSessionId).updates.makeAsyncIterator()
 
@@ -376,12 +388,12 @@ private struct ConnectionPair {
                 AgentHistory.frameEvent(kind: responseFrameKind, entryCount: historyEntriesWithoutTheMessage),
                 AgentHistory.frameEvent(kind: updateFrameKind, entryCount: historyEntriesWithTheMessage),
             ])
-        await pair.close()
     }
 
     @Test
     func theClientCorrelatorLinksThePendingPromptToTheEchoedMessage() async throws {
         let pair = try await connect(mode: .newMessageId)
+        defer { await pair.close() }
         var updates = pair.client.subscribe(to: insertionSessionId).updates.makeAsyncIterator()
         var correlator = PendingPromptCorrelator<Int>()
         let localID = 1

@@ -11,6 +11,13 @@ comments:
     - Test: InboundCancellationScopeTests. Before the fix, the started task read the meta and true after the response was on the wire. After the fix, it reads nil and false.
     - Filtered run: 28 tests in 6 suites passed (cancel meta, permission and the new test). The full run comes before the push.
   timestamp: 2026-10-16T20:59:29.540082+00:00
+- actor: claude-code
+  id: 01m539d6k1wr7msar84201egqw
+  text: |-
+    ### commit, changed
+    - evidence: 2ea94f1 fix(connection): end the inbound cancel box when the handler returns
+    - Full run before the push: 510 tests in 56 suites and 135 tests in 17 suites passed. Integration: 7 tests passed. DocC: clean.
+  timestamp: 2026-10-16T21:20:37.473589+00:00
 position_column: done
 position_ordinal: b780
 title: 'Group D: currentInboundCancellation is inherited by tasks that a handler starts'

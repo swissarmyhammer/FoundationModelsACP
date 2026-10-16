@@ -73,9 +73,12 @@ private struct CancelledPromptAgent: Agent {
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {
         if case .afterInsertion = point {
             connection.insertUserMessage(params, messageId: cancellationMessageId)
-            connection.afterRespondingToCurrentRequest { [probe] in
-                probe.deferredWorkCancellation.continuation.yield(Task.isCancelled)
-            }
+            // A discard of the work ends the stream. Then the test reads `nil`
+            // and does not wait for work that never runs.
+            connection.afterRespondingToCurrentRequest(
+                { [probe] in probe.deferredWorkCancellation.continuation.yield(Task.isCancelled) },
+                onDiscard: { [probe] in probe.deferredWorkCancellation.continuation.finish() }
+            )
         }
         probe.waiting.continuation.yield(())
         await waitForTaskCancellation()
@@ -161,6 +164,14 @@ private struct RawClientHarness {
     func nextFrame() async throws -> JSONValue {
         try #require(try await reader.next())
     }
+
+    /// Closes the agent side and the raw client end. The close of the agent
+    /// cancels a handler that still waits for the cancellation, and ends the
+    /// stream that `reader` reads.
+    func close() async {
+        await agent.close()
+        clientEnd.close()
+    }
 }
 
 // MARK: - Tests
@@ -187,15 +198,21 @@ private struct RawClientHarness {
         }
         let harness = RawClientHarness(agent: agent, clientEnd: clientEnd, reader: WireReader(clientEnd))
         let prompt = PromptRequest(prompt: cancellationPromptContent, sessionId: cancellationSessionId)
-        try await harness.sendRequest(id: promptRequestId, handler: "prompt", params: prompt)
-        var waiting = probe.waiting.stream.makeAsyncIterator()
-        _ = await waiting.next()
-        return harness
+        do {
+            try await harness.sendRequest(id: promptRequestId, handler: "prompt", params: prompt)
+            var waiting = probe.waiting.stream.makeAsyncIterator()
+            _ = try #require(await waiting.next())
+            return harness
+        } catch {
+            await harness.close()
+            throw error
+        }
     }
 
     @Test
     func aCancelAfterInsertionAnswersTheMessageIdAndThenSendsTheEcho() async throws {
         let harness = try await startPrompt(cancelledAt: .afterInsertion, probe: CancellationProbe())
+        defer { await harness.close() }
 
         try await harness.cancelPrompt()
 
@@ -204,7 +221,7 @@ private struct RawClientHarness {
             "id": promptRequestId,
             "result": try JSONValue.encode(result: PromptResponse(messageId: cancellationMessageId)),
         ])
-        #expect(try await harness.nextFrame() == expectedResponse)
+        try #require(try await harness.nextFrame() == expectedResponse)
         let echo = UpdateSessionNotification(
             sessionId: cancellationSessionId,
             update: .userMessage(
@@ -216,12 +233,12 @@ private struct RawClientHarness {
             "params": try JSONValue.encode(result: echo),
         ])
         #expect(try await harness.nextFrame() == expectedEcho)
-        await harness.agent.close()
     }
 
     @Test
     func aCancelBeforeInsertionAnswersRequestCancelledAndSendsNoEcho() async throws {
         let harness = try await startPrompt(cancelledAt: .beforeInsertion, probe: CancellationProbe())
+        defer { await harness.close() }
 
         try await harness.cancelPrompt()
 
@@ -230,23 +247,22 @@ private struct RawClientHarness {
             "id": promptRequestId,
             "error": RequestError.requestCancelled.wireValue,
         ])
-        #expect(try await harness.nextFrame() == expectedResponse)
+        try #require(try await harness.nextFrame() == expectedResponse)
         // An echo would come before the answer to a later request.
         try await harness.sendRequest(id: followUpRequestId, handler: "listSessions", params: ListSessionsRequest())
         #expect(requestID(of: try await harness.nextFrame()) == followUpRequestId)
-        await harness.agent.close()
     }
 
     @Test
     func deferredWorkDoesNotSeeTheCancellationOfTheHandler() async throws {
         let probe = CancellationProbe()
         let harness = try await startPrompt(cancelledAt: .afterInsertion, probe: probe)
+        defer { await harness.close() }
 
         try await harness.cancelPrompt()
 
         var observed = probe.deferredWorkCancellation.stream.makeAsyncIterator()
         // `nil` means that the deferred work did not run, and fails too.
         #expect(await observed.next() == false)
-        await harness.agent.close()
     }
 }

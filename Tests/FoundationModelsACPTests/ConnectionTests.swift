@@ -14,12 +14,13 @@ import FoundationModelsACP
             .object(["method": .string(method), "params": params ?? .null])
         }
     )
+    defer { await agent.close() }
     let client = await Connection(transport: clientEnd)
+    defer { await client.close() }
 
     let result = try await client.request(method: "ping", params: .object(["n": .number(1)]))
 
     #expect(result == .object(["method": .string("ping"), "params": .object(["n": .number(1)])]))
-    _ = agent
 }
 
 /// Lets the handlers of one connection answer in the reverse order of their
@@ -37,10 +38,21 @@ private actor ReverseTurns {
         next = count - 1
     }
 
-    /// Suspends until it is the turn of handler `number`.
+    /// Suspends until it is the turn of handler `number`, or until the task
+    /// is cancelled. A close of the connection cancels each handler, so the
+    /// wait also ends when the test fails and closes the connection.
     func wait(for number: Int) async {
-        guard number != next else { return }
-        await withCheckedContinuation { waiters[number] = $0 }
+        guard number != next, !Task.isCancelled else { return }
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { waiters[number] = $0 }
+        } onCancel: {
+            Task { await self.endWait(for: number) }
+        }
+    }
+
+    /// Resumes the handler `number` when it still waits.
+    private func endWait(for number: Int) {
+        waiters.removeValue(forKey: number)?.resume()
     }
 
     /// Gives the turn to the next handler.
@@ -62,6 +74,8 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
             throw RequestError.invalidParams
         }
         await turns.wait(for: Int(n))
+        // A cancelled handler does not give the turn to the next handler.
+        try Task.checkCancellation()
         await turns.advance()
         return .object(["doubled": .number(n * 2)])
     }
@@ -73,7 +87,9 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     // The handlers answer in reverse order, so responses return out of
     // submission order and correlation is exercised, not just FIFO luck.
     let agent = await Connection(transport: agentEnd, requestHandler: reverseOrderDoubler(ReverseTurns(count: count)))
+    defer { await agent.close() }
     let client = await Connection(transport: clientEnd, requestHandler: reverseOrderDoubler(ReverseTurns(count: count)))
+    defer { await client.close() }
 
     try await withThrowingTaskGroup(of: Void.self) { group in
         for n in 0..<count {
@@ -94,6 +110,8 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
 @Test func responseWithUnknownIdIsIgnored() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
+    defer { await client.close() }
+    defer { agentEnd.close() }
     let reader = WireReader(agentEnd)
 
     // A response nobody asked for must be dropped without poisoning the connection.
@@ -121,6 +139,8 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
         transport: agentEnd,
         requestHandler: { method, _ in .object(["ok": .bool(true), "method": .string(method)]) }
     )
+    defer { await agent.close() }
+    defer { clientEnd.close() }
     let reader = WireReader(clientEnd)
 
     // String ids must be echoed back exactly, not renumbered.
@@ -137,7 +157,6 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
                 "id": .string("req-1"),
                 "result": .object(["ok": .bool(true), "method": .string("hello")]),
             ]))
-    _ = agent
 }
 
 @Test func slowRequestHandlerDoesNotDelaySubsequentNotification() async throws {
@@ -150,20 +169,28 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
         requestHandler: { _, _ in
             started.continuation.yield(())
             // Suspend until the test opens the gate — a stand-in for a
-            // long-lived request like session/request_permission.
+            // long-lived request like session/request_permission. The wait
+            // also ends when a close cancels the handler.
             var release = gate.stream.makeAsyncIterator()
             _ = await release.next()
             return .string("slow done")
         },
-        notificationHandler: { method, _ in notes.continuation.yield(method) }
+        notificationHandler: { method, _ in notes.continuation.yield(method) },
+        // The close ends each wait of the test on the two streams.
+        onClose: {
+            started.continuation.finish()
+            notes.continuation.finish()
+        }
     )
+    defer { await agent.close() }
     let client = await Connection(transport: clientEnd)
+    defer { await client.close() }
 
     let slow = Task { try await client.request(method: "slow") }
     // Wait until the slow handler is definitely running before notifying, so
     // the notification demonstrably arrives while the request is in flight.
     var startedIterator = started.stream.makeAsyncIterator()
-    _ = await startedIterator.next()
+    try #require(await startedIterator.next() != nil)
     try await client.notify(method: "poke")
 
     var notesIterator = notes.stream.makeAsyncIterator()
@@ -171,7 +198,6 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
 
     gate.continuation.finish()
     #expect(try await slow.value == .string("slow done"))
-    _ = agent
 }
 
 @Test func slowRequestHandlerDoesNotDelayConcurrentRequest() async throws {
@@ -187,25 +213,29 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
         requestHandler: { method, _ in
             if method == "slow" {
                 started.continuation.yield(())
+                // The wait also ends when a close cancels the handler.
                 var release = gate.stream.makeAsyncIterator()
                 _ = await release.next()
                 return .string("slow done")
             }
             return .string("fast done")
-        }
+        },
+        // The close ends the wait of the test for the start.
+        onClose: { started.continuation.finish() }
     )
+    defer { await agent.close() }
     let client = await Connection(transport: clientEnd)
+    defer { await client.close() }
 
     let slow = Task { try await client.request(method: "slow") }
     var startedIterator = started.stream.makeAsyncIterator()
-    _ = await startedIterator.next()
+    try #require(await startedIterator.next() != nil)
 
     let fast = try await client.request(method: "fast")
     #expect(fast == .string("fast done"))
 
     gate.continuation.finish()
     #expect(try await slow.value == .string("slow done"))
-    _ = agent
 }
 
 @Test func notificationsRouteToHandlerInSendOrder() async throws {
@@ -213,9 +243,13 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     let notes = AsyncStream<String>.makeStream()
     let agent = await Connection(
         transport: agentEnd,
-        notificationHandler: { method, _ in notes.continuation.yield(method) }
+        notificationHandler: { method, _ in notes.continuation.yield(method) },
+        // The close ends each wait of the test for a notification.
+        onClose: { notes.continuation.finish() }
     )
+    defer { await agent.close() }
     let client = await Connection(transport: clientEnd)
+    defer { await client.close() }
 
     for n in 0..<5 {
         try await client.notify(method: "note/\(n)")
@@ -225,7 +259,6 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     for n in 0..<5 {
         #expect(await iterator.next() == "note/\(n)")
     }
-    _ = agent
 }
 
 @Test func outOfOrderNotificationsAreDeliveredWithoutReordering() async throws {
@@ -238,9 +271,13 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     let notes = AsyncStream<JSONValue>.makeStream()
     let agent = await Connection(
         transport: agentEnd,
-        notificationHandler: { _, params in notes.continuation.yield(params ?? .null) }
+        notificationHandler: { _, params in notes.continuation.yield(params ?? .null) },
+        // The close ends each wait of the test for a notification.
+        onClose: { notes.continuation.finish() }
     )
+    defer { await agent.close() }
     let client = await Connection(transport: clientEnd)
+    defer { await client.close() }
 
     // A "later" toolCallId=1 update followed by an out-of-order toolCallId=2
     // arriving after it, then a late toolCallId=1 stray update.
@@ -252,7 +289,6 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     #expect(await iterator.next() == .object(["toolCallId": .string("1"), "seq": .number(1)]))
     #expect(await iterator.next() == .object(["toolCallId": .string("2"), "seq": .number(2)]))
     #expect(await iterator.next() == .object(["toolCallId": .string("1"), "seq": .number(3)]))
-    _ = agent
 }
 
 // MARK: - Errors
@@ -260,7 +296,9 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
 @Test func unknownMethodIsAnsweredWithMethodNotFound() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(transport: agentEnd)
+    defer { await agent.close() }
     let client = await Connection(transport: clientEnd)
+    defer { await client.close() }
 
     do {
         _ = try await client.request(method: "no/such")
@@ -268,7 +306,6 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     } catch let error as RequestError {
         #expect(error.code == .methodNotFound)
     }
-    _ = agent
 }
 
 @Test func handlerRequestErrorPropagatesCodeMessageAndData() async throws {
@@ -279,7 +316,9 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     )
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(transport: agentEnd, requestHandler: { _, _ in throw thrown })
+    defer { await agent.close() }
     let client = await Connection(transport: clientEnd)
+    defer { await client.close() }
 
     do {
         _ = try await client.request(method: "op/whatever")
@@ -287,14 +326,15 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     } catch let error as RequestError {
         #expect(error == thrown)
     }
-    _ = agent
 }
 
 @Test func handlerFailureMapsToInternalError() async throws {
     struct Boom: Error {}
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(transport: agentEnd, requestHandler: { _, _ in throw Boom() })
+    defer { await agent.close() }
     let client = await Connection(transport: clientEnd)
+    defer { await client.close() }
 
     do {
         _ = try await client.request(method: "explode")
@@ -302,12 +342,13 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     } catch let error as RequestError {
         #expect(error.code == .internalError)
     }
-    _ = agent
 }
 
 @Test func unclassifiableMessageWithIdIsAnsweredInvalidRequest() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(transport: agentEnd)
+    defer { await agent.close() }
+    defer { clientEnd.close() }
     let reader = WireReader(clientEnd)
 
     // No method and no result/error: not a request, notification, or response.
@@ -324,7 +365,6 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
         return
     }
     #expect(errorFields["code"] == .number(-32600))
-    _ = agent
 }
 
 @Test func handlerAuthenticationRequiredErrorRoundTripsToCaller() async throws {
@@ -333,7 +373,9 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
         transport: agentEnd,
         requestHandler: { _, _ in throw RequestError.authenticationRequired }
     )
+    defer { await agent.close() }
     let client = await Connection(transport: clientEnd)
+    defer { await client.close() }
 
     do {
         _ = try await client.request(method: "session/new")
@@ -341,12 +383,13 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     } catch let error as RequestError {
         #expect(error == RequestError.authenticationRequired)
     }
-    _ = agent
 }
 
 @Test func messageWithoutJsonrpcVersionIsAnsweredInvalidRequest() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(transport: agentEnd, requestHandler: { _, _ in .bool(true) })
+    defer { await agent.close() }
+    defer { clientEnd.close() }
     let reader = WireReader(clientEnd)
 
     // No `jsonrpc` member: the request must be rejected, not dispatched —
@@ -364,12 +407,13 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
         return
     }
     #expect(errorFields["code"] == .number(-32600))
-    _ = agent
 }
 
 @Test func messageWithWrongJsonrpcVersionIsAnsweredInvalidRequest() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(transport: agentEnd, requestHandler: { _, _ in .bool(true) })
+    defer { await agent.close() }
+    defer { clientEnd.close() }
     let reader = WireReader(clientEnd)
 
     try await send(
@@ -388,12 +432,13 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
         return
     }
     #expect(errorFields["code"] == .number(-32600))
-    _ = agent
 }
 
 @Test func responseWithoutJsonrpcVersionFailsCallerInsteadOfHanging() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
+    defer { await client.close() }
+    defer { agentEnd.close() }
     let reader = WireReader(agentEnd)
 
     async let answer = client.request(method: "ping")
@@ -456,8 +501,12 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
             // outliving the test.
             await waitForTaskCancellation()
             throw CancellationError()
-        }
+        },
+        // The close ends the wait of the test for the start.
+        onClose: { started.continuation.finish() }
     )
+    defer { await agent.close() }
+    defer { clientEnd.close() }
     let reader = WireReader(clientEnd)
 
     try await send(
@@ -465,7 +514,7 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
         over: clientEnd
     )
     var startedIterator = started.stream.makeAsyncIterator()
-    _ = await startedIterator.next()
+    try #require(await startedIterator.next() != nil)
 
     try await send(
         .object([
@@ -483,12 +532,13 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     }
     #expect(fields["id"] == .number(1))
     #expect(error["code"] == .number(-32800))
-    _ = agent
 }
 
 @Test func cancelRequestNotificationForUnknownIdIsANoOp() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(transport: agentEnd, requestHandler: { _, _ in .bool(true) })
+    defer { await agent.close() }
+    defer { clientEnd.close() }
     let reader = WireReader(clientEnd)
 
     // Nothing pending named "999" — cancellation racing completion (or a
@@ -509,7 +559,6 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     )
     let response = try #require(try await reader.next())
     #expect(response == .object(["jsonrpc": .string("2.0"), "id": .number(1), "result": .bool(true)]))
-    _ = agent
 }
 
 @Test func cancelRequestIsNeverRoutedToARequestOrNotificationHandler() async throws {
@@ -528,6 +577,8 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
             if method == "$/cancel_request" { sawCancelRequest.withLock { $0 = true } }
         }
     )
+    defer { await agent.close() }
+    defer { clientEnd.close() }
     let reader = WireReader(clientEnd)
 
     try await send(
@@ -547,7 +598,6 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     _ = try await reader.next()
 
     #expect(!sawCancelRequest.withLock { $0 })
-    _ = agent
 }
 
 // MARK: - Duplicate inbound request ids
@@ -567,11 +617,16 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
         transport: agentEnd,
         requestHandler: { _, _ in
             started.continuation.yield(())
+            // The wait also ends when a close cancels the handler.
             var release = gate.stream.makeAsyncIterator()
             _ = await release.next()
             return .string("first done")
-        }
+        },
+        // The close ends the wait of the test for the start.
+        onClose: { started.continuation.finish() }
     )
+    defer { await agent.close() }
+    defer { clientEnd.close() }
     let reader = WireReader(clientEnd)
 
     try await send(
@@ -579,7 +634,7 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
         over: clientEnd
     )
     var startedIterator = started.stream.makeAsyncIterator()
-    _ = await startedIterator.next()
+    try #require(await startedIterator.next() != nil)
 
     // A second request reusing the same still-in-flight id.
     try await send(
@@ -600,7 +655,6 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     gate.continuation.finish()
     let firstResponse = try #require(try await reader.next())
     #expect(firstResponse == .object(["jsonrpc": .string("2.0"), "id": .number(1), "result": .string("first done")]))
-    _ = agent
 }
 
 // MARK: - Batch JSON-RPC
@@ -611,6 +665,8 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
         transport: agentEnd,
         requestHandler: { method, _ in .object(["echo": .string(method)]) }
     )
+    defer { await agent.close() }
+    defer { clientEnd.close() }
 
     try await clientEnd.write(
         NDJSONCodec.encode(
@@ -636,7 +692,6 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     )
     #expect(byId[.number(1)] == .object(["echo": .string("a")]))
     #expect(byId[.number(2)] == .object(["echo": .string("b")]))
-    _ = agent
 }
 
 @Test func batchOfOnlyNotificationsProducesNoReply() async throws {
@@ -644,8 +699,12 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     let notes = AsyncStream<String>.makeStream()
     let agent = await Connection(
         transport: agentEnd,
-        notificationHandler: { method, _ in notes.continuation.yield(method) }
+        notificationHandler: { method, _ in notes.continuation.yield(method) },
+        // The close ends each wait of the test for a notification.
+        onClose: { notes.continuation.finish() }
     )
+    defer { await agent.close() }
+    defer { clientEnd.close() }
 
     try await clientEnd.write(
         NDJSONCodec.encode(
@@ -666,7 +725,6 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     let reader = WireReader(clientEnd)
     let received = try await reader.next()
     #expect(received == .object(["jsonrpc": .string("2.0"), "method": .string("sentinel")]))
-    _ = agent
 }
 
 @Test func batchMixingRequestsAndNotificationsOwesOnlyTheRequests() async throws {
@@ -675,8 +733,12 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     let agent = await Connection(
         transport: agentEnd,
         requestHandler: { _, _ in .bool(true) },
-        notificationHandler: { method, _ in notes.continuation.yield(method) }
+        notificationHandler: { method, _ in notes.continuation.yield(method) },
+        // The close ends the wait of the test for the notification.
+        onClose: { notes.continuation.finish() }
     )
+    defer { await agent.close() }
+    defer { clientEnd.close() }
 
     try await clientEnd.write(
         NDJSONCodec.encode(
@@ -698,7 +760,6 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     }
     #expect(responses.count == 1)
     #expect(requestID(of: responses.first) == .number(1))
-    _ = agent
 }
 
 // MARK: - Malformed frame (clean protocol error, not a crashed read loop)
@@ -706,6 +767,8 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
 @Test func malformedFrameGetsCleanParseErrorAndReadLoopContinues() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(transport: agentEnd, requestHandler: { _, _ in .bool(true) })
+    defer { await agent.close() }
+    defer { clientEnd.close() }
     let reader = WireReader(clientEnd)
 
     try await sendRawLine("not json at all", over: clientEnd)
@@ -725,7 +788,6 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     )
     let response = try #require(try await reader.next())
     #expect(response == .object(["jsonrpc": .string("2.0"), "id": .number(1), "result": .bool(true)]))
-    _ = agent
 }
 
 // MARK: - _meta passthrough
@@ -740,10 +802,11 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
         transport: agentEnd,
         requestHandler: { _, params in params ?? .null }
     )
+    defer { await agent.close() }
     let client = await Connection(transport: clientEnd)
+    defer { await client.close() }
 
     let result = try await client.request(method: "echo", params: params)
 
     #expect(result == params)
-    _ = agent
 }

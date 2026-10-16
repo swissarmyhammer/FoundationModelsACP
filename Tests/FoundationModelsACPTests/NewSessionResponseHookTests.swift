@@ -111,6 +111,9 @@ private struct HookHarness {
     /// One observation for each permission handler that started.
     let observed: AsyncStream<HandlerObservation>
 
+    /// Feeds `observed`. `close()` finishes it.
+    let observedFeed: AsyncStream<HandlerObservation>.Continuation
+
     /// Connects an `OrderProbeClient` to a raw agent end over
     /// `InMemoryTransport`.
     ///
@@ -122,9 +125,30 @@ private struct HookHarness {
         let client = await ClientSideConnection(stream: clientEnd) { _ in
             OrderProbeClient(log: log, observed: observed.continuation)
         }
+        // The close of the client ends the stream of observations. Then a
+        // test that waits for a handler that never starts does not stay
+        // suspended after the connection closed.
+        Task {
+            _ = await client.closed
+            observed.continuation.finish()
+        }
         return HookHarness(
-            client: client, agentEnd: agentEnd, reader: WireReader(agentEnd), log: log, observed: observed.stream
+            client: client,
+            agentEnd: agentEnd,
+            reader: WireReader(agentEnd),
+            log: log,
+            observed: observed.stream,
+            observedFeed: observed.continuation
         )
+    }
+
+    /// Closes the client and the raw agent end, and ends the stream of
+    /// observations. The close of the client ends each call that still
+    /// waits for a response.
+    func close() async {
+        await client.close()
+        agentEnd.close()
+        observedFeed.finish()
     }
 
     /// Starts one `newSession(_:onResponse:)` call whose hook records into
@@ -190,6 +214,7 @@ private func sendTogether(_ messages: [JSONValue], over transport: some ACPTrans
 @Suite struct NewSessionResponseHookTests {
     @Test func theHookRunsBeforeTheNextFrameIsDispatched() async throws {
         let harness = await HookHarness.connect()
+        defer { await harness.close() }
         let call = harness.startNewSession(cwd: firstWorkingDirectory)
         let request = try await harness.nextNewSessionRequest()
 
@@ -211,11 +236,11 @@ private func sendTogether(_ messages: [JSONValue], over transport: some ACPTrans
         #expect(observation.hookRanBefore)
         #expect(response.sessionId == firstSession)
         #expect(harness.log.entries == [hookEvent(firstSession), requestEvent(firstSession)])
-        await harness.client.close()
     }
 
     @Test func eachHookGetsOnlyTheResponseToItsOwnCall() async throws {
         let harness = await HookHarness.connect()
+        defer { await harness.close() }
         let firstLog = SynchronousEventLog()
         let secondLog = SynchronousEventLog()
         let client = harness.client
@@ -253,11 +278,11 @@ private func sendTogether(_ messages: [JSONValue], over transport: some ACPTrans
         #expect(try await secondCall.value.sessionId == secondSession)
         #expect(firstLog.entries == [hookEvent(firstSession)])
         #expect(secondLog.entries == [hookEvent(secondSession)])
-        await harness.client.close()
     }
 
     @Test func anErrorResponseDoesNotRunTheHook() async throws {
         let harness = await HookHarness.connect()
+        defer { await harness.close() }
         let call = harness.startNewSession(cwd: firstWorkingDirectory)
         let request = try await harness.nextNewSessionRequest()
 
@@ -267,11 +292,11 @@ private func sendTogether(_ messages: [JSONValue], over transport: some ACPTrans
             try await call.value
         }
         #expect(harness.log.entries.isEmpty)
-        await harness.client.close()
     }
 
     @Test func aResultThatDoesNotDecodeDoesNotRunTheHook() async throws {
         let harness = await HookHarness.connect()
+        defer { await harness.close() }
         let call = harness.startNewSession(cwd: firstWorkingDirectory)
         let request = try await harness.nextNewSessionRequest()
 
@@ -282,11 +307,11 @@ private func sendTogether(_ messages: [JSONValue], over transport: some ACPTrans
             try await call.value
         }
         #expect(harness.log.entries.isEmpty)
-        await harness.client.close()
     }
 
     @Test func aCloseBeforeTheResponseDoesNotRunTheHook() async throws {
         let harness = await HookHarness.connect()
+        defer { await harness.close() }
         let call = harness.startNewSession(cwd: firstWorkingDirectory)
         _ = try await harness.nextNewSessionRequest()
 

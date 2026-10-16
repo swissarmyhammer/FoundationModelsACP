@@ -54,13 +54,44 @@ private final class RoleRecorder: Sendable {
         calls.withLock { $0[handler] }
     }
 
-    /// Waits until the named handler has been invoked at least once.
+    /// Ends each wait, now and later. A test calls it on a failure event: a
+    /// connection closed, or a reverse call failed. Then the call that a
+    /// wait expects does not come.
+    func finish() {
+        emit.finish()
+    }
+
+    /// Ends the waits of this recorder when `connection` closes.
+    ///
+    /// - Parameter connection: The agent side to watch.
+    func finish(whenClosed connection: AgentSideConnection) {
+        Task { [self] in
+            _ = await connection.closed
+            finish()
+        }
+    }
+
+    /// Ends the waits of this recorder when `connection` closes.
+    ///
+    /// - Parameter connection: The client side to watch.
+    func finish(whenClosed connection: ClientSideConnection) {
+        Task { [self] in
+            _ = await connection.closed
+            finish()
+        }
+    }
+
+    /// Waits until the named handler has been invoked at least once, or
+    /// until a failure event ends the wait.
     ///
     /// - Parameter handler: The handler name to wait for.
-    func waitForCall(_ handler: String) async {
+    /// - Returns: `true` when the handler was invoked, or `false` when a
+    ///   failure event ended the wait first.
+    func waitForCall(_ handler: String) async -> Bool {
         for await event in events where event == handler {
-            return
+            return true
         }
+        return false
     }
 }
 
@@ -201,7 +232,13 @@ private final class ReactiveClient: Client {
     }
 
     func sessionUpdate(_ notification: UpdateSessionNotification) async {
-        try? await connection.sessionCancel(CancelSessionNotification(sessionId: notification.sessionId))
+        do {
+            try await connection.sessionCancel(CancelSessionNotification(sessionId: notification.sessionId))
+        } catch {
+            // The reverse call failed, so the agent does not get the cancel.
+            // End the wait of the test for it.
+            recorder.finish()
+        }
         recorder.record("reactiveSessionCancel", notification)
     }
 
@@ -276,6 +313,14 @@ func agentFactoryCapturesConnectionAndIssuesReversePermissionDuringPrompt() asyn
         ReversePromptAgent(connection: conn, recorder: recorder)
     }
     let client = await ClientSideConnection(stream: clientEnd) { _ in PermittingClient(recorder: recorder) }
+    // The two closes run also when the test body throws. A close of either
+    // side also ends the wait for a call below.
+    defer {
+        await agentConn.close()
+        await client.close()
+    }
+    recorder.finish(whenClosed: agentConn)
+    recorder.finish(whenClosed: client)
 
     let prompt = PromptRequest(prompt: [.text(TextContent(text: "go"))], sessionId: testSessionId)
     _ = try await client.prompt(prompt)
@@ -289,10 +334,7 @@ func agentFactoryCapturesConnectionAndIssuesReversePermissionDuringPrompt() asyn
     #expect(recorder.recorded("promptReversePermission") == (try encodedValue(expected)))
 
     // The session update fired during the turn was delivered.
-    await recorder.waitForCall("sessionUpdate")
-
-    await agentConn.close()
-    await client.close()
+    try #require(await recorder.waitForCall("sessionUpdate"))
 }
 
 @Test
@@ -303,6 +345,14 @@ func clientFactoryCapturesConnectionAndDrivesAgentFromWithinSessionUpdate() asyn
     let client = await ClientSideConnection(stream: clientEnd) { conn in
         ReactiveClient(connection: conn, recorder: recorder)
     }
+    // The two closes run also when the test body throws. A close of either
+    // side also ends the wait for a call below.
+    defer {
+        await agentConn.close()
+        await client.close()
+    }
+    recorder.finish(whenClosed: agentConn)
+    recorder.finish(whenClosed: client)
 
     try await agentConn.sessionUpdate(
         UpdateSessionNotification(
@@ -315,12 +365,9 @@ func clientFactoryCapturesConnectionAndDrivesAgentFromWithinSessionUpdate() asyn
 
     // The client's own handler used its captured connection to drive the
     // agent back — the reverse call actually reached the agent's side.
-    await recorder.waitForCall("sessionCancel")
+    try #require(await recorder.waitForCall("sessionCancel"))
     #expect(
         recorder.recorded("sessionCancel")
             == (try encodedValue(CancelSessionNotification(sessionId: testSessionId)))
     )
-
-    await agentConn.close()
-    await client.close()
 }

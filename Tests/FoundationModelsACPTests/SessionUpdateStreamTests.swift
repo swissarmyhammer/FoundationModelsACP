@@ -181,6 +181,10 @@ private func startPrompt(
 func updatesDemuxAcrossInterleavedSessions() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
 
     var firstUpdates = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
     var secondUpdates = client.subscribe(to: sessionTwo).updates.makeAsyncIterator()
@@ -196,8 +200,6 @@ func updatesDemuxAcrossInterleavedSessions() async throws {
     #expect(firstA == messageChunk("a1"))
     #expect(firstB == messageChunk("a2"))
     #expect(secondA == messageChunk("b1"))
-
-    await client.close()
 }
 
 // MARK: - Straggler after the idle state_update
@@ -206,6 +208,10 @@ func updatesDemuxAcrossInterleavedSessions() async throws {
 func lateToolCallUpdateAfterIdleStateUpdateIsDelivered() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     var updates = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
@@ -228,8 +234,6 @@ func lateToolCallUpdateAfterIdleStateUpdateIsDelivered() async throws {
     #expect(await updates.nextUpdate() == messageChunk("mid-turn"))
     #expect(await updates.nextUpdate() == idleState(stopReason: .endTurn))
     #expect(await updates.nextUpdate() == toolCallUpdate("call-late"))
-
-    await client.close()
 }
 
 // MARK: - Post-cancel stragglers then the cancelled stop reason
@@ -238,6 +242,10 @@ func lateToolCallUpdateAfterIdleStateUpdateIsDelivered() async throws {
 func postCancelTrailingUpdatesThenCancelledStopReasonInOrder() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     var updates = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
@@ -265,8 +273,6 @@ func postCancelTrailingUpdatesThenCancelledStopReasonInOrder() async throws {
     #expect(await updates.nextUpdate() == toolCallUpdate("call-trailing"))
     #expect(await updates.nextUpdate() == messageChunk("winding down"))
     #expect(await updates.nextUpdate() == idleState(stopReason: .cancelled))
-
-    await client.close()
 }
 
 // MARK: - An update for a session with no subscriber
@@ -275,6 +281,10 @@ func postCancelTrailingUpdatesThenCancelledStopReasonInOrder() async throws {
 func anUpdateForASessionWithNoSubscriberDoesNotStopOtherSessions() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
 
     // Nobody subscribes to sessionTwo, so the connection keeps its update.
     // sessionOne's subscriber proves that the read loop continues after it
@@ -285,8 +295,6 @@ func anUpdateForASessionWithNoSubscriberDoesNotStopOtherSessions() async throws 
     try await send(sessionUpdateEnvelope(notification(for: sessionOne, messageChunk("still-here"))), over: agentEnd)
 
     #expect(await firstUpdates.nextUpdate() == messageChunk("still-here"))
-
-    await client.close()
 }
 
 // MARK: - A known update whose payload does not decode
@@ -296,6 +304,10 @@ func aKnownUpdateWithABadFieldTypeLogsOneWarningAndLaterUpdatesStillArrive() asy
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let log = LogCapture()
     let client = await ClientSideConnection(stream: clientEnd, logger: log.logger) { _ in MinimalClient() }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     var updates = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
 
     try await send(sessionUpdateEnvelope(params: malformedToolCallUpdateParams), over: agentEnd)
@@ -310,8 +322,6 @@ func aKnownUpdateWithABadFieldTypeLogsOneWarningAndLaterUpdatesStillArrive() asy
     #expect(warning.contains(sessionOne.rawValue))
     #expect(warning.contains(toolCallUpdateDiscriminator))
     #expect(warning.contains(toolCallIdField))
-
-    await client.close()
 }
 
 // MARK: - Stream finish on disconnect
@@ -320,6 +330,10 @@ func aKnownUpdateWithABadFieldTypeLogsOneWarningAndLaterUpdatesStillArrive() asy
 func connectionEOFFinishesAllSessionStreams() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
 
     let firstStream = client.subscribe(to: sessionOne).updates
     let secondStream = client.subscribe(to: sessionTwo).updates
@@ -337,8 +351,6 @@ func connectionEOFFinishesAllSessionStreams() async throws {
 
     #expect(await firstCollector.value == 1)
     #expect(await secondCollector.value == 0)
-
-    await client.close()
 }
 
 // MARK: - Router buffer before the first subscription
@@ -493,6 +505,10 @@ func routerDiscardsEveryBufferAndMarkWhenItFinishes() async {
 func anUpdateSentBeforeTheNewSessionResponseReachesTheFirstSubscriber() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     let session = try await createSession(
@@ -505,8 +521,6 @@ func anUpdateSentBeforeTheNewSessionResponseReachesTheFirstSubscriber() async th
     #expect(await updates.nextUpdate() == messageChunk("before-response"))
     #expect(await updates.nextUpdate() == messageChunk("after-subscribe"))
     #expect(!subscription.hasMissedUpdates)
-
-    await client.close()
 }
 
 @Test
@@ -516,6 +530,10 @@ func bufferLimitsSetOnTheConnectionMarkAnOverflowBeforeTheNewSessionResponse() a
     let client = await ClientSideConnection(
         stream: clientEnd, logger: log.logger, bufferLimits: oneUpdateLimits
     ) { _ in MinimalClient() }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     let session = try await createSession(
@@ -525,14 +543,16 @@ func bufferLimitsSetOnTheConnectionMarkAnOverflowBeforeTheNewSessionResponse() a
 
     #expect(subscription.hasMissedUpdates)
     #expect(log.messages.count == 1)
-
-    await client.close()
 }
 
 @Test
 func closingASessionDiscardsItsBufferAndItsMark() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd, bufferLimits: oneUpdateLimits) { _ in MinimalClient() }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     let session = try await createSession(
@@ -548,14 +568,16 @@ func closingASessionDiscardsItsBufferAndItsMark() async throws {
     var updates = subscription.updates.makeAsyncIterator()
     #expect(await updates.nextUpdate() == messageChunk("live"))
     #expect(!subscription.hasMissedUpdates)
-
-    await client.close()
 }
 
 @Test
 func closingTheConnectionDiscardsEveryBufferAndMark() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd, bufferLimits: oneUpdateLimits) { _ in MinimalClient() }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     let session = try await createSession(
@@ -617,6 +639,10 @@ private func failedPromptMarker(id: JSONValue) -> SessionStreamEvent {
 func theResumeMarkerComesAfterEveryEarlierUpdateAndBeforeEveryLaterUpdate() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     var events = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
@@ -631,14 +657,16 @@ func theResumeMarkerComesAfterEveryEarlierUpdateAndBeforeEveryLaterUpdate() asyn
     #expect(await events.next() == .update(messageChunk("replay-2")))
     #expect(await events.next() == .requestFinished(id: id, method: resumeWireMethod, outcome: .succeeded))
     #expect(await events.next() == .update(messageChunk("live")))
-
-    await client.close()
 }
 
 @Test
 func anErrorResponseYieldsAFailedMarker() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     var events = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
@@ -647,8 +675,6 @@ func anErrorResponseYieldsAFailedMarker() async throws {
 
     await #expect(throws: RequestError.invalidParams) { try await prompt.value }
     #expect(await events.next() == failedPromptMarker(id: id))
-
-    await client.close()
 }
 
 @Test
@@ -657,6 +683,10 @@ func aTimedOutRequestYieldsAFailedMarker() async throws {
     let client = await ClientSideConnection(stream: clientEnd, requestTimeout: shortRequestTimeout) { _ in
         MinimalClient()
     }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     var events = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
@@ -664,14 +694,16 @@ func aTimedOutRequestYieldsAFailedMarker() async throws {
 
     await #expect(throws: ConnectionError.timedOut) { try await prompt.value }
     #expect(await events.next() == failedPromptMarker(id: id))
-
-    await client.close()
 }
 
 @Test
 func aCancelledRequestYieldsAFailedMarker() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     var events = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
@@ -680,14 +712,16 @@ func aCancelledRequestYieldsAFailedMarker() async throws {
 
     await #expect(throws: CancellationError.self) { try await prompt.value }
     #expect(await events.next() == failedPromptMarker(id: id))
-
-    await client.close()
 }
 
 @Test
 func connectionCloseYieldsAFailedMarkerBeforeTheStreamFinishes() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     var events = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
@@ -703,6 +737,10 @@ func connectionCloseYieldsAFailedMarkerBeforeTheStreamFinishes() async throws {
 func aRequestWithoutASessionIdYieldsNoMarker() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     var events = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
@@ -722,14 +760,16 @@ func aRequestWithoutASessionIdYieldsNoMarker() async throws {
     try await send(sessionUpdateEnvelope(notification(for: sessionOne, messageChunk("after-initialize"))), over: agentEnd)
 
     #expect(await events.next() == .update(messageChunk("after-initialize")))
-
-    await client.close()
 }
 
 @Test
 func keptUpdatesAndAMarkerReachTheFirstSubscriberInOrder() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
     let reader = WireReader(agentEnd)
 
     let (resume, id) = try await startResume(on: client, reader: reader)
@@ -744,8 +784,6 @@ func keptUpdatesAndAMarkerReachTheFirstSubscriberInOrder() async throws {
     #expect(await events.next() == .requestFinished(id: id, method: resumeWireMethod, outcome: .succeeded))
     #expect(await events.next() == .update(messageChunk("live")))
     #expect(!subscription.hasMissedUpdates)
-
-    await client.close()
 }
 
 @Test

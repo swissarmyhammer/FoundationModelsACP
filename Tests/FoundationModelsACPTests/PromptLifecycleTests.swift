@@ -155,6 +155,13 @@ private final class PromptLifecycleAgent: Agent {
                 await self.runTurn(sessionId: params.sessionId, content: params.prompt, messageId: messageId)
             }
             registry.beginWork(params.sessionId, task)
+            // The close of the connection cancels the turn. Thus a turn that
+            // waits for a cancel ends also when a test fails before it sends
+            // `session/cancel`.
+            Task { [connection] in
+                _ = await connection.closed
+                task.cancel()
+            }
         }
         return PromptResponse(messageId: messageId)
     }
@@ -308,8 +315,14 @@ private let repetitionsForOrderingRaceDetection = 500
             PromptLifecycleAgent(connection: conn, script: script, stopReason: stopReason)
         }
         let client = await ClientSideConnection(stream: clientEnd, clientFactory)
-        let session = try await client.newSession(NewSessionRequest(cwd: workingDirectory)).sessionId
-        return (agentConn, client, session)
+        do {
+            let session = try await client.newSession(NewSessionRequest(cwd: workingDirectory)).sessionId
+            return (agentConn, client, session)
+        } catch {
+            await agentConn.close()
+            await client.close()
+            throw error
+        }
     }
 
     // MARK: session/prompt acknowledges with the user message's id
@@ -337,6 +350,10 @@ private let repetitionsForOrderingRaceDetection = 500
                 PromptLifecycleAgent(connection: conn, script: .completesImmediately)
             }
             let client = await ClientSideConnection(stream: clientEnd) { _ in PassiveClient() }
+            defer {
+                await agentConn.close()
+                await client.close()
+            }
             let session = try await client.newSession(NewSessionRequest(cwd: workingDirectory)).sessionId
 
             // `session/new`'s own response wrote a frame too; clear it so the
@@ -353,9 +370,6 @@ private let repetitionsForOrderingRaceDetection = 500
             let events = await log.events
             #expect(events.first == "response", "wire order was \(events), expected the response written first")
             #expect(events.dropFirst().first == "update", "wire order was \(events), expected the update written second")
-
-            await agentConn.close()
-            await client.close()
         }
     }
 
@@ -364,18 +378,19 @@ private let repetitionsForOrderingRaceDetection = 500
     @Test
     func aFullTurnProducesRunningThenIdleWithAStopReason() async throws {
         let (agentConn, client, session) = try await makeSessionPair(script: .completesImmediately, stopReason: .maxTokens)
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
         var updates = client.subscribe(to: session).updates.makeAsyncIterator()
 
         let response = try await client.prompt(PromptRequest(prompt: [.text(TextContent(text: "go"))], sessionId: session))
 
-        #expect(await updates.nextUpdate() == .stateUpdate(.running(RunningStateUpdate())))
+        try #require(await updates.nextUpdate() == .stateUpdate(.running(RunningStateUpdate())))
         // The echo names the same user message that the response names.
         let echo = ContentChunk(content: .text(TextContent(text: "go")), messageId: response.messageId)
-        #expect(await updates.nextUpdate() == .userMessageChunk(echo))
+        try #require(await updates.nextUpdate() == .userMessageChunk(echo))
         #expect(await updates.nextUpdate() == .stateUpdate(.idle(IdleStateUpdate(stopReason: .maxTokens))))
-
-        await agentConn.close()
-        await client.close()
     }
 
     // MARK: The agent owns message identity
@@ -383,6 +398,10 @@ private let repetitionsForOrderingRaceDetection = 500
     @Test
     func acceptingAPromptEmitsUserMessageChunksSharingTheMessageIdThatTheResponseReturns() async throws {
         let (agentConn, client, session) = try await makeSessionPair(script: .completesImmediately)
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
         var updates = client.subscribe(to: session).updates.makeAsyncIterator()
 
         let response = try await client.prompt(
@@ -413,9 +432,6 @@ private let repetitionsForOrderingRaceDetection = 500
         #expect(second.content == .text(TextContent(text: "second")))
 
         _ = try #require(await updates.nextUpdate())  // idle
-
-        await agentConn.close()
-        await client.close()
     }
 
     // MARK: requires_action, then resumed to running once answered
@@ -429,24 +445,25 @@ private let repetitionsForOrderingRaceDetection = 500
             script: .requiresPermissionThenCompletes,
             clientFactory: { _ in PermissionAnsweringClient(outcome: selected) }
         )
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
         var updates = client.subscribe(to: session).updates.makeAsyncIterator()
 
         _ = try await client.prompt(PromptRequest(prompt: [.text(TextContent(text: "go"))], sessionId: session))
 
-        #expect(await updates.nextUpdate() == .stateUpdate(.running(RunningStateUpdate())))
+        try #require(await updates.nextUpdate() == .stateUpdate(.running(RunningStateUpdate())))
         let echoed = try #require(await updates.nextUpdate())
         guard case .userMessageChunk = echoed else {
             Issue.record("expected a user_message_chunk, got \(echoed)")
             return
         }
-        #expect(await updates.nextUpdate() == .stateUpdate(.requiresAction(RequiresActionStateUpdate())))
+        try #require(await updates.nextUpdate() == .stateUpdate(.requiresAction(RequiresActionStateUpdate())))
         // Resumed to running only once the permission request was answered —
         // not before, since the agent awaits it in between.
-        #expect(await updates.nextUpdate() == .stateUpdate(.running(RunningStateUpdate())))
+        try #require(await updates.nextUpdate() == .stateUpdate(.running(RunningStateUpdate())))
         #expect(await updates.nextUpdate() == .stateUpdate(.idle(IdleStateUpdate(stopReason: .endTurn))))
-
-        await agentConn.close()
-        await client.close()
     }
 
     // MARK: session/cancel -> idle + cancelled
@@ -454,11 +471,15 @@ private let repetitionsForOrderingRaceDetection = 500
     @Test
     func sessionCancelMidTurnYieldsIdleAndCancelled() async throws {
         let (agentConn, client, session) = try await makeSessionPair(script: .runsUntilCancelled)
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
         var updates = client.subscribe(to: session).updates.makeAsyncIterator()
 
         _ = try await client.prompt(PromptRequest(prompt: [.text(TextContent(text: "go"))], sessionId: session))
 
-        #expect(await updates.nextUpdate() == .stateUpdate(.running(RunningStateUpdate())))
+        try #require(await updates.nextUpdate() == .stateUpdate(.running(RunningStateUpdate())))
         let echoed = try #require(await updates.nextUpdate())
         guard case .userMessageChunk = echoed else {
             Issue.record("expected a user_message_chunk, got \(echoed)")
@@ -468,9 +489,6 @@ private let repetitionsForOrderingRaceDetection = 500
         // A notification, not a request: nothing here waits on the agent.
         try await client.sessionCancel(CancelSessionNotification(sessionId: session))
         #expect(await updates.nextUpdate() == .stateUpdate(.idle(IdleStateUpdate(stopReason: .cancelled))))
-
-        await agentConn.close()
-        await client.close()
     }
 
     // MARK: stopReason round trips, unknown ones preserved

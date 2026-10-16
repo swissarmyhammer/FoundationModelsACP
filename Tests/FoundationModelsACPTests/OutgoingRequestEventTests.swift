@@ -39,8 +39,9 @@ import Testing
     @Test(arguments: TypedCall.all)
     func successfulCallStartsThenFinishes(_ call: TypedCall) async throws {
         let peer = await RawAgentPeer()
+        defer { await peer.close() }
         var events = peer.client.subscribeToOutgoingRequests().makeAsyncIterator()
-        let caller = Task { [client = peer.client] in try await call.invoke(client) }
+        let caller = peer.startCall { try await call.invoke($0) }
 
         let request = try await peer.nextRequest()
         #expect(request.method == call.wireMethod)
@@ -51,14 +52,14 @@ import Testing
         try await caller.value
         #expect(await events.next() == .finished(id: request.id))
         #expect(peer.client.inFlightMethod(for: request.id) == nil)
-        await peer.close()
     }
 
     @Test(arguments: TypedCall.all)
     func failedCallStartsThenFinishes(_ call: TypedCall) async throws {
         let peer = await RawAgentPeer()
+        defer { await peer.close() }
         var events = peer.client.subscribeToOutgoingRequests().makeAsyncIterator()
-        let caller = Task { [client = peer.client] in try await call.invoke(client) }
+        let caller = peer.startCall { try await call.invoke($0) }
 
         let request = try await peer.nextRequest()
         #expect(await events.next() == .started(id: request.id, method: call.wireMethod))
@@ -67,14 +68,14 @@ import Testing
         await #expect(throws: RequestError.invalidParams) { try await caller.value }
         #expect(await events.next() == .finished(id: request.id))
         #expect(peer.client.inFlightMethod(for: request.id) == nil)
-        await peer.close()
     }
 
     @Test(arguments: TypedCall.all)
     func cancelledCallStartsThenFinishes(_ call: TypedCall) async throws {
         let peer = await RawAgentPeer()
+        defer { await peer.close() }
         var events = peer.client.subscribeToOutgoingRequests().makeAsyncIterator()
-        let caller = Task { [client = peer.client] in try await call.invoke(client) }
+        let caller = peer.startCall { try await call.invoke($0) }
 
         let request = try await peer.nextRequest()
         #expect(await events.next() == .started(id: request.id, method: call.wireMethod))
@@ -83,14 +84,14 @@ import Testing
         await #expect(throws: CancellationError.self) { try await caller.value }
         #expect(await events.next() == .finished(id: request.id))
         #expect(peer.client.inFlightMethod(for: request.id) == nil)
-        await peer.close()
     }
 
     @Test(arguments: TypedCall.all)
     func callInFlightAtCloseFinishesAndTheStreamEnds(_ call: TypedCall) async throws {
         let peer = await RawAgentPeer()
+        defer { await peer.close() }
         var events = peer.client.subscribeToOutgoingRequests().makeAsyncIterator()
-        let caller = Task { [client = peer.client] in try await call.invoke(client) }
+        let caller = peer.startCall { try await call.invoke($0) }
 
         let request = try await peer.nextRequest()
         #expect(await events.next() == .started(id: request.id, method: call.wireMethod))
@@ -100,27 +101,29 @@ import Testing
         #expect(await events.next() == .finished(id: request.id))
         #expect(await events.next() == nil)
         #expect(peer.client.inFlightMethod(for: request.id) == nil)
-        await peer.close()
     }
 
     // MARK: - Timeout and subscription edges
 
     @Test func timedOutCallFinishes() async throws {
         let peer = await RawAgentPeer(requestTimeout: Self.shortRequestTimeout)
+        defer { await peer.close() }
         var events = peer.client.subscribeToOutgoingRequests().makeAsyncIterator()
 
-        await #expect(throws: ConnectionError.timedOut) {
+        // A timeout proves that the client wrote the request. Any other end
+        // fails the test here, before it waits for the request on the wire.
+        try await #require(throws: ConnectionError.timedOut) {
             _ = try await peer.client.logoutAuth(LogoutAuthRequest())
         }
         let request = try await peer.nextRequest()
         #expect(await events.next() == .started(id: request.id, method: request.method))
         #expect(await events.next() == .finished(id: request.id))
-        await peer.close()
     }
 
     @Test func lateSubscriberFirstGetsTheRequestsThatAreInFlight() async throws {
         let peer = await RawAgentPeer()
-        let caller = Task { [client = peer.client] in try await client.logoutAuth(LogoutAuthRequest()) }
+        defer { await peer.close() }
+        let caller = peer.startCall { _ = try await $0.logoutAuth(LogoutAuthRequest()) }
         let request = try await peer.nextRequest()
 
         var events = peer.client.subscribeToOutgoingRequests().makeAsyncIterator()
@@ -129,14 +132,14 @@ import Testing
         try await peer.respond(to: request.id, with: WireRoundTrip.encode(LogoutAuthResponse()))
         _ = try await caller.value
         #expect(await events.next() == .finished(id: request.id))
-        await peer.close()
     }
 
     @Test func everySubscriberGetsEveryEvent() async throws {
         let peer = await RawAgentPeer()
+        defer { await peer.close() }
         var first = peer.client.subscribeToOutgoingRequests().makeAsyncIterator()
         var second = peer.client.subscribeToOutgoingRequests().makeAsyncIterator()
-        let caller = Task { [client = peer.client] in try await client.logoutAuth(LogoutAuthRequest()) }
+        let caller = peer.startCall { _ = try await $0.logoutAuth(LogoutAuthRequest()) }
 
         let request = try await peer.nextRequest()
         try await peer.respond(to: request.id, with: WireRoundTrip.encode(LogoutAuthResponse()))
@@ -147,47 +150,50 @@ import Testing
         ]
         #expect([await first.next(), await first.next()] == expected)
         #expect([await second.next(), await second.next()] == expected)
-        await peer.close()
     }
 
     @Test func subscriptionAfterCloseEndsAtOnce() async throws {
         let peer = await RawAgentPeer()
+        defer { await peer.close() }
         await peer.client.close()
 
         var events = peer.client.subscribeToOutgoingRequests().makeAsyncIterator()
         #expect(await events.next() == nil)
-        await peer.close()
     }
 
     @Test func inFlightMethodIsNilForAnUnknownRequest() async {
         let peer = await RawAgentPeer()
+        defer { await peer.close() }
         #expect(peer.client.inFlightMethod(for: .string("never-sent")) == nil)
-        await peer.close()
     }
 
     // MARK: - A request-scoped elicitation matches its request
 
     @Test func requestScopedElicitationMatchesTheInFlightLogin() async throws {
         let peer = await RawAgentPeer()
+        defer { await peer.close() }
         var events = peer.client.subscribeToOutgoingRequests().makeAsyncIterator()
-        let caller = Task { [client = peer.client] in
-            try await client.loginAuth(LoginAuthRequest(methodId: AuthMethodId(rawValue: "browser")))
+        let caller = peer.startCall {
+            _ = try await $0.loginAuth(LoginAuthRequest(methodId: AuthMethodId(rawValue: "browser")))
         }
         let login = try await peer.nextRequest()
         #expect(login.method == Self.loginWireMethod)
         #expect(await events.next() == .started(id: login.id, method: Self.loginWireMethod))
 
         try await peer.sendElicitation(Self.loginElicitation(scopedTo: login.id))
+        // The client writes its answer only after the handler returns. A
+        // success answer proves that the handler got the elicitation. Thus
+        // the next wait does not wait for an elicitation that never comes.
+        let answer = try await peer.nextResponse()
+        try #require(answer["result"] != nil)
         let elicitation = try #require(await peer.elicitations.next())
         let scopedId = try #require(elicitation.urlRequestScope?.requestId)
         #expect(peer.client.inFlightMethod(for: scopedId) == Self.loginWireMethod)
 
-        _ = try await peer.nextResponse()
         try await peer.respond(to: login.id, with: WireRoundTrip.encode(LoginAuthResponse()))
         _ = try await caller.value
         #expect(await events.next() == .finished(id: scopedId))
         #expect(peer.client.inFlightMethod(for: scopedId) == nil)
-        await peer.close()
     }
 
     /// Makes a url-mode elicitation that names one request of the client.
@@ -331,7 +337,8 @@ private final class RawAgentPeer {
     /// The connection under test.
     let client: ClientSideConnection
 
-    /// The elicitation requests that the client served, in order.
+    /// The elicitation requests that the client served, in order. The
+    /// stream ends when the client connection closed.
     var elicitations: AsyncStream<CreateElicitationRequest>.Iterator
 
     /// The raw agent end of the transport pair.
@@ -339,6 +346,9 @@ private final class RawAgentPeer {
 
     /// Reads the frames that the client writes.
     private let reader: WireReader
+
+    /// Is set when the test read a request of the client from the wire.
+    private let requestRead = AtomicFlag()
 
     /// The monotonic ID of the next request that the agent end sends.
     private var nextAgentRequestId = 1
@@ -353,8 +363,30 @@ private final class RawAgentPeer {
         self.agentEnd = agentEnd
         reader = WireReader(agentEnd)
         elicitations = served.stream.makeAsyncIterator()
-        client = await ClientSideConnection(stream: clientEnd, requestTimeout: requestTimeout) { _ in
+        let client = await ClientSideConnection(stream: clientEnd, requestTimeout: requestTimeout) { _ in
             ElicitationRecordingClient(served: served.continuation)
+        }
+        self.client = client
+        finishStream(served.continuation) { _ = await client.closed }
+    }
+
+    /// Starts one call of the client in a new task.
+    ///
+    /// When the call ends before the test read a request from the wire, the
+    /// task closes the client. Then the wait of the test for the request
+    /// ends at the end of the wire, and the test fails. When the test read a
+    /// request first, the task does not change the client.
+    ///
+    /// - Parameter body: The call.
+    /// - Returns: The task of the call.
+    func startCall(
+        _ body: @escaping @Sendable (ClientSideConnection) async throws -> Void
+    ) -> Task<Void, any Error> {
+        Task { [client, requestRead] in
+            defer {
+                if !requestRead.isSet { await client.close() }
+            }
+            try await body(client)
         }
     }
 
@@ -364,6 +396,7 @@ private final class RawAgentPeer {
     /// - Throws: When the wire ends, or the next frame is not a request.
     func nextRequest() async throws -> WireRequest {
         let fields = try await nextFrame()
+        requestRead.set()
         let id = try #require(fields["id"])
         guard case .string(let method) = try #require(fields["method"]) else {
             throw RawAgentPeerError.notARequest(fields)

@@ -225,6 +225,13 @@ import Testing
         let capture = CapturingTransport(underlying: rawAgentEnd)
         let agentConn = await AgentSideConnection(stream: capture) { conn in GoldenSessionAgent(connection: conn) }
         let client = await ClientSideConnection(stream: clientEnd) { _ in GoldenSessionClient() }
+        // The two closes run also when the test body throws or returns
+        // early. A second close has no effect, so the closes before the
+        // golden comparison below stay in their place.
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
 
         let subscription = client.subscribe(to: Self.sessionId)
 

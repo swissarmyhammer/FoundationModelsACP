@@ -96,8 +96,9 @@ private struct IdleAgent: Agent {
 /// arrival number of an inbound request.
 ///
 /// Each test runs in a fixed order. Each step waits for a stream element or
-/// a wire frame that the step before it causes. No test uses a clock, a
-/// sleep, a poll, a retry or a time limit.
+/// a wire frame that the step before it causes. Each wait also ends when a
+/// connection closes, and each test closes its connections also when it
+/// fails. No test uses a clock, a sleep, a poll, a retry or a time limit.
 @Suite struct CancelRequestMetaTests {
     // MARK: - Fixtures
 
@@ -144,9 +145,16 @@ private struct IdleAgent: Agent {
         let agent: AgentSideConnection
         let client: ClientSideConnection
         let events: AsyncStream<ClientEvent>
+
+        /// Closes the two connections.
+        func close() async {
+            await agent.close()
+            await client.close()
+        }
     }
 
-    /// Connects an agent and the probe client.
+    /// Connects an agent and the probe client. The event stream of the
+    /// client ends when the client connection closed.
     ///
     /// - Returns: The two connections and the event stream of the client.
     private static func connectEndToEnd() async -> EndToEnd {
@@ -155,8 +163,52 @@ private struct IdleAgent: Agent {
         let client = await ClientSideConnection(stream: clientEnd) { _ in
             CancelProbeClient(events: events.continuation)
         }
+        finishStream(events.continuation) { _ = await client.closed }
         let agent = await AgentSideConnection(stream: agentEnd) { _ in IdleAgent() }
         return EndToEnd(agent: agent, client: client, events: events.stream)
+    }
+
+    /// Connects the probe client to a raw agent end. The event stream of the
+    /// client ends when the client connection closed.
+    ///
+    /// - Returns: The client connection, the raw agent end, and the event
+    ///   stream of the client.
+    private static func connectRawAgent() async -> (
+        client: ClientSideConnection, agentEnd: InMemoryTransport, events: AsyncStream<ClientEvent>
+    ) {
+        let events = AsyncStream<ClientEvent>.makeStream()
+        let (clientEnd, agentEnd) = InMemoryTransport.pair()
+        let client = await ClientSideConnection(stream: clientEnd) { _ in
+            CancelProbeClient(events: events.continuation)
+        }
+        finishStream(events.continuation) { _ = await client.closed }
+        return (client, agentEnd, events.stream)
+    }
+
+    /// Starts one call of the agent in a new task.
+    ///
+    /// When the call fails with an error that is not `CancellationError`,
+    /// the task closes the agent connection. Then each wait of the test for
+    /// a client event or a wire frame ends, and the test fails. A test
+    /// cancels a call only after the call reached the peer, so the expected
+    /// cancel does not close the connection.
+    ///
+    /// - Parameters:
+    ///   - agent: The agent connection that makes the call.
+    ///   - body: The call.
+    /// - Returns: The task of the call.
+    private static func startCall<Response: Sendable>(
+        on agent: AgentSideConnection,
+        _ body: @escaping @Sendable () async throws -> Response
+    ) -> Task<Response, any Error> {
+        Task {
+            do {
+                return try await body()
+            } catch let error where !(error is CancellationError) {
+                await agent.close()
+                throw error
+            }
+        }
     }
 
     /// Asserts that `task` ended with `CancellationError`.
@@ -175,10 +227,13 @@ private struct IdleAgent: Agent {
 
     @Test func cancelMetaReachesTheClientHandler() async throws {
         let pair = await Self.connectEndToEnd()
+        defer { await pair.close() }
         var events = pair.events.makeAsyncIterator()
         let cancellation = OutboundCancellation()
         let agent = pair.agent
-        let call = Task { try await agent.createElicitation(Self.request("wait-1"), cancellation: cancellation) }
+        let call = Self.startCall(on: agent) {
+            try await agent.createElicitation(Self.request("wait-1"), cancellation: cancellation)
+        }
 
         #expect(await events.next() == .entered("wait-1"))
         cancellation.setMeta(Self.runCancelledMeta)
@@ -186,15 +241,18 @@ private struct IdleAgent: Agent {
 
         #expect(await events.next() == .cancelled("wait-1", Self.runCancelledMeta, byPeer: true))
         await Self.expectCancelled(call)
-        _ = pair.client
     }
 
     @Test func cancelRequestFrameCarriesTheMeta() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agent = await AgentSideConnection(stream: agentEnd) { _ in IdleAgent() }
+        defer { await agent.close() }
+        defer { clientEnd.close() }
         let reader = WireReader(clientEnd)
         let cancellation = OutboundCancellation()
-        let call = Task { try await agent.createElicitation(Self.request("wait-1"), cancellation: cancellation) }
+        let call = Self.startCall(on: agent) {
+            try await agent.createElicitation(Self.request("wait-1"), cancellation: cancellation)
+        }
 
         let request = try #require(try await reader.next())
         let id = try #require(requestID(of: request))
@@ -213,11 +271,12 @@ private struct IdleAgent: Agent {
 
     @Test func permissionCancelMetaReachesTheClientHandler() async throws {
         let pair = await Self.connectEndToEnd()
+        defer { await pair.close() }
         var events = pair.events.makeAsyncIterator()
         let cancellation = OutboundCancellation()
         let agent = pair.agent
         let request = RequestPermissionRequest.stub(for: SessionId(rawValue: "session-1"))
-        let call = Task { try await agent.requestPermission(request, cancellation: cancellation) }
+        let call = Self.startCall(on: agent) { try await agent.requestPermission(request, cancellation: cancellation) }
 
         #expect(await events.next() == .entered("Permission needed"))
         cancellation.setMeta(Self.runCancelledMeta)
@@ -230,7 +289,6 @@ private struct IdleAgent: Agent {
             return
         }
         #expect(error is CancellationError)
-        _ = pair.client
     }
 
     // MARK: - T2: no meta
@@ -238,8 +296,10 @@ private struct IdleAgent: Agent {
     @Test func cancelWithNoBoxSendsNoMetaMember() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agent = await AgentSideConnection(stream: agentEnd) { _ in IdleAgent() }
+        defer { await agent.close() }
+        defer { clientEnd.close() }
         let reader = WireReader(clientEnd)
-        let call = Task { try await agent.createElicitation(Self.request("wait-2")) }
+        let call = Self.startCall(on: agent) { try await agent.createElicitation(Self.request("wait-2")) }
 
         let request = try #require(try await reader.next())
         let id = try #require(requestID(of: request))
@@ -257,9 +317,13 @@ private struct IdleAgent: Agent {
     @Test func cancelWithABoxThatHasNoMetaSendsNoMetaMember() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agent = await AgentSideConnection(stream: agentEnd) { _ in IdleAgent() }
+        defer { await agent.close() }
+        defer { clientEnd.close() }
         let reader = WireReader(clientEnd)
         let cancellation = OutboundCancellation()
-        let call = Task { try await agent.createElicitation(Self.request("wait-2"), cancellation: cancellation) }
+        let call = Self.startCall(on: agent) {
+            try await agent.createElicitation(Self.request("wait-2"), cancellation: cancellation)
+        }
 
         let request = try #require(try await reader.next())
         let id = try #require(requestID(of: request))
@@ -276,29 +340,32 @@ private struct IdleAgent: Agent {
 
     @Test func handlerReadsNilWhenTheCancelHasNoMeta() async throws {
         let pair = await Self.connectEndToEnd()
+        defer { await pair.close() }
         var events = pair.events.makeAsyncIterator()
         let agent = pair.agent
-        let call = Task { try await agent.createElicitation(Self.request("wait-2")) }
+        let call = Self.startCall(on: agent) { try await agent.createElicitation(Self.request("wait-2")) }
 
         #expect(await events.next() == .entered("wait-2"))
         call.cancel()
 
         #expect(await events.next() == .cancelled("wait-2", nil, byPeer: true))
         await Self.expectCancelled(call)
-        _ = pair.client
     }
 
     // MARK: - T3: one meta for each request
 
     @Test func eachCancelledRequestGetsItsOwnMeta() async throws {
         let pair = await Self.connectEndToEnd()
+        defer { await pair.close() }
         var events = pair.events.makeAsyncIterator()
         let agent = pair.agent
         let reasons = ["wait-a": "run cancelled", "wait-b": "no user is present"]
         var calls: [String: (OutboundCancellation, Task<CreateElicitationResponse, any Error>)] = [:]
         for message in reasons.keys {
             let cancellation = OutboundCancellation()
-            let call = Task { try await agent.createElicitation(Self.request(message), cancellation: cancellation) }
+            let call = Self.startCall(on: agent) {
+                try await agent.createElicitation(Self.request(message), cancellation: cancellation)
+            }
             calls[message] = (cancellation, call)
         }
 
@@ -331,13 +398,13 @@ private struct IdleAgent: Agent {
         for (_, call) in calls.values {
             await Self.expectCancelled(call)
         }
-        _ = pair.client
     }
 
     // MARK: - T4: no cancel, or no handler
 
     @Test func handlerWithNoCancelReadsNil() async throws {
         let pair = await Self.connectEndToEnd()
+        defer { await pair.close() }
         var events = pair.events.makeAsyncIterator()
 
         let response = try await pair.agent.createElicitation(Self.request("answer-1"))
@@ -350,7 +417,6 @@ private struct IdleAgent: Agent {
         #expect(arrival != nil)
         #expect(meta == nil)
         #expect(!byPeer)
-        _ = pair.client
     }
 
     @Test func codeOutsideAHandlerReadsNil() {
@@ -368,13 +434,11 @@ private struct IdleAgent: Agent {
     // MARK: - T5: a raw peer
 
     @Test func rawMetaThatIsNotAnObjectIsGivenAsItIs() async throws {
-        let events = AsyncStream<ClientEvent>.makeStream()
-        let (clientEnd, agentEnd) = InMemoryTransport.pair()
-        let client = await ClientSideConnection(stream: clientEnd) { _ in
-            CancelProbeClient(events: events.continuation)
-        }
+        let (client, agentEnd, events) = await Self.connectRawAgent()
+        defer { await client.close() }
+        defer { agentEnd.close() }
         let reader = WireReader(agentEnd)
-        var iterator = events.stream.makeAsyncIterator()
+        var iterator = events.makeAsyncIterator()
 
         try await send(Self.requestFrame(id: 7, message: "wait-raw"), over: agentEnd)
         #expect(await iterator.next() == .entered("wait-raw"))
@@ -395,18 +459,15 @@ private struct IdleAgent: Agent {
             return
         }
         #expect(error["code"] == .number(-32800))
-        _ = client
     }
 
     // MARK: - A close is not a cancel of the peer
 
     @Test func closeWithAnOpenHandlerIsNotACancelOfThePeer() async throws {
-        let events = AsyncStream<ClientEvent>.makeStream()
-        let (clientEnd, agentEnd) = InMemoryTransport.pair()
-        let client = await ClientSideConnection(stream: clientEnd) { _ in
-            CancelProbeClient(events: events.continuation)
-        }
-        var iterator = events.stream.makeAsyncIterator()
+        let (client, agentEnd, events) = await Self.connectRawAgent()
+        defer { await client.close() }
+        defer { agentEnd.close() }
+        var iterator = events.makeAsyncIterator()
 
         try await send(Self.requestFrame(id: 9, message: "wait-close"), over: agentEnd)
         #expect(await iterator.next() == .entered("wait-close"))
@@ -423,13 +484,11 @@ private struct IdleAgent: Agent {
     // MARK: - Arrival number
 
     @Test func twoRequestsInOneWriteGetArrivalNumbersInWireOrder() async throws {
-        let events = AsyncStream<ClientEvent>.makeStream()
-        let (clientEnd, agentEnd) = InMemoryTransport.pair()
-        let client = await ClientSideConnection(stream: clientEnd) { _ in
-            CancelProbeClient(events: events.continuation)
-        }
+        let (client, agentEnd, events) = await Self.connectRawAgent()
+        defer { await client.close() }
+        defer { agentEnd.close() }
         let reader = WireReader(agentEnd)
-        var iterator = events.stream.makeAsyncIterator()
+        var iterator = events.makeAsyncIterator()
 
         var bytes = try NDJSONCodec.encode(Self.requestFrame(id: 1, message: "first"))
         bytes.append(try NDJSONCodec.encode(Self.requestFrame(id: 2, message: "second")))
@@ -451,6 +510,5 @@ private struct IdleAgent: Agent {
             answered.insert(try #require(requestID(of: try await reader.next())))
         }
         #expect(answered == [.number(1), .number(2)])
-        _ = client
     }
 }

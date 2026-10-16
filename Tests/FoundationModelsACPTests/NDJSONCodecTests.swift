@@ -196,6 +196,7 @@ extension NDJSONFrame: Equatable {
 
 @Test func transportRoundTripsEncodedMessages() async throws {
     let transport = LoopbackTransport()
+    defer { transport.close() }
     let first = JSONValue.object(["method": .string("initialize")])
     let second = JSONValue.object(["method": .string("session/update")])
     try await transport.write(NDJSONCodec.encode(first))

@@ -52,6 +52,25 @@ private struct NegotiatingAgent: Agent {
     func sessionCancel(_ params: CancelSessionNotification) async {}
 }
 
+/// Sends the handshake `initialize` request. When the request fails, it
+/// closes `client`.
+///
+/// The close ends the stream of the raw agent end. Thus a test that reads
+/// that end for the request does not wait forever when the request failed
+/// before its frame went out.
+///
+/// - Parameter client: The client side that sends the request.
+/// - Returns: The response of the agent.
+/// - Throws: The error of the request.
+private func initializeClosingOnFailure(_ client: ClientSideConnection) async throws -> InitializeResponse {
+    do {
+        return try await client.initialize(handshakeInitializeRequest())
+    } catch {
+        await client.close()
+        throw error
+    }
+}
+
 /// `initialize` — required `info`/`capabilities`, empty-object support
 /// markers, nested `capabilities.session.*`, and v2-only protocol version
 /// negotiation.
@@ -63,6 +82,11 @@ private struct NegotiatingAgent: Agent {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { _ in NegotiatingAgent() }
         let client = await ClientSideConnection(stream: clientEnd) { _ in HandshakeClient() }
+        // The two closes run also when the test body throws.
+        defer {
+            await agentConn.close()
+            await client.close()
+        }
 
         let request = InitializeRequest(
             info: Implementation(name: "test-client", version: "0.0.1"),
@@ -88,9 +112,6 @@ private struct NegotiatingAgent: Agent {
         #expect(prompt.audio != nil)
         #expect(prompt.image != nil)
         #expect(prompt.embeddedContext != nil)
-
-        await agentConn.close()
-        await client.close()
     }
 
     // MARK: - protocolVersion 2 on the wire
@@ -99,9 +120,14 @@ private struct NegotiatingAgent: Agent {
     func protocolVersion2IsSentOnTheWire() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let client = await ClientSideConnection(stream: clientEnd) { _ in HandshakeClient() }
+        // The closes run also when the test body throws or returns early.
+        defer {
+            await client.close()
+            agentEnd.close()
+        }
         let reader = WireReader(agentEnd)
 
-        async let response = client.initialize(handshakeInitializeRequest())
+        async let response = initializeClosingOnFailure(client)
 
         let request = try #require(try await reader.next())
         guard case .object(let fields) = request, case .object(let params) = fields["params"] ?? .null else {
@@ -130,9 +156,14 @@ private struct NegotiatingAgent: Agent {
     func agentAnsweringADifferentProtocolVersionThrowsAClearMismatchError() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let client = await ClientSideConnection(stream: clientEnd) { _ in HandshakeClient() }
+        // The closes run also when the test body throws.
+        defer {
+            await client.close()
+            agentEnd.close()
+        }
         let reader = WireReader(agentEnd)
 
-        async let response = client.initialize(handshakeInitializeRequest())
+        async let response = initializeClosingOnFailure(client)
 
         let request = try #require(try await reader.next())
         try await send(
@@ -169,9 +200,14 @@ private struct NegotiatingAgent: Agent {
         // merely a "lower version" special case.
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let client = await ClientSideConnection(stream: clientEnd) { _ in HandshakeClient() }
+        // The closes run also when the test body throws.
+        defer {
+            await client.close()
+            agentEnd.close()
+        }
         let reader = WireReader(agentEnd)
 
-        async let response = client.initialize(handshakeInitializeRequest())
+        async let response = initializeClosingOnFailure(client)
 
         let request = try #require(try await reader.next())
         try await send(

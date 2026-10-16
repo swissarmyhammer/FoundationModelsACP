@@ -208,6 +208,12 @@ import Testing
             let (clientEnd, agentEnd) = InMemoryTransport.pair()
             let agentConn = await AgentSideConnection(stream: agentEnd) { _ in RecordingAgent(log: log) }
             let client = await ClientSideConnection(stream: clientEnd) { _ in RecordingClient(log: log) }
+            // The two closes run at the end of each pass, also when the
+            // driver throws.
+            defer {
+                await agentConn.close()
+                await client.close()
+            }
 
             try await Self.driveAgentHandler(named: entry.handlerName, client: client)
 
@@ -222,9 +228,6 @@ import Testing
                 calls == expected,
                 "wire method \"\(entry.wireMethod)\" should reach \(expected), reached \(calls) instead"
             )
-
-            await agentConn.close()
-            await client.close()
         }
     }
 
@@ -289,6 +292,12 @@ import Testing
             let (clientEnd, agentEnd) = InMemoryTransport.pair()
             let agentConn = await AgentSideConnection(stream: agentEnd) { _ in RecordingAgent(log: log) }
             let client = await ClientSideConnection(stream: clientEnd) { _ in RecordingClient(log: log) }
+            // The two closes run at the end of each pass, also when the
+            // driver throws.
+            defer {
+                await agentConn.close()
+                await client.close()
+            }
 
             try await Self.driveClientHandler(named: entry.handlerName, agentConnection: agentConn)
 
@@ -304,9 +313,6 @@ import Testing
                 calls == expected,
                 "wire method \"\(entry.wireMethod)\" should reach \(expected), reached \(calls) instead"
             )
-
-            await agentConn.close()
-            await client.close()
         }
     }
 

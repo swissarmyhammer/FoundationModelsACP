@@ -110,18 +110,19 @@ private struct ConnectedPair {
                 hookRan.continuation.yield()
             }
         }
+        defer { await pair.close() }
 
         _ = try await pair.agent.requestPermission(permissionRequest)
         var ran = hookRan.stream.makeAsyncIterator()
         _ = try #require(await ran.next())
 
         #expect(await log.events == [responseFrame, hookEvent])
-        await pair.close()
     }
 
     @Test
     func callOutsideInboundRequestRunsNothingAndSignalsDiscard() async {
         let pair = await connect(log: EventLog()) { _ in }
+        defer { await pair.close() }
         let discards = CallCount()
         let reference = WeakReference()
         let run = AtomicFlag()
@@ -136,7 +137,6 @@ private struct ConnectedPair {
         #expect(discards.value == oneDiscardCall)
         #expect(!reference.isAlive)
         #expect(!run.isSet)
-        await pair.close()
     }
 
     @Test
@@ -158,10 +158,17 @@ private struct ConnectedPair {
                 with: connection.afterRespondingToCurrentRequest(_:onDiscard:)
             )
             entered.continuation.yield()
+            // The gate ends when the test finishes it, or when the close of
+            // the connection cancels this handler.
             var release = gate.stream.makeAsyncIterator()
             _ = await release.next()
         }
         let permission = Task { try await pair.agent.requestPermission(permissionRequest) }
+        defer {
+            gate.continuation.finish()
+            await pair.close()
+            _ = try? await permission.value
+        }
         var enteredIterator = entered.stream.makeAsyncIterator()
         _ = try #require(await enteredIterator.next())
 
@@ -174,8 +181,6 @@ private struct ConnectedPair {
         #expect(discards.value == oneDiscardCall)
         #expect(!run.isSet)
         #expect(!reference.isAlive)
-        await pair.agent.close()
-        _ = try? await permission.value
     }
 
     @Test
@@ -185,6 +190,7 @@ private struct ConnectedPair {
         let pair = await connect(log: log) { connection in
             connection.afterRespondingToCurrentRequest { hookRan.continuation.yield() }
         }
+        defer { await pair.close() }
         var waiter = hookRan.stream.makeAsyncIterator()
 
         for run in 0..<orderingRunCount {
@@ -196,6 +202,5 @@ private struct ConnectedPair {
 
             #expect(await log.events == [responseFrame, outboundRequestFrame], "run \(run)")
         }
-        await pair.close()
     }
 }

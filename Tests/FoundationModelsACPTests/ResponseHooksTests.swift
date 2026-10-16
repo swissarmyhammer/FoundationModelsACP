@@ -127,6 +127,14 @@ private struct DeferringAgent: Agent {
             withExtendedLifetime(captured) {}
             probe.deferredClosureRan.continuation.yield()
         }
+        // The deferred work runs in the order of registration. A discard of
+        // this second entry ends the stream. Then the test does not wait for
+        // a closure that never runs. The first closure stays a plain
+        // registration with no discard handler.
+        connection.afterRespondingToCurrentRequest(
+            {},
+            onDiscard: { [probe] in probe.deferredClosureRan.continuation.finish() }
+        )
         let child = Task { [connection, probe] in
             await Self.runChildTask(connection: connection, probe: probe)
         }
@@ -143,6 +151,9 @@ private struct DeferringAgent: Agent {
     ///   - connection: The connection of the agent.
     ///   - probe: The state that the test reads.
     private static func runChildTask(connection: AgentSideConnection, probe: DeferralProbe) async {
+        // The end of the child task ends the stream. Then the test does not
+        // wait for a late closure that the child task never defers.
+        defer { probe.lateClosureDeferred.continuation.finish() }
         var gate = probe.childGate.stream.makeAsyncIterator()
         guard await gate.next() != nil else { return }
         deferLateClosure(connection: connection, probe: probe)
@@ -372,15 +383,27 @@ private struct QuietClient: Client {
             DeferringAgent(connection: connection, probe: probe)
         }
         let client = await ClientSideConnection(stream: clientEnd) { _ in QuietClient() }
-        _ = try await client.newSession(NewSessionRequest(cwd: hooksWorkingDirectory))
-        _ = try await client.prompt(hooksPrompt)
-        return (agent, client)
+        do {
+            _ = try await client.newSession(NewSessionRequest(cwd: hooksWorkingDirectory))
+            _ = try await client.prompt(hooksPrompt)
+            return (agent, client)
+        } catch {
+            await probe.stopChildTask()
+            await agent.close()
+            await client.close()
+            throw error
+        }
     }
 
     @Test
     func aDeferredClosureIsReleasedWhileATaskOfTheHandlerIsAlive() async throws {
         let probe = DeferralProbe()
         let (agent, client) = try await prompt(probe: probe, log: LogCapture())
+        defer {
+            await probe.stopChildTask()
+            await agent.close()
+            await client.close()
+        }
         var ran = probe.deferredClosureRan.stream.makeAsyncIterator()
         _ = try #require(await ran.next())
 
@@ -389,9 +412,6 @@ private struct QuietClient: Client {
         await agent.close()
         _ = await agent.closed
         #expect(!probe.handlerCapture.isAlive)
-
-        await probe.stopChildTask()
-        await client.close()
     }
 
     @Test
@@ -399,6 +419,11 @@ private struct QuietClient: Client {
         let probe = DeferralProbe()
         let log = LogCapture()
         let (agent, client) = try await prompt(probe: probe, log: log)
+        defer {
+            await probe.stopChildTask()
+            await agent.close()
+            await client.close()
+        }
         var ran = probe.deferredClosureRan.stream.makeAsyncIterator()
         _ = try #require(await ran.next())
 
@@ -409,9 +434,6 @@ private struct QuietClient: Client {
         #expect(!probe.lateCapture.isAlive)
         #expect(!probe.lateClosureRun.isSet)
         #expect(log.messages.contains { $0.contains("dropped") })
-        await probe.stopChildTask()
-        await agent.close()
-        await client.close()
     }
 
     @Test

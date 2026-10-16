@@ -205,6 +205,26 @@ extension AsyncStream.Iterator where Element == SessionStreamEvent {
     }
 }
 
+/// Finishes a stream when an event occurs.
+///
+/// A test uses it to end the wait of a stream iterator when a connection
+/// closes. For example, give `{ _ = await connection.closed }` as `event`.
+/// Then a wait for an item that never comes ends when the connection
+/// closes. The function uses no clock.
+///
+/// - Parameters:
+///   - continuation: The continuation of the stream to finish.
+///   - event: Returns when the event occurs.
+func finishStream<Element: Sendable>(
+    _ continuation: AsyncStream<Element>.Continuation,
+    after event: @escaping @Sendable () async -> Void
+) {
+    Task {
+        await event()
+        continuation.finish()
+    }
+}
+
 /// Extracts the `id` field from a JSON-RPC envelope.
 ///
 /// - Parameter message: The envelope to inspect, or `nil`.
