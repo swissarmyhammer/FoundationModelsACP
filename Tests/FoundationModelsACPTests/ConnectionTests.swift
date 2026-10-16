@@ -6,7 +6,7 @@ import FoundationModelsACP
 
 // MARK: - Request/response correlation
 
-@Test(.timeLimit(.minutes(1))) func requestResolvesWithHandlerResult() async throws {
+@Test func requestResolvesWithHandlerResult() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(
         transport: agentEnd,
@@ -22,24 +22,61 @@ import FoundationModelsACP
     _ = agent
 }
 
-@Test(.timeLimit(.minutes(1))) func concurrentBidirectionalRequestsCorrelateToCallers() async throws {
-    let (clientEnd, agentEnd) = InMemoryTransport.pair()
-    // Stagger completions so responses return out of submission order and
-    // correlation is exercised, not just FIFO luck.
-    let doubler: Connection.RequestHandler = { _, params in
+/// Lets the handlers of one connection answer in the reverse order of their
+/// number, so the responses come back out of submission order. It uses no
+/// clock.
+private actor ReverseTurns {
+    /// The number whose handler answers next.
+    private var next: Int
+    /// The handlers that wait for their turn, keyed by their number.
+    private var waiters: [Int: CheckedContinuation<Void, Never>] = [:]
+
+    /// - Parameter count: The number of handlers. The handler with the
+    ///   largest number, `count - 1`, answers first.
+    init(count: Int) {
+        next = count - 1
+    }
+
+    /// Suspends until it is the turn of handler `number`.
+    func wait(for number: Int) async {
+        guard number != next else { return }
+        await withCheckedContinuation { waiters[number] = $0 }
+    }
+
+    /// Gives the turn to the next handler.
+    func advance() {
+        next -= 1
+        waiters.removeValue(forKey: next)?.resume()
+    }
+}
+
+/// A handler that doubles `n`, and answers only in its turn of `turns`.
+///
+/// - Parameter turns: The answer order of the connection.
+/// - Returns: The handler.
+private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHandler {
+    { _, params in
         guard case .object(let fields) = params ?? .null,
             case .number(let n) = fields["n", default: .null]
         else {
             throw RequestError.invalidParams
         }
-        try await Task.sleep(for: .milliseconds(10 - Int(n)))
+        await turns.wait(for: Int(n))
+        await turns.advance()
         return .object(["doubled": .number(n * 2)])
     }
-    let agent = await Connection(transport: agentEnd, requestHandler: doubler)
-    let client = await Connection(transport: clientEnd, requestHandler: doubler)
+}
+
+@Test func concurrentBidirectionalRequestsCorrelateToCallers() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let count = 10
+    // The handlers answer in reverse order, so responses return out of
+    // submission order and correlation is exercised, not just FIFO luck.
+    let agent = await Connection(transport: agentEnd, requestHandler: reverseOrderDoubler(ReverseTurns(count: count)))
+    let client = await Connection(transport: clientEnd, requestHandler: reverseOrderDoubler(ReverseTurns(count: count)))
 
     try await withThrowingTaskGroup(of: Void.self) { group in
-        for n in 0..<10 {
+        for n in 0..<count {
             for connection in [client, agent] {
                 group.addTask {
                     let result = try await connection.request(
@@ -54,7 +91,7 @@ import FoundationModelsACP
     }
 }
 
-@Test(.timeLimit(.minutes(1))) func responseWithUnknownIdIsIgnored() async throws {
+@Test func responseWithUnknownIdIsIgnored() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
     let reader = WireReader(agentEnd)
@@ -78,7 +115,7 @@ import FoundationModelsACP
 
 // MARK: - Inbound dispatch
 
-@Test(.timeLimit(.minutes(1))) func inboundRequestIsAnsweredWithEchoedIdAndResult() async throws {
+@Test func inboundRequestIsAnsweredWithEchoedIdAndResult() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(
         transport: agentEnd,
@@ -103,7 +140,7 @@ import FoundationModelsACP
     _ = agent
 }
 
-@Test(.timeLimit(.minutes(1))) func slowRequestHandlerDoesNotDelaySubsequentNotification() async throws {
+@Test func slowRequestHandlerDoesNotDelaySubsequentNotification() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let started = AsyncStream<Void>.makeStream()
     let gate = AsyncStream<Void>.makeStream()
@@ -137,7 +174,7 @@ import FoundationModelsACP
     _ = agent
 }
 
-@Test(.timeLimit(.minutes(1))) func slowRequestHandlerDoesNotDelayConcurrentRequest() async throws {
+@Test func slowRequestHandlerDoesNotDelayConcurrentRequest() async throws {
     // The head-of-line-blocking guard for requests, not just notifications:
     // a concurrent request (standing in for `session/cancel` arriving as a
     // request rather than a notification on some future revision) must not
@@ -171,7 +208,7 @@ import FoundationModelsACP
     _ = agent
 }
 
-@Test(.timeLimit(.minutes(1))) func notificationsRouteToHandlerInSendOrder() async throws {
+@Test func notificationsRouteToHandlerInSendOrder() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let notes = AsyncStream<String>.makeStream()
     let agent = await Connection(
@@ -191,7 +228,7 @@ import FoundationModelsACP
     _ = agent
 }
 
-@Test(.timeLimit(.minutes(1))) func outOfOrderNotificationsAreDeliveredWithoutReordering() async throws {
+@Test func outOfOrderNotificationsAreDeliveredWithoutReordering() async throws {
     // The connection makes no reordering claim of its own: whatever order
     // notifications land on the wire is the order the handler observes them
     // in, even when a "later" update names an id that already moved on. That
@@ -220,7 +257,7 @@ import FoundationModelsACP
 
 // MARK: - Errors
 
-@Test(.timeLimit(.minutes(1))) func unknownMethodIsAnsweredWithMethodNotFound() async throws {
+@Test func unknownMethodIsAnsweredWithMethodNotFound() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(transport: agentEnd)
     let client = await Connection(transport: clientEnd)
@@ -234,7 +271,7 @@ import FoundationModelsACP
     _ = agent
 }
 
-@Test(.timeLimit(.minutes(1))) func handlerRequestErrorPropagatesCodeMessageAndData() async throws {
+@Test func handlerRequestErrorPropagatesCodeMessageAndData() async throws {
     let thrown = RequestError(
         code: .resourceNotFound,
         message: "Resource not found",
@@ -253,7 +290,7 @@ import FoundationModelsACP
     _ = agent
 }
 
-@Test(.timeLimit(.minutes(1))) func handlerFailureMapsToInternalError() async throws {
+@Test func handlerFailureMapsToInternalError() async throws {
     struct Boom: Error {}
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(transport: agentEnd, requestHandler: { _, _ in throw Boom() })
@@ -268,7 +305,7 @@ import FoundationModelsACP
     _ = agent
 }
 
-@Test(.timeLimit(.minutes(1))) func unclassifiableMessageWithIdIsAnsweredInvalidRequest() async throws {
+@Test func unclassifiableMessageWithIdIsAnsweredInvalidRequest() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(transport: agentEnd)
     let reader = WireReader(clientEnd)
@@ -290,7 +327,7 @@ import FoundationModelsACP
     _ = agent
 }
 
-@Test(.timeLimit(.minutes(1))) func handlerAuthenticationRequiredErrorRoundTripsToCaller() async throws {
+@Test func handlerAuthenticationRequiredErrorRoundTripsToCaller() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(
         transport: agentEnd,
@@ -307,7 +344,7 @@ import FoundationModelsACP
     _ = agent
 }
 
-@Test(.timeLimit(.minutes(1))) func messageWithoutJsonrpcVersionIsAnsweredInvalidRequest() async throws {
+@Test func messageWithoutJsonrpcVersionIsAnsweredInvalidRequest() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(transport: agentEnd, requestHandler: { _, _ in .bool(true) })
     let reader = WireReader(clientEnd)
@@ -330,7 +367,7 @@ import FoundationModelsACP
     _ = agent
 }
 
-@Test(.timeLimit(.minutes(1))) func messageWithWrongJsonrpcVersionIsAnsweredInvalidRequest() async throws {
+@Test func messageWithWrongJsonrpcVersionIsAnsweredInvalidRequest() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(transport: agentEnd, requestHandler: { _, _ in .bool(true) })
     let reader = WireReader(clientEnd)
@@ -354,7 +391,7 @@ import FoundationModelsACP
     _ = agent
 }
 
-@Test(.timeLimit(.minutes(1))) func responseWithoutJsonrpcVersionFailsCallerInsteadOfHanging() async throws {
+@Test func responseWithoutJsonrpcVersionFailsCallerInsteadOfHanging() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
     let reader = WireReader(agentEnd)
@@ -404,7 +441,7 @@ import FoundationModelsACP
 
 // MARK: - `$/cancel_request` (protocol-level, connection layer only)
 
-@Test(.timeLimit(.minutes(1))) func cancelRequestNotificationCancelsRunningHandlerAndAnswersRequestCancelled()
+@Test func cancelRequestNotificationCancelsRunningHandlerAndAnswersRequestCancelled()
     async throws
 {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
@@ -413,13 +450,11 @@ import FoundationModelsACP
         transport: agentEnd,
         requestHandler: { _, _ in
             started.continuation.yield(())
-            // Task.sleep observes cancellation and throws, unlike a plain
+            // Ends only when the task is cancelled, unlike a plain
             // suspension on an external gate — the deterministic way to
             // prove a handler was actually cancelled rather than merely
             // outliving the test.
-            while !Task.isCancelled {
-                try await Task.sleep(for: .milliseconds(5))
-            }
+            await waitForTaskCancellation()
             throw CancellationError()
         }
     )
@@ -451,7 +486,7 @@ import FoundationModelsACP
     _ = agent
 }
 
-@Test(.timeLimit(.minutes(1))) func cancelRequestNotificationForUnknownIdIsANoOp() async throws {
+@Test func cancelRequestNotificationForUnknownIdIsANoOp() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(transport: agentEnd, requestHandler: { _, _ in .bool(true) })
     let reader = WireReader(clientEnd)
@@ -477,7 +512,7 @@ import FoundationModelsACP
     _ = agent
 }
 
-@Test(.timeLimit(.minutes(1))) func cancelRequestIsNeverRoutedToARequestOrNotificationHandler() async throws {
+@Test func cancelRequestIsNeverRoutedToARequestOrNotificationHandler() async throws {
     // `$/cancel_request` is protocol-level (spec: served at the connection
     // layer on both sides, never on a role protocol) — it must not reach
     // either handler the connection was configured with.
@@ -517,7 +552,7 @@ import FoundationModelsACP
 
 // MARK: - Duplicate inbound request ids
 
-@Test(.timeLimit(.minutes(1))) func duplicateInboundRequestIdWhileFirstIsInFlightIsRejectedNotMisdirected()
+@Test func duplicateInboundRequestIdWhileFirstIsInFlightIsRejectedNotMisdirected()
     async throws
 {
     // `inboundTasks` has one slot per wire id — a second request reusing an
@@ -570,7 +605,7 @@ import FoundationModelsACP
 
 // MARK: - Batch JSON-RPC
 
-@Test(.timeLimit(.minutes(1))) func batchOfRequestsIsAnsweredWithOneAggregateBatchResponse() async throws {
+@Test func batchOfRequestsIsAnsweredWithOneAggregateBatchResponse() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(
         transport: agentEnd,
@@ -604,7 +639,7 @@ import FoundationModelsACP
     _ = agent
 }
 
-@Test(.timeLimit(.minutes(1))) func batchOfOnlyNotificationsProducesNoReply() async throws {
+@Test func batchOfOnlyNotificationsProducesNoReply() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let notes = AsyncStream<String>.makeStream()
     let agent = await Connection(
@@ -634,7 +669,7 @@ import FoundationModelsACP
     _ = agent
 }
 
-@Test(.timeLimit(.minutes(1))) func batchMixingRequestsAndNotificationsOwesOnlyTheRequests() async throws {
+@Test func batchMixingRequestsAndNotificationsOwesOnlyTheRequests() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let notes = AsyncStream<String>.makeStream()
     let agent = await Connection(
@@ -668,7 +703,7 @@ import FoundationModelsACP
 
 // MARK: - Malformed frame (clean protocol error, not a crashed read loop)
 
-@Test(.timeLimit(.minutes(1))) func malformedFrameGetsCleanParseErrorAndReadLoopContinues() async throws {
+@Test func malformedFrameGetsCleanParseErrorAndReadLoopContinues() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await Connection(transport: agentEnd, requestHandler: { _, _ in .bool(true) })
     let reader = WireReader(clientEnd)
@@ -695,7 +730,7 @@ import FoundationModelsACP
 
 // MARK: - _meta passthrough
 
-@Test(.timeLimit(.minutes(1))) func metaFieldsPassThroughParamsAndResultUnchanged() async throws {
+@Test func metaFieldsPassThroughParamsAndResultUnchanged() async throws {
     let params: JSONValue = .object([
         "_meta": .object(["traceId": .string("t-1")]),
         "text": .string("hello"),

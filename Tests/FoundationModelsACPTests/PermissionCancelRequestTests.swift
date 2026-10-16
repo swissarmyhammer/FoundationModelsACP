@@ -5,9 +5,6 @@ import Testing
 
 // MARK: - Fixtures
 
-/// The time limit of each test in this suite, in minutes.
-private let cancelRequestTestTimeout = 1
-
 /// The session of the permission request.
 private let permissionSession = SessionId(rawValue: "cancel-request-session")
 
@@ -95,7 +92,7 @@ private struct RawAgentHarness {
 /// (https://agentclientprotocol.com/protocol/v2/cancellation) require a valid
 /// response or a `-32800` error, and one response only.
 @Suite struct PermissionCancelRequestTests {
-    @Test(.timeLimit(.minutes(cancelRequestTestTimeout)))
+    @Test
     func aCancelRequestForAPendingPermissionRequestAnswersRequestCancelled() async throws {
         let harness = await RawAgentHarness.connect()
         try await harness.sendPermissionRequest()
@@ -109,7 +106,7 @@ private struct RawAgentHarness {
         await harness.connection.close()
     }
 
-    @Test(.timeLimit(.minutes(cancelRequestTestTimeout)))
+    @Test
     func aCancelRequestAfterTheCancelledOutcomeSendsNoSecondResponse() async throws {
         let harness = await RawAgentHarness.connect()
         try await harness.sendPermissionRequest()

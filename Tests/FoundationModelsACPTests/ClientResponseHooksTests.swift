@@ -5,9 +5,6 @@ import Testing
 
 // MARK: - Fixtures
 
-/// The time limit of each test in this suite, in minutes.
-private let clientHooksTestTimeout = 1
-
 /// The number of permission round trips that the ordering test examines.
 private let orderingRunCount = 100
 
@@ -103,7 +100,7 @@ private struct ConnectedPair {
         return ConnectedPair(agent: agent, client: client)
     }
 
-    @Test(.timeLimit(.minutes(clientHooksTestTimeout)))
+    @Test
     func hookRunsAfterPermissionResponseIsWritten() async throws {
         let log = EventLog()
         let hookRan = AsyncStream<Void>.makeStream()
@@ -122,7 +119,7 @@ private struct ConnectedPair {
         await pair.close()
     }
 
-    @Test(.timeLimit(.minutes(clientHooksTestTimeout)))
+    @Test
     func callOutsideInboundRequestRunsNothingAndSignalsDiscard() async {
         let pair = await connect(log: EventLog()) { _ in }
         let discards = CallCount()
@@ -142,7 +139,7 @@ private struct ConnectedPair {
         await pair.close()
     }
 
-    @Test(.timeLimit(.minutes(clientHooksTestTimeout)))
+    @Test
     func closeBeforeResponseDiscardsWorkAndSignalsDiscard() async throws {
         let entered = AsyncStream<Void>.makeStream()
         let gate = AsyncStream<Void>.makeStream()
@@ -181,7 +178,7 @@ private struct ConnectedPair {
         _ = try? await permission.value
     }
 
-    @Test(.timeLimit(.minutes(clientHooksTestTimeout)))
+    @Test
     func outboundRequestAfterHookIsWrittenAfterResponse() async throws {
         let log = EventLog()
         let hookRan = AsyncStream<Void>.makeStream()

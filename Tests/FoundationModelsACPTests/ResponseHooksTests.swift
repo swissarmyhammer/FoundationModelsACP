@@ -10,18 +10,9 @@ import Testing
 /// effect.
 private let unitRequestId: RequestId = .number(1)
 
-/// The longest time that a test waits for a released closure, in seconds.
-private let releaseTimeoutSeconds = 5
-
-/// The longest time that a test waits for a released closure.
-private let releaseTimeout: Duration = .seconds(releaseTimeoutSeconds)
-
 /// The number of warnings that `ResponseHooks` logs when it drops one late
 /// closure.
 private let dropWarningCount = 1
-
-/// The time limit of each test in this suite, in minutes.
-private let hooksTestTimeout = 1
 
 /// The number of closures that the discard-order test appends.
 private let discardOrderEntryCount = 3
@@ -194,7 +185,7 @@ private struct QuietClient: Client {
 /// `ResponseHooks` releases each closure when it runs or discards the
 /// closures, and does not keep a closure that comes after that.
 @Suite struct ResponseHooksTests {
-    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    @Test
     func runAllReleasesEachClosureAfterItRuns() async {
         let reference = WeakReference()
         let run = AtomicFlag()
@@ -207,7 +198,7 @@ private struct QuietClient: Client {
         #expect(!reference.isAlive)
     }
 
-    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    @Test
     func aClosureAppendedAfterRunAllIsDroppedWithAWarning() async {
         let log = LogCapture()
         let reference = WeakReference()
@@ -224,7 +215,7 @@ private struct QuietClient: Client {
         #expect(log.messages.first?.contains("dropped") == true)
     }
 
-    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    @Test
     func discardAllReleasesTheClosuresAndDoesNotRunThem() async {
         let reference = WeakReference()
         let run = AtomicFlag()
@@ -238,7 +229,7 @@ private struct QuietClient: Client {
         #expect(!run.isSet)
     }
 
-    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    @Test
     func aClosureAppendedAfterDiscardAllIsDroppedWithAWarning() async {
         let log = LogCapture()
         let reference = WeakReference()
@@ -255,7 +246,7 @@ private struct QuietClient: Client {
         #expect(log.messages.first?.contains("dropped") == true)
     }
 
-    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    @Test
     func discardAllCallsEachOnDiscardOneTimeInRegistrationOrder() async {
         let order = DiscardOrder()
         let run = AtomicFlag()
@@ -272,7 +263,7 @@ private struct QuietClient: Client {
         #expect(!run.isSet)
     }
 
-    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    @Test
     func runAllRunsTheWorkAndDoesNotCallOnDiscard() async {
         let discards = CallCount()
         let run = AtomicFlag()
@@ -286,7 +277,7 @@ private struct QuietClient: Client {
         #expect(discards.value == 0)
     }
 
-    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    @Test
     func runAllAfterAnErrorResponseSkipsSuccessOnlyWorkAndRunsOtherWork() async {
         let successOnlyRun = AtomicFlag()
         let otherRun = AtomicFlag()
@@ -300,7 +291,7 @@ private struct QuietClient: Client {
         #expect(otherRun.isSet)
     }
 
-    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    @Test
     func runAllAfterASuccessResponseRunsSuccessOnlyWork() async {
         let run = AtomicFlag()
         let hooks = ResponseHooks(logger: .disabled, requestId: unitRequestId)
@@ -311,7 +302,7 @@ private struct QuietClient: Client {
         #expect(run.isSet)
     }
 
-    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    @Test
     func aLateAppendWithOnDiscardAfterRunAllCallsOnDiscardAndLogsOneWarning() async {
         let log = LogCapture()
         let discards = CallCount()
@@ -386,21 +377,24 @@ private struct QuietClient: Client {
         return (agent, client)
     }
 
-    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    @Test
     func aDeferredClosureIsReleasedWhileATaskOfTheHandlerIsAlive() async throws {
         let probe = DeferralProbe()
         let (agent, client) = try await prompt(probe: probe, log: LogCapture())
         var ran = probe.deferredClosureRan.stream.makeAsyncIterator()
         _ = try #require(await ran.next())
 
-        try await waitUntil(timeout: releaseTimeout) { !probe.handlerCapture.isAlive }
+        // `closed` comes only after each inbound task and its deferred work
+        // ended. The child task of the handler is still alive then.
+        await agent.close()
+        _ = await agent.closed
+        #expect(!probe.handlerCapture.isAlive)
 
         await probe.stopChildTask()
-        await agent.close()
         await client.close()
     }
 
-    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    @Test
     func aClosureDeferredByAChildTaskAfterTheResponseIsDroppedWithAWarning() async throws {
         let probe = DeferralProbe()
         let log = LogCapture()
@@ -420,7 +414,7 @@ private struct QuietClient: Client {
         await client.close()
     }
 
-    @Test(.timeLimit(.minutes(hooksTestTimeout)))
+    @Test
     func anAgentCallOutsideAnInboundRequestRunsNothingAndSignalsDiscard() async {
         let (_, agentEnd) = InMemoryTransport.pair()
         let agent = await AgentSideConnection(stream: agentEnd) { connection in

@@ -20,8 +20,15 @@ private let newline: UInt8 = 0x0A
     let transport = try SubprocessTransport(executableURL: TransportTestSupport.helperAgentURL)
     let client = await ClientSideConnection(stream: transport) { _ in HandshakeClient() }
 
-    let response = try await withTimeout(.seconds(10)) {
-        try await client.initialize(handshakeInitializeRequest())
+    // The request ends with the response, or with the close of the
+    // connection when the child exits.
+    let response: InitializeResponse
+    do {
+        response = try await client.initialize(handshakeInitializeRequest())
+    } catch {
+        await client.close()
+        transport.close()
+        throw error
     }
 
     #expect(response.protocolVersion == .latest)
@@ -40,31 +47,25 @@ private let newline: UInt8 = 0x0A
     process.standardError = stderr
     try process.run()
 
-    // Collect the child's raw stdout on a background reader so nothing blocks.
-    let collected = Mutex<Data>(Data())
-    let stdoutBytes = ByteReader.stream(from: stdout.fileHandleForReading.fileDescriptor)
-    let collector = Task {
-        for try await chunk in stdoutBytes {
-            collected.withLock { $0.append(chunk) }
-        }
-        return collected.withLock { $0 }
-    }
+    var stdoutBytes = ByteReader.stream(from: stdout.fileHandleForReading.fileDescriptor).makeAsyncIterator()
+    var capturedStdout = Data()
 
     let request = RequestEnvelope(
         id: 1,
         method: "initialize",
         params: handshakeInitializeRequest()
     )
-    try stdin.fileHandleForWriting.write(contentsOf: NDJSONCodec.encode(request))
-
-    // Wait until a full response line has arrived, then reap the child so its
-    // stdout hits EOF and the collector finishes.
-    try await waitUntil(timeout: .seconds(10)) {
-        collected.withLock { $0.contains(newline) }
+    do {
+        try stdin.fileHandleForWriting.write(contentsOf: NDJSONCodec.encode(request))
+        // Read until a full response line has arrived, or until the child's
+        // stdout ends. Then reap the child, and read its stdout to the end.
+        try await read(&stdoutBytes, into: &capturedStdout) { $0.contains(newline) }
+        await terminateAndAwaitExit(process)
+        try await read(&stdoutBytes, into: &capturedStdout) { _ in false }
+    } catch {
+        await terminateAndAwaitExit(process)
+        throw error
     }
-    await terminateAndAwaitExit(process)
-
-    let capturedStdout = try await withTimeout(.seconds(10)) { try await collector.value }
 
     // Every non-empty stdout line must be valid JSON — nothing but ACP frames.
     let lines = capturedStdout.split(separator: newline)
@@ -94,30 +95,28 @@ private let newline: UInt8 = 0x0A
     process.standardError = stderr
     try process.run()
 
-    let collected = Mutex<Data>(Data())
-    let stdoutBytes = ByteReader.stream(from: stdout.fileHandleForReading.fileDescriptor)
-    let collector = Task {
-        for try await chunk in stdoutBytes {
-            collected.withLock { $0.append(chunk) }
-        }
-    }
+    var stdoutBytes = ByteReader.stream(from: stdout.fileHandleForReading.fileDescriptor).makeAsyncIterator()
+    var collected = Data()
 
-    // A garbage line, followed by a well-formed request: the read loop must
-    // survive the first and still answer the second.
-    try stdin.fileHandleForWriting.write(contentsOf: Data("not json at all\n".utf8))
-    let request = RequestEnvelope(id: 1, method: "initialize", params: handshakeInitializeRequest())
-    try stdin.fileHandleForWriting.write(contentsOf: NDJSONCodec.encode(request))
+    do {
+        // A garbage line, followed by a well-formed request: the read loop
+        // must survive the first and still answer the second.
+        try stdin.fileHandleForWriting.write(contentsOf: Data("not json at all\n".utf8))
+        let request = RequestEnvelope(id: 1, method: "initialize", params: handshakeInitializeRequest())
+        try stdin.fileHandleForWriting.write(contentsOf: NDJSONCodec.encode(request))
 
-    try await waitUntil(timeout: .seconds(10)) {
-        collected.withLock { data in
-            // Two lines expected: the parse-error response, then the real one.
+        // Two lines expected: the parse-error response, then the real one.
+        // The read also ends when the child's stdout ends.
+        try await read(&stdoutBytes, into: &collected) { data in
             data.filter { $0 == newline }.count >= 2
         }
+    } catch {
+        await terminateAndAwaitExit(process)
+        throw error
     }
     await terminateAndAwaitExit(process)
-    collector.cancel()
 
-    let lines = collected.withLock { $0 }.split(separator: newline)
+    let lines = collected.split(separator: newline)
     #expect(lines.count == 2)
 
     let parseErrorLine = try JSONDecoder().decode(JSONValue.self, from: Data(lines[0]))

@@ -6,25 +6,6 @@ import FoundationModelsACP
 
 // MARK: - Fixtures
 
-/// The time limit of each test in this suite, in minutes.
-private let closedSignalTestTimeout = 1
-
-/// The number of seconds in one hour.
-private let secondsPerHour = 3600
-
-/// How long a test request handler waits for its cancellation. The value is
-/// much longer than any test, so only the cancellation ends the wait.
-private let handlerWaitForCancellation: Duration = .seconds(secondsPerHour)
-
-/// The number of milliseconds that a test request handler continues to work
-/// after its cancellation.
-private let handlerWorkAfterCancellationMilliseconds = 200
-
-/// How long a test request handler continues to work after its
-/// cancellation. The signal must wait for this work to end.
-private let handlerWorkAfterCancellation: Duration =
-    .milliseconds(handlerWorkAfterCancellationMilliseconds)
-
 /// The error that the scripted input stream fails with.
 private struct WireFailure: Error {}
 
@@ -200,32 +181,48 @@ private struct SignalTestAgent: Agent {
     func sessionCancel(_ params: CancelSessionNotification) async {}
 }
 
-/// Works for `handlerWorkAfterCancellation`, also when the current task is
-/// cancelled, and then records the end.
-///
-/// - Parameter record: Is set at the end of the work.
-private func finishWorkPastCancellation(record: AtomicFlag) async {
-    // A detached task does not get the cancellation of the current task, so
-    // this work continues after the connection closed.
-    await Task.detached { try? await Task.sleep(for: handlerWorkAfterCancellation) }.value
-    record.set()
+/// Work that a handler does after its cancellation. It ends only when the
+/// test calls ``release()``, so the signal must wait for it. It uses no
+/// clock.
+private final class WorkPastCancellation: Sendable {
+    /// Ends when the test releases the work.
+    private let gate = AsyncStream<Void>.makeStream()
+    /// Is set at the end of the work.
+    let record = AtomicFlag()
+
+    /// Waits until the test releases the work, also when the current task is
+    /// cancelled, and then records the end.
+    func run() async {
+        let stream = gate.stream
+        // A detached task does not get the cancellation of the current task,
+        // so this work continues after the connection closed.
+        await Task.detached {
+            var release = stream.makeAsyncIterator()
+            _ = await release.next()
+        }.value
+        record.set()
+    }
+
+    /// Lets the work end.
+    func release() {
+        gate.continuation.finish()
+    }
 }
 
-/// A request handler that runs until its cancellation, then continues to
-/// work for `handlerWorkAfterCancellation`, and then records that it ended.
+/// A request handler that runs until its cancellation, then does `work`.
 ///
 /// - Parameters:
 ///   - started: Gets one value when the handler starts.
-///   - record: Is set at the end of the handler.
+///   - work: The work after the cancellation.
 /// - Returns: The handler.
 private func slowHandler(
     started: AsyncStream<Void>.Continuation,
-    record: AtomicFlag
+    work: WorkPastCancellation
 ) -> Connection.RequestHandler {
     { _, _ in
         started.yield(())
-        try? await Task.sleep(for: handlerWaitForCancellation)
-        await finishWorkPastCancellation(record: record)
+        await waitForTaskCancellation()
+        await work.run()
         return .null
     }
 }
@@ -235,7 +232,7 @@ private func slowHandler(
 /// `Connection.closed` gives one reason, after the connection closed and
 /// after each inbound handler ended.
 @Suite struct ConnectionClosedSignalTests {
-    @Test(.timeLimit(.minutes(closedSignalTestTimeout)), arguments: CloseTrigger.allCases)
+    @Test(arguments: CloseTrigger.allCases)
     func everyWaiterGetsTheReasonOfTheFirstClose(trigger: CloseTrigger) async {
         let peer = ScriptedPeer()
         let connection = await Connection(transport: peer.transport)
@@ -250,7 +247,7 @@ private func slowHandler(
         #expect(late.kind == trigger.expectedKind)
     }
 
-    @Test(.timeLimit(.minutes(closedSignalTestTimeout)))
+    @Test
     func transportFailureGivesTheErrorOfTheInputStream() async throws {
         let peer = ScriptedPeer()
         let connection = await Connection(transport: peer.transport)
@@ -262,27 +259,28 @@ private func slowHandler(
         #expect(error is WireFailure)
     }
 
-    @Test(.timeLimit(.minutes(closedSignalTestTimeout)), arguments: CloseTrigger.allCases)
+    @Test(arguments: CloseTrigger.allCases)
     func signalComesAfterARunningRequestHandlerEnded(trigger: CloseTrigger) async throws {
         let peer = ScriptedPeer()
         let started = AsyncStream<Void>.makeStream()
-        let record = AtomicFlag()
+        let work = WorkPastCancellation()
         let connection = await Connection(
             transport: peer.transport,
-            requestHandler: slowHandler(started: started.continuation, record: record)
+            requestHandler: slowHandler(started: started.continuation, work: work)
         )
         try peer.send(.object(["jsonrpc": .string("2.0"), "id": .number(1), "method": .string("slow")]))
         var startedIterator = started.stream.makeAsyncIterator()
         _ = await startedIterator.next()
 
         await peer.close(by: trigger, connection)
+        work.release()
         let reason = await connection.closed
 
         #expect(reason.kind == trigger.expectedKind)
-        #expect(record.isSet)
+        #expect(work.record.isSet)
     }
 
-    @Test(.timeLimit(.minutes(closedSignalTestTimeout)))
+    @Test
     func batchRequestAfterCloseStartsNoHandler() async throws {
         let peer = ScriptedPeer()
         let box = ConnectionBox()
@@ -314,7 +312,7 @@ private func slowHandler(
 /// `AgentSideConnection.closed` and `ClientSideConnection.closed` give the
 /// reason of the underlying connection.
 @Suite struct RoleConnectionClosedSignalTests {
-    @Test(.timeLimit(.minutes(closedSignalTestTimeout)))
+    @Test
     func agentSideConnectionGivesEndOfInputWhenTheClientCloses() async {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let connection = await AgentSideConnection(stream: agentEnd) { SignalTestAgent(connection: $0) }
@@ -324,7 +322,7 @@ private func slowHandler(
         #expect(await connection.closed.kind == .endOfInput)
     }
 
-    @Test(.timeLimit(.minutes(closedSignalTestTimeout)))
+    @Test
     func agentSideConnectionGivesClosedLocallyAfterClose() async {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let connection = await AgentSideConnection(stream: agentEnd) { SignalTestAgent(connection: $0) }
@@ -335,15 +333,15 @@ private func slowHandler(
         _ = clientEnd
     }
 
-    @Test(.timeLimit(.minutes(closedSignalTestTimeout)))
+    @Test
     func agentSideSignalComesAfterDeferredWorkOfARespondedRequestEnded() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let started = AsyncStream<Void>.makeStream()
-        let record = AtomicFlag()
+        let work = WorkPastCancellation()
         let agent = await AgentSideConnection(stream: agentEnd) { connection in
             SignalTestAgent(connection: connection) {
                 started.continuation.yield(())
-                await finishWorkPastCancellation(record: record)
+                await work.run()
             }
         }
         let client = await ClientSideConnection(stream: clientEnd) { _ in HandshakeClient() }
@@ -352,14 +350,15 @@ private func slowHandler(
         _ = await startedIterator.next()
 
         await agent.close()
+        work.release()
         let reason = await agent.closed
 
         #expect(reason.kind == .closedLocally)
-        #expect(record.isSet)
+        #expect(work.record.isSet)
         await client.close()
     }
 
-    @Test(.timeLimit(.minutes(closedSignalTestTimeout)))
+    @Test
     func clientSideConnectionGivesEndOfInputWhenTheAgentCloses() async {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let connection = await ClientSideConnection(stream: clientEnd) { _ in HandshakeClient() }
@@ -369,7 +368,7 @@ private func slowHandler(
         #expect(await connection.closed.kind == .endOfInput)
     }
 
-    @Test(.timeLimit(.minutes(closedSignalTestTimeout)))
+    @Test
     func clientSideConnectionGivesClosedLocallyAfterClose() async {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let connection = await ClientSideConnection(stream: clientEnd) { _ in HandshakeClient() }

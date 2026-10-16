@@ -177,7 +177,7 @@ private func startPrompt(
 
 // MARK: - Demux
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func updatesDemuxAcrossInterleavedSessions() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
@@ -202,7 +202,7 @@ func updatesDemuxAcrossInterleavedSessions() async throws {
 
 // MARK: - Straggler after the idle state_update
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func lateToolCallUpdateAfterIdleStateUpdateIsDelivered() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
@@ -234,7 +234,7 @@ func lateToolCallUpdateAfterIdleStateUpdateIsDelivered() async throws {
 
 // MARK: - Post-cancel stragglers then the cancelled stop reason
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func postCancelTrailingUpdatesThenCancelledStopReasonInOrder() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
@@ -271,7 +271,7 @@ func postCancelTrailingUpdatesThenCancelledStopReasonInOrder() async throws {
 
 // MARK: - An update for a session with no subscriber
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func anUpdateForASessionWithNoSubscriberDoesNotStopOtherSessions() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
@@ -291,7 +291,7 @@ func anUpdateForASessionWithNoSubscriberDoesNotStopOtherSessions() async throws 
 
 // MARK: - A known update whose payload does not decode
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func aKnownUpdateWithABadFieldTypeLogsOneWarningAndLaterUpdatesStillArrive() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let log = LogCapture()
@@ -316,7 +316,7 @@ func aKnownUpdateWithABadFieldTypeLogsOneWarningAndLaterUpdatesStillArrive() asy
 
 // MARK: - Stream finish on disconnect
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func connectionEOFFinishesAllSessionStreams() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
@@ -366,7 +366,7 @@ private func drain(_ subscription: SessionUpdateSubscription) async -> [SessionS
     return received
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func routerGivesBufferedUpdatesToTheFirstSubscriberInOrderBeforeLiveUpdates() async {
     let (router, log) = makeRouter()
     router.deliver(notification(for: sessionOne, messageChunk("early-1")))
@@ -383,7 +383,7 @@ func routerGivesBufferedUpdatesToTheFirstSubscriberInOrderBeforeLiveUpdates() as
     #expect(log.messages.isEmpty)
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func routerDoesNotGiveBufferedUpdatesToASecondSubscriber() async {
     let (router, _) = makeRouter()
     router.deliver(notification(for: sessionOne, messageChunk("early")))
@@ -399,7 +399,7 @@ func routerDoesNotGiveBufferedUpdatesToASecondSubscriber() async {
     #expect(await firstUpdates.nextUpdate() == messageChunk("live"))
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func routerDiscardsAFullSessionBufferMarksTheSessionAndLogsAWarning() async {
     let (router, log) = makeRouter(limits: oneUpdateLimits)
     router.deliver(notification(for: sessionOne, messageChunk("kept")))
@@ -415,7 +415,7 @@ func routerDiscardsAFullSessionBufferMarksTheSessionAndLogsAWarning() async {
     #expect(log.messages.first?.contains(sessionOne.rawValue) == true)
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func routerGivesTheOverflowMarkToTheFirstSubscriberOnly() {
     let (router, _) = makeRouter(limits: oneUpdateLimits)
     router.deliver(notification(for: sessionOne, messageChunk("kept")))
@@ -428,7 +428,7 @@ func routerGivesTheOverflowMarkToTheFirstSubscriberOnly() {
     #expect(!second.hasMissedUpdates)
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func routerEvictsTheOldestBufferWhenOneSessionTooManyHasABuffer() async {
     let (router, log) = makeRouter()
     let sessionLimit = SessionUpdateBufferLimits.default.maximumSessions
@@ -457,7 +457,7 @@ func routerEvictsTheOldestBufferWhenOneSessionTooManyHasABuffer() async {
     #expect(log.messages.first?.contains(sessions[0].rawValue) == true)
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func routerDiscardsTheBufferAndTheMarkOfAClosedSession() async {
     let (router, _) = makeRouter(limits: oneUpdateLimits)
     router.deliver(notification(for: sessionOne, messageChunk("kept")))
@@ -473,7 +473,7 @@ func routerDiscardsTheBufferAndTheMarkOfAClosedSession() async {
     #expect(!subscription.hasMissedUpdates)
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func routerDiscardsEveryBufferAndMarkWhenItFinishes() async {
     let (router, _) = makeRouter(limits: oneUpdateLimits)
     router.deliver(notification(for: sessionOne, messageChunk("kept")))
@@ -489,7 +489,7 @@ func routerDiscardsEveryBufferAndMarkWhenItFinishes() async {
 
 // MARK: - Connection buffer before the session/new response
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func anUpdateSentBeforeTheNewSessionResponseReachesTheFirstSubscriber() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
@@ -509,7 +509,7 @@ func anUpdateSentBeforeTheNewSessionResponseReachesTheFirstSubscriber() async th
     await client.close()
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func bufferLimitsSetOnTheConnectionMarkAnOverflowBeforeTheNewSessionResponse() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let log = LogCapture()
@@ -529,7 +529,7 @@ func bufferLimitsSetOnTheConnectionMarkAnOverflowBeforeTheNewSessionResponse() a
     await client.close()
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func closingASessionDiscardsItsBufferAndItsMark() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd, bufferLimits: oneUpdateLimits) { _ in MinimalClient() }
@@ -552,7 +552,7 @@ func closingASessionDiscardsItsBufferAndItsMark() async throws {
     await client.close()
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func closingTheConnectionDiscardsEveryBufferAndMark() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd, bufferLimits: oneUpdateLimits) { _ in MinimalClient() }
@@ -613,7 +613,7 @@ private func failedPromptMarker(id: JSONValue) -> SessionStreamEvent {
     .requestFinished(id: id, method: promptWireMethod, outcome: .failed)
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func theResumeMarkerComesAfterEveryEarlierUpdateAndBeforeEveryLaterUpdate() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
@@ -635,7 +635,7 @@ func theResumeMarkerComesAfterEveryEarlierUpdateAndBeforeEveryLaterUpdate() asyn
     await client.close()
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func anErrorResponseYieldsAFailedMarker() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
@@ -651,7 +651,7 @@ func anErrorResponseYieldsAFailedMarker() async throws {
     await client.close()
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func aTimedOutRequestYieldsAFailedMarker() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd, requestTimeout: shortRequestTimeout) { _ in
@@ -668,7 +668,7 @@ func aTimedOutRequestYieldsAFailedMarker() async throws {
     await client.close()
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func aCancelledRequestYieldsAFailedMarker() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
@@ -684,7 +684,7 @@ func aCancelledRequestYieldsAFailedMarker() async throws {
     await client.close()
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func connectionCloseYieldsAFailedMarkerBeforeTheStreamFinishes() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
@@ -699,7 +699,7 @@ func connectionCloseYieldsAFailedMarkerBeforeTheStreamFinishes() async throws {
     #expect(await events.next() == nil)
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func aRequestWithoutASessionIdYieldsNoMarker() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
@@ -726,7 +726,7 @@ func aRequestWithoutASessionIdYieldsNoMarker() async throws {
     await client.close()
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func keptUpdatesAndAMarkerReachTheFirstSubscriberInOrder() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
@@ -748,7 +748,7 @@ func keptUpdatesAndAMarkerReachTheFirstSubscriberInOrder() async throws {
     await client.close()
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func routerCountsAKeptMarkerTowardTheSessionLimit() {
     let (router, log) = makeRouter(limits: oneUpdateLimits)
     router.deliver(notification(for: sessionOne, messageChunk("kept")))

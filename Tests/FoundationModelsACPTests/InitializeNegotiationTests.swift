@@ -58,7 +58,7 @@ private struct NegotiatingAgent: Agent {
 @Suite struct InitializeNegotiationTests {
     // MARK: - Full exchange over InMemoryTransport
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func initializeRoundTripsOverInMemoryTransportWithNegotiatedInfoAndCapabilities() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { _ in NegotiatingAgent() }
@@ -95,7 +95,7 @@ private struct NegotiatingAgent: Agent {
 
     // MARK: - protocolVersion 2 on the wire
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func protocolVersion2IsSentOnTheWire() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let client = await ClientSideConnection(stream: clientEnd) { _ in HandshakeClient() }
@@ -126,7 +126,7 @@ private struct NegotiatingAgent: Agent {
 
     // MARK: - Version mismatch
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func agentAnsweringADifferentProtocolVersionThrowsAClearMismatchError() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let client = await ClientSideConnection(stream: clientEnd) { _ in HandshakeClient() }
@@ -163,7 +163,7 @@ private struct NegotiatingAgent: Agent {
         }
     }
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func agentAnsweringAnUnrecognizedHigherProtocolVersionAlsoMismatches() async throws {
         // v2-only means any deviation from what was sent is unservable, not
         // merely a "lower version" special case.

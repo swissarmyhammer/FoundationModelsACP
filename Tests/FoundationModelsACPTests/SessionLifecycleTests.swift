@@ -232,13 +232,9 @@ private final class SessionManagingAgent: Agent {
     func prompt(_ params: PromptRequest) async throws -> PromptResponse {
         _ = try await registry.session(params.sessionId)
         let task = Task<Void, Never> {
-            do {
-                // Stands in for real foreground work: never actually reaches
-                // this sleep's end in a test, only its cancellation.
-                try await Task.sleep(for: .seconds(3600))
-            } catch {
-                // Cancelled by `session/cancel` or `session/close`.
-            }
+            // Stands in for real foreground work: it ends only when
+            // `session/cancel` or `session/close` cancels it.
+            await waitForTaskCancellation()
         }
         try await registry.beginWork(params.sessionId, task)
         return PromptResponse.stubAcknowledgement
@@ -411,7 +407,7 @@ private let selectConfigOption = SessionConfigOption(
 @Suite struct SessionLifecycleTests {
     // MARK: session/new, session/list
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func newSessionCreatesASessionThatListSessionsReports() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
@@ -428,7 +424,7 @@ private let selectConfigOption = SessionConfigOption(
         await client.close()
     }
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func listSessionsFiltersByCwd() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
@@ -448,7 +444,7 @@ private let selectConfigOption = SessionConfigOption(
 
     // MARK: session/resume, replayFrom
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func resumeSessionWithReplayFromStartReplaysTheFullHistoryInOrder() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in
@@ -495,7 +491,7 @@ private let selectConfigOption = SessionConfigOption(
         await client.close()
     }
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func resumeSessionWithoutReplayFromSendsNoUpdates() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in
@@ -535,7 +531,7 @@ private let selectConfigOption = SessionConfigOption(
         await client.close()
     }
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func resumeSessionWithAnUnrecognizedReplayFromCursorIsRejectedRatherThanGuessed() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
@@ -561,7 +557,7 @@ private let selectConfigOption = SessionConfigOption(
         await client.close()
     }
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func resumeSessionWithACwdThatDoesNotMatchTheSessionsIsRejected() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
@@ -581,7 +577,7 @@ private let selectConfigOption = SessionConfigOption(
 
     // MARK: session/close
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func closeSessionCancelsOngoingWorkAndKeepsTheSessionListed() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
@@ -610,7 +606,7 @@ private let selectConfigOption = SessionConfigOption(
         await client.close()
     }
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func closeSessionWithNoWorkInFlightSucceedsAsANoOpAndSendsNoUpdate() async throws {
         // The other close test covers the cancel-something path; this covers
         // `cancelOngoingWork`'s no-op guard, so both branches of that
@@ -641,7 +637,7 @@ private let selectConfigOption = SessionConfigOption(
         await client.close()
     }
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func closeSessionOnAnUnknownSessionFails() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
@@ -657,7 +653,7 @@ private let selectConfigOption = SessionConfigOption(
 
     // MARK: session/delete
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func deleteSessionRemovesTheSessionFromListingAndIsDistinctFromClose() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in SessionManagingAgent(connection: conn) }
@@ -683,7 +679,7 @@ private let selectConfigOption = SessionConfigOption(
         await client.close()
     }
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func deleteSessionIsMethodNotFoundWhenCapabilityIsNotAdvertised() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { _ in SessionBaselineOnlyAgent() }
@@ -703,7 +699,7 @@ private let selectConfigOption = SessionConfigOption(
 
     // MARK: session/set_config_option, config_option_update
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func setSessionConfigOptionRoundTripsAndEmitsConfigOptionUpdateForEachCategory() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in
@@ -735,7 +731,7 @@ private let selectConfigOption = SessionConfigOption(
         await client.close()
     }
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func setSessionConfigOptionRoundTripsAndEmitsConfigOptionUpdateForTheSelectVariant() async throws {
         // The category round-trip test above only ever sets `.boolean`
         // options, so it never reaches `SessionRegistry.setConfigOption`'s
@@ -784,7 +780,7 @@ private let selectConfigOption = SessionConfigOption(
         await client.close()
     }
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func setSessionConfigOptionOnAnUnknownOptionFails() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agentConn = await AgentSideConnection(stream: agentEnd) { conn in

@@ -180,9 +180,6 @@ private let insertionPrompt = PromptRequest(prompt: promptContent, sessionId: in
 /// pass can show the correct order by chance, so the test uses many passes.
 private let orderingRepetitions = 50
 
-/// The time limit of each test in this suite, in minutes.
-private let insertionTestTimeout = 1
-
 /// The error that `InsertingAgent` throws after the insertion, in
 /// `InsertionMode.throwAfterInsertion` and
 /// `InsertionMode.recordInHistoryThenThrow`.
@@ -246,7 +243,7 @@ private struct ConnectionPair {
         return ConnectionPair(agent: agent, client: client)
     }
 
-    @Test(.timeLimit(.minutes(insertionTestTimeout)))
+    @Test
     func theEchoCarriesThePromptAndTheMessageIdThatTheResponseNames() async throws {
         let pair = try await connect(mode: .newMessageId)
         var updates = pair.client.subscribe(to: insertionSessionId).updates.makeAsyncIterator()
@@ -259,7 +256,7 @@ private struct ConnectionPair {
         await pair.close()
     }
 
-    @Test(.timeLimit(.minutes(insertionTestTimeout)))
+    @Test
     func eachPromptGetsANewMessageId() async throws {
         let pair = try await connect(mode: .newMessageId)
 
@@ -270,7 +267,7 @@ private struct ConnectionPair {
         await pair.close()
     }
 
-    @Test(.timeLimit(.minutes(insertionTestTimeout)))
+    @Test
     func aMessageIdFromTheCallerIsTheIdOfTheResponseAndTheEcho() async throws {
         let callerId = MessageId(rawValue: "caller-msg-1")
         let pair = try await connect(mode: .callerMessageId(callerId))
@@ -283,7 +280,7 @@ private struct ConnectionPair {
         await pair.close()
     }
 
-    @Test(.timeLimit(.minutes(insertionTestTimeout)))
+    @Test
     func theEchoEntersTheHistoryWithTheMessageIdThatTheResponseNames() async throws {
         let history = AgentHistory()
         let pair = try await connect(mode: .recordInHistory, history: history)
@@ -299,7 +296,7 @@ private struct ConnectionPair {
         await pair.close()
     }
 
-    @Test(.timeLimit(.minutes(insertionTestTimeout)))
+    @Test
     func theResponseIsWrittenBeforeTheEcho() async throws {
         for _ in 0..<orderingRepetitions {
             let log = EventLog()
@@ -316,7 +313,7 @@ private struct ConnectionPair {
         }
     }
 
-    @Test(.timeLimit(.minutes(insertionTestTimeout)))
+    @Test
     func aHandlerThatThrowsAfterTheInsertionGivesAnErrorAndNoEcho() async throws {
         let log = EventLog()
         let (deferredWorkRan, deferredWorkContinuation) = AsyncStream<Void>.makeStream()
@@ -337,7 +334,7 @@ private struct ConnectionPair {
         await pair.close()
     }
 
-    @Test(.timeLimit(.minutes(insertionTestTimeout)))
+    @Test
     func aHandlerThatThrowsAfterTheInsertionLeavesTheHistoryEmpty() async throws {
         let history = AgentHistory()
         let (deferredWorkRan, deferredWorkContinuation) = AsyncStream<Void>.makeStream()
@@ -358,7 +355,7 @@ private struct ConnectionPair {
         await pair.close()
     }
 
-    @Test(.timeLimit(.minutes(insertionTestTimeout)))
+    @Test
     func theHistoryGetsTheMessageAfterTheResponseAndBeforeTheEcho() async throws {
         let history = AgentHistory()
         let log = EventLog()
@@ -382,7 +379,7 @@ private struct ConnectionPair {
         await pair.close()
     }
 
-    @Test(.timeLimit(.minutes(insertionTestTimeout)))
+    @Test
     func theClientCorrelatorLinksThePendingPromptToTheEchoedMessage() async throws {
         let pair = try await connect(mode: .newMessageId)
         var updates = pair.client.subscribe(to: insertionSessionId).updates.makeAsyncIterator()

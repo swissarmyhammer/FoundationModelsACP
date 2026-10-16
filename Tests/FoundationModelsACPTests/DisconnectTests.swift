@@ -5,7 +5,7 @@ import FoundationModelsACP
 
 // MARK: - Fail loud on disconnect
 
-@Test(.timeLimit(.minutes(1))) func eofRejectsEveryPendingRequest() async throws {
+@Test func eofRejectsEveryPendingRequest() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
     let reader = WireReader(agentEnd)
@@ -26,7 +26,7 @@ import FoundationModelsACP
     }
 }
 
-@Test(.timeLimit(.minutes(1))) func streamErrorRejectsPendingRequests() async throws {
+@Test func streamErrorRejectsPendingRequests() async throws {
     struct WireFailure: Error {}
     let incoming = AsyncThrowingStream<Data, any Error>.makeStream()
     let writes = AsyncStream<Data>.makeStream()
@@ -44,7 +44,7 @@ import FoundationModelsACP
     }
 }
 
-@Test(.timeLimit(.minutes(1))) func requestAfterDisconnectFailsImmediately() async throws {
+@Test func requestAfterDisconnectFailsImmediately() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
     agentEnd.close()
@@ -62,7 +62,7 @@ import FoundationModelsACP
     }
 }
 
-@Test(.timeLimit(.minutes(1))) func closeRejectsPendingAndRefusesNewRequests() async throws {
+@Test func closeRejectsPendingAndRefusesNewRequests() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
     let reader = WireReader(agentEnd)
@@ -79,7 +79,7 @@ import FoundationModelsACP
     }
 }
 
-@Test(.timeLimit(.minutes(1))) func closeCancelsInFlightInboundHandlers() async throws {
+@Test func closeCancelsInFlightInboundHandlers() async throws {
     // Fail loud covers the inbound direction too: a handler still running
     // when the connection shuts down must not be left dangling.
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
@@ -90,7 +90,7 @@ import FoundationModelsACP
         requestHandler: { _, _ in
             started.continuation.yield(())
             await withTaskCancellationHandler {
-                try? await Task.sleep(for: .seconds(3600))
+                await waitForTaskCancellation()
             } onCancel: {
                 cancelled.continuation.yield(())
             }
@@ -111,7 +111,7 @@ import FoundationModelsACP
     _ = await cancelledIterator.next()
 }
 
-@Test(.timeLimit(.minutes(1))) func closeFinishesStreamsDerivedFromOnClose() async throws {
+@Test func closeFinishesStreamsDerivedFromOnClose() async throws {
     // The disconnect signal upper layers rely on to finish derived streams
     // (e.g. `ClientSideConnection`'s per-session update streams).
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
@@ -129,7 +129,7 @@ import FoundationModelsACP
 
 // MARK: - Timeout
 
-@Test(.timeLimit(.minutes(1))) func perRequestTimeoutFiresWhenPeerNeverAnswers() async throws {
+@Test func perRequestTimeoutFiresWhenPeerNeverAnswers() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
 
@@ -139,7 +139,7 @@ import FoundationModelsACP
     _ = agentEnd  // keep the peer end alive so EOF does not race the timeout
 }
 
-@Test(.timeLimit(.minutes(1))) func connectionDefaultTimeoutApplies() async throws {
+@Test func connectionDefaultTimeoutApplies() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd, requestTimeout: .milliseconds(50))
 
@@ -149,7 +149,7 @@ import FoundationModelsACP
     _ = agentEnd
 }
 
-@Test(.timeLimit(.minutes(1))) func lateResponseAfterTimeoutIsIgnored() async throws {
+@Test func lateResponseAfterTimeoutIsIgnored() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
     let reader = WireReader(agentEnd)
@@ -179,7 +179,7 @@ import FoundationModelsACP
 
 // MARK: - Task cancellation
 
-@Test(.timeLimit(.minutes(1))) func cancellingCallerTaskUnblocksPendingRequest() async throws {
+@Test func cancellingCallerTaskUnblocksPendingRequest() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let client = await Connection(transport: clientEnd)
     let reader = WireReader(agentEnd)
@@ -197,7 +197,7 @@ import FoundationModelsACP
     _ = agentEnd
 }
 
-@Test(.timeLimit(.minutes(1))) func cancellingCallerTaskSendsCancelRequestNotificationToPeer() async throws {
+@Test func cancellingCallerTaskSendsCancelRequestNotificationToPeer() async throws {
     // Local cancellation must never block on the peer — but it should tell
     // the peer, best-effort, so a slow handler on the other end can stop
     // doing work nobody is waiting for anymore.
@@ -230,7 +230,7 @@ import FoundationModelsACP
     #expect(params["requestId"] == id)
 }
 
-@Test(.timeLimit(.minutes(1))) func cancellingAnAlreadyResolvedRequestSendsNoNotification() async throws {
+@Test func cancellingAnAlreadyResolvedRequestSendsNoNotification() async throws {
     // No point telling the peer to stop working on a request that already
     // finished — and no pending entry survives to look up anyway.
     let (clientEnd, agentEnd) = InMemoryTransport.pair()

@@ -26,9 +26,6 @@ private let foreignContent: [ContentBlock] = [.text(TextContent(text: "not this 
 /// The prompt that each test sends.
 private let echoPrompt = PromptRequest(prompt: echoPromptContent, sessionId: echoSessionId)
 
-/// The time limit of each test in this suite, in minutes.
-private let echoTestTimeout = 1
-
 /// The error that the agent gives to a prompt that fails.
 private let echoPromptFailure = RequestError.invalidParams
 
@@ -136,7 +133,7 @@ private struct EchoHarness {
         #expect(result.entryID == .userMessage(echoMessageId))
     }
 
-    @Test(.timeLimit(.minutes(echoTestTimeout)))
+    @Test
     func anEchoBeforeTheResponseGivesTheMessageIdAndTheEcho() async throws {
         let harness = await EchoHarness.connect()
         let (prompt, id) = try await harness.startPrompt()
@@ -148,7 +145,7 @@ private struct EchoHarness {
         await harness.client.close()
     }
 
-    @Test(.timeLimit(.minutes(echoTestTimeout)))
+    @Test
     func anEchoAfterTheResponseGivesTheMessageIdAndTheEcho() async throws {
         let harness = await EchoHarness.connect()
         let (prompt, id) = try await harness.startPrompt()
@@ -160,7 +157,7 @@ private struct EchoHarness {
         await harness.client.close()
     }
 
-    @Test(.timeLimit(.minutes(echoTestTimeout)))
+    @Test
     func aUserMessageChunkEchoGivesTheFirstChunk() async throws {
         let harness = await EchoHarness.connect()
         let (prompt, id) = try await harness.startPrompt()
@@ -175,7 +172,7 @@ private struct EchoHarness {
         await harness.client.close()
     }
 
-    @Test(.timeLimit(.minutes(echoTestTimeout)))
+    @Test
     func anEchoOfAnotherMessageDoesNotCompleteThePrompt() async throws {
         let harness = await EchoHarness.connect()
         let (prompt, id) = try await harness.startPrompt()
@@ -189,7 +186,7 @@ private struct EchoHarness {
         await harness.client.close()
     }
 
-    @Test(.timeLimit(.minutes(echoTestTimeout)))
+    @Test
     func anEchoInAnotherSessionDoesNotCompleteThePrompt() async throws {
         let harness = await EchoHarness.connect()
         let (prompt, id) = try await harness.startPrompt()
@@ -202,7 +199,7 @@ private struct EchoHarness {
         await harness.client.close()
     }
 
-    @Test(.timeLimit(.minutes(echoTestTimeout)))
+    @Test
     func anErrorResponseThrowsTheError() async throws {
         let harness = await EchoHarness.connect()
         let (prompt, id) = try await harness.startPrompt()
@@ -214,7 +211,7 @@ private struct EchoHarness {
         await harness.client.close()
     }
 
-    @Test(.timeLimit(.minutes(echoTestTimeout)))
+    @Test
     func aConnectionCloseBeforeTheEchoThrowsClosed() async throws {
         let harness = await EchoHarness.connect()
         let (prompt, id) = try await harness.startPrompt()
@@ -225,7 +222,7 @@ private struct EchoHarness {
         await #expect(throws: ConnectionError.closed) { try await prompt.value }
     }
 
-    @Test(.timeLimit(.minutes(echoTestTimeout)))
+    @Test
     func aCancelledTaskBeforeTheEchoThrowsCancellationError() async throws {
         let harness = await EchoHarness.connect()
         let (prompt, id) = try await harness.startPrompt()

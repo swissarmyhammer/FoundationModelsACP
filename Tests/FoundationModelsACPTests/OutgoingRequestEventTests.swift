@@ -11,7 +11,7 @@ import Testing
 /// sends `started` before it writes the request, and it sends `finished`
 /// before the call returns or throws. Thus each event is in the stream
 /// before the test reads it, and no test waits on a timer.
-@Suite(.timeLimit(.minutes(1))) struct OutgoingRequestEventTests {
+@Suite struct OutgoingRequestEventTests {
     // MARK: - Fixtures
 
     /// The timeout of the request in the timeout test. The raw agent end

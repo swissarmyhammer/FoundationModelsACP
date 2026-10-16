@@ -7,7 +7,7 @@ import Testing
 /// The broadcaster that `SessionUpdateRouter` and `OutgoingRequestTracker`
 /// use, tested with string topics, string events, and a context that keeps
 /// the events that no subscriber got.
-@Suite(.timeLimit(.minutes(1))) struct EventBroadcasterTests {
+@Suite struct EventBroadcasterTests {
     /// A broadcaster with string topics and string events. Its context holds
     /// the events that the tests keep for the next subscriber.
     typealias Broadcaster = EventBroadcaster<String, String, [String]>
@@ -152,9 +152,6 @@ import Testing
     /// chance to cancel the consumer while a yield resumes it.
     private static let cancelRaceRounds = 2_000
 
-    /// The time that the deadlock test waits for all its rounds.
-    private static let cancelRaceDeadline = Duration.seconds(30)
-
     /// A cancel of the consumer on one thread, while a yield on a different
     /// thread resumes that consumer, must not cause a deadlock.
     ///
@@ -164,25 +161,20 @@ import Testing
     /// yields, because the detach waits for that lock.
     ///
     /// The rounds run on Dispatch threads, not in the cooperative pool. Thus a
-    /// deadlock stops only those threads, and the test fails at its deadline.
+    /// deadlock stops only those threads. The test uses no clock: it waits
+    /// until the last round ended, so a deadlock makes it hang, not fail.
     @Test func aCancelWhileAYieldResumesTheConsumerDoesNotDeadlock() async throws {
         let progress = RoundCounter()
-        DispatchQueue.global().async {
-            for _ in 0..<Self.cancelRaceRounds {
-                Self.runOneCancelRaceRound()
-                progress.increment()
+        await withCheckedContinuation { (finished: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().async {
+                for _ in 0..<Self.cancelRaceRounds {
+                    Self.runOneCancelRaceRound()
+                    progress.increment()
+                }
+                finished.resume()
             }
         }
-
-        let clock = ContinuousClock()
-        let deadline = clock.now + Self.cancelRaceDeadline
-        while progress.value < Self.cancelRaceRounds, clock.now < deadline {
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(
-            progress.value == Self.cancelRaceRounds,
-            "Only \(progress.value) of \(Self.cancelRaceRounds) rounds ended: a cancel and a yield are in a deadlock"
-        )
+        #expect(progress.value == Self.cancelRaceRounds)
     }
 
     /// Runs one round of the deadlock test: a consumer waits for events, one

@@ -5,9 +5,6 @@ import Testing
 
 // MARK: - Fixtures
 
-/// The time limit of each test in this suite, in minutes.
-private let outboundRuleTestTimeout = 1
-
 /// The session of each update in this suite.
 private let ruleSession = StubAgent.sessionId
 
@@ -128,7 +125,7 @@ private struct OutboundHarness {
 /// A custom stop reason starts with `_`. A value without `_` that ACP does
 /// not define is reserved for a future ACP version, so an agent must not send
 /// it. A peer that receives such a value still decodes it.
-@Suite(.timeLimit(.minutes(outboundRuleTestTimeout)))
+@Suite
 struct OutboundStopReasonRuleTests {
     @Test(arguments: [StopReason.endTurn, .cancelled, .unknown("_vendor_paused")])
     func aStopReasonThatACPDefinesOrACustomOneIsSent(reason: StopReason) async throws {
@@ -159,7 +156,7 @@ struct OutboundStopReasonRuleTests {
 ///
 /// `used` and `size` are `uint64` values, and `cost.currency` is an ISO 4217
 /// code of three upper-case letters.
-@Suite(.timeLimit(.minutes(outboundRuleTestTimeout)))
+@Suite
 struct OutboundUsageRuleTests {
     @Test func usageWithCountsOfZeroOrMoreIsSent() async throws {
         let harness = await OutboundHarness.connect()

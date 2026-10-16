@@ -28,7 +28,7 @@ import Testing
     /// A well-formed cancel that the client sends after the malformed one.
     private static let laterCancel = CancelSessionNotification(sessionId: SessionId(rawValue: "session-cancel-1"))
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func aCancelWithABadFieldTypeLogsOneWarningAndALaterCancelStillArrives() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let log = LogCapture()

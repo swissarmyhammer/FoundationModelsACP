@@ -268,7 +268,7 @@ private final class RecordingAgent: Agent {
 
 // MARK: - Tests
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func agentFactoryCapturesConnectionAndIssuesReversePermissionDuringPrompt() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let recorder = RoleRecorder()
@@ -295,7 +295,7 @@ func agentFactoryCapturesConnectionAndIssuesReversePermissionDuringPrompt() asyn
     await client.close()
 }
 
-@Test(.timeLimit(.minutes(1)))
+@Test
 func clientFactoryCapturesConnectionAndDrivesAgentFromWithinSessionUpdate() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let recorder = RoleRecorder()

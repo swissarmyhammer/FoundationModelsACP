@@ -14,7 +14,7 @@ import Testing
         let document = try TestSupport.jsonObject(atTreeRelativePath: "Schema/acp-v2.json")
         guard let object = document as? [String: Any] else {
             Issue.record("Schema/acp-v2.json did not decode to a JSON object")
-            throw TimedOutError()  // unreachable; satisfies the return type
+            throw UnexpectedSchemaShapeError()
         }
         return try JSONSchemaValidator(schemaDocument: object)
     }

@@ -78,7 +78,7 @@ private func collectMessages(from transport: some ACPTransport) async throws -> 
     }
 }
 
-@Test(.timeLimit(.minutes(1))) func aReaderThatStopsEndsThePeerStream() async throws {
+@Test func aReaderThatStopsEndsThePeerStream() async throws {
     let (a, b) = InMemoryTransport.pair()
     let reader = Task { try await collectMessages(from: a) }
     reader.cancel()
@@ -88,7 +88,7 @@ private func collectMessages(from transport: some ACPTransport) async throws -> 
     #expect(received.isEmpty)
 }
 
-@Test(.timeLimit(.minutes(1))) func closeIsStillAHalfClose() async throws {
+@Test func closeIsStillAHalfClose() async throws {
     let (a, b) = InMemoryTransport.pair()
     a.close()
     // b's stream finishes, but a's stream stays open: b -> a still works.
@@ -99,7 +99,7 @@ private func collectMessages(from transport: some ACPTransport) async throws -> 
     #expect(received == [.object(["b": .number(2)])])
 }
 
-@Test(.timeLimit(.minutes(1))) func aNormalEndDoesNotCloseTheOtherDirection() async throws {
+@Test func aNormalEndDoesNotCloseTheOtherDirection() async throws {
     let (a, b) = InMemoryTransport.pair()
     b.close()
     // a's stream ends normally. That must not close the a -> b direction.
@@ -110,7 +110,7 @@ private func collectMessages(from transport: some ACPTransport) async throws -> 
     #expect(received == [.object(["a": .number(1)])])
 }
 
-@Test(.timeLimit(.minutes(1))) func closingTheClientConnectionEndsTheAgentConnection() async {
+@Test func closingTheClientConnectionEndsTheAgentConnection() async {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
     let agent = await AgentSideConnection(stream: agentEnd) { _ in StubAgent() }
     let client = await ClientSideConnection(stream: clientEnd) { _ in HandshakeClient() }

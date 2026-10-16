@@ -200,11 +200,8 @@ private final class PromptLifecycleAgent: Agent {
             await send(sessionId: sessionId, .stateUpdate(.running(RunningStateUpdate())))
 
         case .runsUntilCancelled:
-            do {
-                try await Task.sleep(for: indefiniteForegroundWorkDuration)
-            } catch {
-                return  // Cancelled; `sessionCancel` sends the idle/cancelled confirmation.
-            }
+            await waitForTaskCancellation()
+            return  // Cancelled; `sessionCancel` sends the idle/cancelled confirmation.
         }
 
         _ = registry.takeActiveWork(sessionId)
@@ -282,17 +279,6 @@ private let workingDirectory = AbsolutePath(rawValue: "/work")
 /// this needs to be large enough to make that luck implausible.
 private let repetitionsForOrderingRaceDetection = 500
 
-/// The `.runsUntilCancelled` script's foreground-work stand-in: long enough
-/// that a test never reaches its end naturally, only through cancellation —
-/// mirrors `SessionManagingAgent.prompt`'s identical stand-in in
-/// `SessionLifecycleTests.swift`.
-private let indefiniteForegroundWorkDuration: Duration = .seconds(3600)
-
-/// The time limit applied to every test in this suite except the ordering
-/// race, which needs its own longer limit to cover
-/// `repetitionsForOrderingRaceDetection` iterations.
-private let standardTestTimeout = 1  // minute
-
 // MARK: - Tests
 
 /// `session/prompt` acknowledges immediately and reports everything else —
@@ -338,7 +324,7 @@ private let standardTestTimeout = 1  // minute
 
     // MARK: Ordering — the entire semantic change
 
-    @Test(.timeLimit(.minutes(2)))
+    @Test
     func promptResponseArrivesBeforeTheFirstStateUpdate() async throws {
         // Repeated many times: a single pass could observe the correct order
         // by luck even from an implementation that races the two writes, and
@@ -375,7 +361,7 @@ private let standardTestTimeout = 1  // minute
 
     // MARK: A full turn: running -> idle with a stopReason
 
-    @Test(.timeLimit(.minutes(standardTestTimeout)))
+    @Test
     func aFullTurnProducesRunningThenIdleWithAStopReason() async throws {
         let (agentConn, client, session) = try await makeSessionPair(script: .completesImmediately, stopReason: .maxTokens)
         var updates = client.subscribe(to: session).updates.makeAsyncIterator()
@@ -394,7 +380,7 @@ private let standardTestTimeout = 1  // minute
 
     // MARK: The agent owns message identity
 
-    @Test(.timeLimit(.minutes(standardTestTimeout)))
+    @Test
     func acceptingAPromptEmitsUserMessageChunksSharingTheMessageIdThatTheResponseReturns() async throws {
         let (agentConn, client, session) = try await makeSessionPair(script: .completesImmediately)
         var updates = client.subscribe(to: session).updates.makeAsyncIterator()
@@ -434,7 +420,7 @@ private let standardTestTimeout = 1  // minute
 
     // MARK: requires_action, then resumed to running once answered
 
-    @Test(.timeLimit(.minutes(standardTestTimeout)))
+    @Test
     func aBlockedTurnReportsRequiresActionThenResumesToRunningOnceAnswered() async throws {
         let selected = RequestPermissionOutcome.selected(
             SelectedPermissionOutcome(optionId: PermissionOptionId(rawValue: "allow"))
@@ -465,7 +451,7 @@ private let standardTestTimeout = 1  // minute
 
     // MARK: session/cancel -> idle + cancelled
 
-    @Test(.timeLimit(.minutes(standardTestTimeout)))
+    @Test
     func sessionCancelMidTurnYieldsIdleAndCancelled() async throws {
         let (agentConn, client, session) = try await makeSessionPair(script: .runsUntilCancelled)
         var updates = client.subscribe(to: session).updates.makeAsyncIterator()

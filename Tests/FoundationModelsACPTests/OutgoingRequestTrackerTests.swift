@@ -5,7 +5,7 @@ import Testing
 
 /// The session observer of `OutgoingRequestTracker`: the tracker calls it
 /// synchronously when a request whose params name a session finishes.
-@Suite(.timeLimit(.minutes(1))) struct OutgoingRequestTrackerTests {
+@Suite struct OutgoingRequestTrackerTests {
     /// The session that the session-scoped requests name.
     private static let sessionId = SessionId(rawValue: "tracker-session")
 

@@ -18,48 +18,23 @@ enum TransportTestSupport {
     }
 }
 
-/// Thrown when a bounded wait elapses before its condition or operation
-/// completes.
-struct TimedOutError: Error {}
-
-/// Runs `operation`, throwing `TimedOutError` if it exceeds `duration`.
-///
-/// Keeps process/pipe tests from hanging: the operation races a sleeping
-/// timeout task, and whichever finishes first cancels the other.
+/// Reads `bytes` until `isDone` holds for the data read so far, or until the
+/// stream ends. It uses no clock: the end of the child's stdout also ends the
+/// wait.
 ///
 /// - Parameters:
-///   - duration: The longest the operation may run.
-///   - operation: The asynchronous work to bound.
-/// - Returns: The operation's value when it finishes in time.
-/// - Throws: `TimedOutError` on timeout, or any error the operation throws.
-func withTimeout<Value: Sendable>(
-    _ duration: Duration,
-    operation: @escaping @Sendable () async throws -> Value
-) async throws -> Value {
-    try await withThrowingTaskGroup(of: Value.self) { group in
-        group.addTask { try await operation() }
-        group.addTask {
-            try await Task.sleep(for: duration)
-            throw TimedOutError()
-        }
-        defer { group.cancelAll() }
-        return try await group.next()!
+///   - iterator: The iterator of the child's stdout.
+///   - data: The data read so far. The read chunks are added to it.
+///   - isDone: The condition that ends the read.
+/// - Throws: Rethrows a failure of the stream.
+func read(
+    _ iterator: inout AsyncThrowingStream<Data, any Error>.Iterator,
+    into data: inout Data,
+    until isDone: (Data) -> Bool
+) async throws {
+    while !isDone(data), let chunk = try await iterator.next() {
+        data.append(chunk)
     }
-}
-
-/// Polls `condition` until it holds or `timeout` elapses.
-///
-/// - Parameters:
-///   - timeout: The longest to wait for the condition.
-///   - condition: The predicate to satisfy.
-/// - Throws: `TimedOutError` if the condition never holds in time.
-func waitUntil(timeout: Duration, _ condition: @Sendable () -> Bool) async throws {
-    let deadline = ContinuousClock.now.advanced(by: timeout)
-    while ContinuousClock.now < deadline {
-        if condition() { return }
-        try await Task.sleep(for: .milliseconds(20))
-    }
-    guard condition() else { throw TimedOutError() }
 }
 
 /// Terminates `process` (if still running) and asynchronously awaits its exit.

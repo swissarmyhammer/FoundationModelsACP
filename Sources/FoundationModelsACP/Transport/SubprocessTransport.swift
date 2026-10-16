@@ -26,7 +26,7 @@ import Synchronization
 ///
 /// Marked `@unchecked Sendable` because it stores a `Process` and its pipes,
 /// which are not `Sendable`: every mutation is serialized — writes through the
-/// `input` lock, the recorded exit through the `exitStatus` lock, and the
+/// `input` lock, the recorded exit through the `exitState` lock, and the
 /// one-shot reap through the `reaped` lock — and `bytes` is an immutable
 /// `Sendable` stream.
 public final class SubprocessTransport: ACPTransport, @unchecked Sendable {
@@ -43,10 +43,17 @@ public final class SubprocessTransport: ACPTransport, @unchecked Sendable {
     /// descriptor.
     private let input: Mutex<Int32>
 
-    /// The child's exit status once `terminationHandler` observes it — `nil`
-    /// while still running. `isRunning` and `terminationStatus` read this
+    /// The exit of the child, as `terminationHandler` observes it.
+    private struct ExitState {
+        /// The child's exit status — `nil` while still running.
+        var status: Int32?
+        /// The callers of `waitForExit()` that wait for the exit.
+        var waiters: [CheckedContinuation<Int32, Never>] = []
+    }
+
+    /// The exit of the child. `isRunning` and `terminationStatus` read this
     /// instead of querying `process` so they never depend on a blocking wait.
-    private let exitStatus = Mutex<Int32?>(nil)
+    private let exitState = Mutex(ExitState())
 
     /// Guards one-shot reaping so `close()`, `deinit`, and stream teardown race
     /// safely; `true` once the child has been signaled to exit.
@@ -94,7 +101,7 @@ public final class SubprocessTransport: ACPTransport, @unchecked Sendable {
         // and closes stdin once it happens so a write racing the exit fails
         // cleanly rather than into a half-torn-down pipe.
         process.terminationHandler = { [weak self] finished in
-            self?.exitStatus.withLock { $0 = finished.terminationStatus }
+            self?.recordExit(status: finished.terminationStatus)
             try? inputPipe.fileHandleForWriting.close()
         }
 
@@ -111,12 +118,39 @@ public final class SubprocessTransport: ACPTransport, @unchecked Sendable {
 
     /// Whether the child process is still running.
     public var isRunning: Bool {
-        exitStatus.withLock { $0 == nil }
+        exitState.withLock { $0.status == nil }
     }
 
     /// The child's exit status once it has terminated, or `nil` while running.
     public var terminationStatus: Int32? {
-        exitStatus.withLock { $0 }
+        exitState.withLock { $0.status }
+    }
+
+    /// Suspends until the child exits, with no clock and no blocking wait.
+    ///
+    /// - Returns: The child's exit status.
+    func waitForExit() async -> Int32 {
+        await withCheckedContinuation { continuation in
+            let status = exitState.withLock { state -> Int32? in
+                if state.status == nil { state.waiters.append(continuation) }
+                return state.status
+            }
+            if let status { continuation.resume(returning: status) }
+        }
+    }
+
+    /// Records the exit of the child, and resumes each `waitForExit()` caller.
+    ///
+    /// - Parameter status: The child's exit status.
+    private func recordExit(status: Int32) {
+        let waiters = exitState.withLock { state in
+            state.status = status
+            defer { state.waiters = [] }
+            return state.waiters
+        }
+        for waiter in waiters {
+            waiter.resume(returning: status)
+        }
     }
 
     /// Writes one whole frame to the child's stdin as an indivisible unit.

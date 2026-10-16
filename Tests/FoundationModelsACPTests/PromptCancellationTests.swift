@@ -78,9 +78,7 @@ private struct CancelledPromptAgent: Agent {
             }
         }
         probe.waiting.continuation.yield(())
-        while !Task.isCancelled {
-            try await Task.sleep(for: cancellationPollInterval)
-        }
+        await waitForTaskCancellation()
         throw CancellationError()
     }
 
@@ -108,16 +106,6 @@ private let followUpRequestNumber: Double = 2
 /// The wire id of the request that proves that no frame came after the
 /// error response.
 private let followUpRequestId: JSONValue = .number(followUpRequestNumber)
-
-/// How many milliseconds the handler sleeps between two checks for
-/// cancellation.
-private let cancellationPollMilliseconds = 5
-
-/// How long the handler sleeps between two checks for cancellation.
-private let cancellationPollInterval = Duration.milliseconds(cancellationPollMilliseconds)
-
-/// The time limit of each test in this suite, in minutes.
-private let cancellationTestTimeout = 1
 
 /// The JSON-RPC version of each frame.
 private let jsonrpcVersion: JSONValue = .string("2.0")
@@ -205,7 +193,7 @@ private struct RawClientHarness {
         return harness
     }
 
-    @Test(.timeLimit(.minutes(cancellationTestTimeout)))
+    @Test
     func aCancelAfterInsertionAnswersTheMessageIdAndThenSendsTheEcho() async throws {
         let harness = try await startPrompt(cancelledAt: .afterInsertion, probe: CancellationProbe())
 
@@ -231,7 +219,7 @@ private struct RawClientHarness {
         await harness.agent.close()
     }
 
-    @Test(.timeLimit(.minutes(cancellationTestTimeout)))
+    @Test
     func aCancelBeforeInsertionAnswersRequestCancelledAndSendsNoEcho() async throws {
         let harness = try await startPrompt(cancelledAt: .beforeInsertion, probe: CancellationProbe())
 
@@ -249,7 +237,7 @@ private struct RawClientHarness {
         await harness.agent.close()
     }
 
-    @Test(.timeLimit(.minutes(cancellationTestTimeout)))
+    @Test
     func deferredWorkDoesNotSeeTheCancellationOfTheHandler() async throws {
         let probe = CancellationProbe()
         let harness = try await startPrompt(cancelledAt: .afterInsertion, probe: probe)

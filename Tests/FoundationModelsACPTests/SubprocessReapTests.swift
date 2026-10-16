@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-import FoundationModelsACP
+@testable import FoundationModelsACP
 
 /// A long-lived child that stays alive until reaped: `cat` blocks reading its
 /// piped stdin.
@@ -15,8 +15,8 @@ private let longLivedChild = URL(fileURLWithPath: "/bin/cat")
 
     // close() signals termination; the exit itself lands asynchronously via
     // terminationHandler rather than a blocking wait (see SubprocessTransport's
-    // class doc), so isRunning/terminationStatus catch up shortly after.
-    try await waitUntil(timeout: .seconds(10)) { !transport.isRunning }
+    // class doc), so wait for that exit.
+    _ = await transport.waitForExit()
     #expect(!transport.isRunning)
     #expect(transport.terminationStatus != nil)
 }
@@ -30,6 +30,6 @@ private let longLivedChild = URL(fileURLWithPath: "/bin/cat")
 
     // Closing the connection cancels its read loop, tearing down the byte
     // stream, which reaps the child — no zombie survives the connection.
-    try await waitUntil(timeout: .seconds(10)) { !transport.isRunning }
+    _ = await transport.waitForExit()
     #expect(!transport.isRunning)
 }

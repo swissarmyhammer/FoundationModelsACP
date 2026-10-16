@@ -53,40 +53,11 @@ enum TestSupport {
     }
 }
 
-/// Thrown when a bounded wait elapses before its condition or operation
-/// completes.
-struct TimedOutError: Error {}
+/// Thrown when a schema document does not have the expected shape.
+struct UnexpectedSchemaShapeError: Error {}
 
-/// Carries a non-`Sendable` value across a `@Sendable` closure boundary.
-///
-/// Safe only when the caller guarantees the boxed value is not touched
-/// concurrently — here, a `JSONSerialization` object graph that is produced
-/// on one task and read only after `withTimeout` hands it back.
-private struct UncheckedBox<Value>: @unchecked Sendable {
-    let value: Value
-}
-
-/// Runs `operation`, throwing `TimedOutError` if it exceeds `duration`.
-///
-/// - Parameters:
-///   - duration: The longest the operation may run.
-///   - operation: The asynchronous work to bound.
-/// - Returns: The operation's value when it finishes in time.
-/// - Throws: `TimedOutError` on timeout, or any error the operation throws.
-func withTimeout<Value: Sendable>(
-    _ duration: Duration,
-    operation: @escaping @Sendable () async throws -> Value
-) async throws -> Value {
-    try await withThrowingTaskGroup(of: Value.self) { group in
-        group.addTask { try await operation() }
-        group.addTask {
-            try await Task.sleep(for: duration)
-            throw TimedOutError()
-        }
-        defer { group.cancelAll() }
-        return try await group.next()!
-    }
-}
+/// Thrown when the stdout of the agent ends before a matching line comes.
+struct AgentOutputEndedError: Error {}
 
 /// A real `acp-test-agent` child process, driven over raw stdio pipes with no
 /// dependency on this library's own transport types — proving the schema
@@ -94,30 +65,19 @@ func withTimeout<Value: Sendable>(
 ///
 /// `@unchecked Sendable`: `process`/`stdin`/`stdout` are `let`-bound and never
 /// mutated after `init`, and the only mutable state (`stdoutBuffer`) is a
-/// `Mutex`.
+/// `Mutex`. The reads use no clock: each read ends with a matching line, or
+/// with the end of the stdout of the agent.
 final class LiveAgentProcess: @unchecked Sendable {
-    /// The longest time, in seconds, to wait for one matching line from the
-    /// agent.
-    private static let lineTimeoutSeconds = 10
-
-    /// The time, in milliseconds, to wait before the next look at the stdout
-    /// buffer, when the buffer has no full line.
-    private static let pollIntervalMilliseconds = 20
-
-    /// The longest time to wait for one matching line from the agent.
-    private static let lineTimeout: Duration = .seconds(lineTimeoutSeconds)
-
-    /// The time to wait before the next look at the stdout buffer, when the
-    /// buffer has no full line.
-    private static let pollInterval: Duration = .milliseconds(pollIntervalMilliseconds)
-
     /// The byte that ends each JSON-RPC line on the wire (`\n`).
     private static let lineTerminator: UInt8 = 0x0A
 
     private let process: Process
     private let stdin: Pipe
     private let stdout: Pipe
+    /// The bytes read from stdout that no read used yet.
     private let stdoutBuffer = Mutex<Data>(Data())
+    /// The stdout chunks of the agent. It ends at the end of stdout.
+    private let stdoutChunks: AsyncStream<Data>
 
     /// Launches `acp-test-agent`.
     ///
@@ -133,14 +93,21 @@ final class LiveAgentProcess: @unchecked Sendable {
 
         // `readabilityHandler` fires on a Dispatch-managed background queue,
         // not a Swift Concurrency cooperative-pool thread — the async reader
-        // below only ever polls the already-collected buffer, so nothing
-        // here risks the pool-exhaustion deadlock a blocking `.availableData`
-        // read from an `async` body would (see `../Tests/FoundationModelsACPTests/TransportProcessSupport.swift`'s `terminateAndAwaitExit`, which
+        // below only awaits the chunks it yields, so nothing here risks the
+        // pool-exhaustion deadlock a blocking `.availableData` read from an
+        // `async` body would (see `../Tests/FoundationModelsACPTests/TransportProcessSupport.swift`'s `terminateAndAwaitExit`, which
         // documents the same hazard for reaping child processes).
-        stdout.fileHandleForReading.readabilityHandler = { [self] handle in
+        let (chunks, continuation) = AsyncStream<Data>.makeStream()
+        stdoutChunks = chunks
+        stdout.fileHandleForReading.readabilityHandler = { handle in
             let chunk = handle.availableData
-            guard !chunk.isEmpty else { return }
-            stdoutBuffer.withLock { $0.append(chunk) }
+            guard !chunk.isEmpty else {
+                // The end of stdout: the agent exited.
+                handle.readabilityHandler = nil
+                continuation.finish()
+                return
+            }
+            continuation.yield(chunk)
         }
 
         try process.run()
@@ -156,7 +123,8 @@ final class LiveAgentProcess: @unchecked Sendable {
     /// - Returns: The request envelope sent and the response envelope
     ///   received (an object with `id` and either `result` or `error`) — both
     ///   real wire bytes, for the caller to validate against the schema.
-    /// - Throws: `TimedOutError` if no matching response arrives in time.
+    /// - Throws: `AgentOutputEndedError` if stdout ends before a matching
+    ///   response arrives.
     func request(
         id: Int,
         method: String,
@@ -164,17 +132,10 @@ final class LiveAgentProcess: @unchecked Sendable {
     ) async throws -> (sent: [String: Any], received: [String: Any]) {
         let envelope: [String: Any] = ["jsonrpc": "2.0", "id": id, "method": method, "params": params]
         try send(envelope)
-        // `[String: Any]` (a `JSONSerialization` object graph) is not
-        // `Sendable`; `withTimeout`'s generic bound requires one, so the
-        // racing closure returns a boxed, `@unchecked Sendable` wrapper
-        // instead — safe here because nothing else touches the value until
-        // it is unboxed on this task after the race resolves.
-        let receivedBox = try await withTimeout(Self.lineTimeout) {
-            UncheckedBox(value: try await self.nextLine { object in
-                (object["id"] as? Int) == id && (object["result"] != nil || object["error"] != nil)
-            })
+        let received = try await nextLine { object in
+            (object["id"] as? Int) == id && (object["result"] != nil || object["error"] != nil)
         }
-        return (envelope, receivedBox.value)
+        return (envelope, received)
     }
 
     /// Waits for the next JSON-RPC notification with the given method from
@@ -183,14 +144,12 @@ final class LiveAgentProcess: @unchecked Sendable {
     /// - Parameter method: The JSON-RPC method name to wait for.
     /// - Returns: The notification envelope received, as real wire bytes for
     ///   the caller to inspect or validate against the schema.
-    /// - Throws: `TimedOutError` if no matching notification arrives in time.
+    /// - Throws: `AgentOutputEndedError` if stdout ends before a matching
+    ///   notification arrives.
     func notification(method: String) async throws -> [String: Any] {
-        let receivedBox = try await withTimeout(Self.lineTimeout) {
-            UncheckedBox(value: try await self.nextLine { object in
-                (object["method"] as? String) == method && object["id"] == nil
-            })
+        try await nextLine { object in
+            (object["method"] as? String) == method && object["id"] == nil
         }
-        return receivedBox.value
     }
 
     /// Sends one JSON-RPC notification (no `id`, no response expected).
@@ -217,7 +176,12 @@ final class LiveAgentProcess: @unchecked Sendable {
     /// Reads stdout until a line satisfying `predicate` decodes, buffering
     /// (and discarding) any lines that do not match — the caller is
     /// responsible for interleaving reads with the traffic it expects.
+    ///
+    /// - Parameter predicate: The condition that the line must satisfy.
+    /// - Returns: The first matching line.
+    /// - Throws: `AgentOutputEndedError` if stdout ends first.
     private func nextLine(where predicate: ([String: Any]) -> Bool) async throws -> [String: Any] {
+        var chunks = stdoutChunks.makeAsyncIterator()
         while true {
             let lineData: Data? = stdoutBuffer.withLock { buffer in
                 guard let newlineIndex = buffer.firstIndex(of: Self.lineTerminator) else { return nil }
@@ -226,7 +190,8 @@ final class LiveAgentProcess: @unchecked Sendable {
                 return line
             }
             guard let lineData else {
-                try await Task.sleep(for: Self.pollInterval)
+                guard let chunk = await chunks.next() else { throw AgentOutputEndedError() }
+                stdoutBuffer.withLock { $0.append(chunk) }
                 continue
             }
             guard !lineData.isEmpty,
@@ -239,7 +204,6 @@ final class LiveAgentProcess: @unchecked Sendable {
 
     /// Terminates the child process and awaits its exit.
     func shutdown() async {
-        stdout.fileHandleForReading.readabilityHandler = nil
         await withCheckedContinuation { continuation in
             process.terminationHandler = { _ in continuation.resume() }
             if process.isRunning {

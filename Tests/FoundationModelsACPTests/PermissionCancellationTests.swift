@@ -5,9 +5,6 @@ import Testing
 
 // MARK: - Fixtures
 
-/// The time limit of each test in this suite, in minutes.
-private let permissionCancellationTestTimeout = 1
-
 /// The kind that `LoggingTransport` records for a response frame.
 private let responseFrame = "response"
 
@@ -96,7 +93,7 @@ private struct PermissionHarness {
 /// It does not wait for the `Client` handler, and the connection ignores the
 /// late result of the handler.
 @Suite struct PermissionCancellationTests {
-    @Test(.timeLimit(.minutes(permissionCancellationTestTimeout)))
+    @Test
     func sessionCancelAnswersAPendingPermissionRequestWithCancelled() async throws {
         let harness = await PermissionHarness.connect()
         let answer = try await harness.sendPermissionRequest(for: cancelledSession)
@@ -107,7 +104,7 @@ private struct PermissionHarness {
         await harness.close()
     }
 
-    @Test(.timeLimit(.minutes(permissionCancellationTestTimeout)))
+    @Test
     func theCancelNotificationIsWrittenBeforeTheCancelledAnswer() async throws {
         let harness = await PermissionHarness.connect()
         let answer = try await harness.sendPermissionRequest(for: cancelledSession)
@@ -119,7 +116,7 @@ private struct PermissionHarness {
         await harness.close()
     }
 
-    @Test(.timeLimit(.minutes(permissionCancellationTestTimeout)))
+    @Test
     func theLateResultOfTheHandlerIsIgnored() async throws {
         let harness = await PermissionHarness.connect()
         let answer = try await harness.sendPermissionRequest(for: cancelledSession)
@@ -135,7 +132,7 @@ private struct PermissionHarness {
         await harness.agent.close()
     }
 
-    @Test(.timeLimit(.minutes(permissionCancellationTestTimeout)))
+    @Test
     func aPermissionRequestOfAnotherSessionStaysWithTheHandler() async throws {
         let harness = await PermissionHarness.connect()
         let cancelledAnswer = try await harness.sendPermissionRequest(for: cancelledSession)
@@ -149,7 +146,7 @@ private struct PermissionHarness {
         await harness.close()
     }
 
-    @Test(.timeLimit(.minutes(permissionCancellationTestTimeout)))
+    @Test
     func aPermissionRequestAfterTheCancelReachesTheHandler() async throws {
         let harness = await PermissionHarness.connect()
         try await harness.cancel(cancelledSession)

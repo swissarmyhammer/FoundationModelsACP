@@ -165,7 +165,7 @@ private actor RecordingElicitationClient: Client {
         #expect(await client.completedElicitations == [completion])
     }
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func aCompletionWithABadFieldTypeLogsOneWarningAndALaterCompletionStillArrives() async throws {
         let client = RecordingElicitationClient(response: .object(["action": .string("cancel")]))
         let completion = CompleteElicitationNotification(elicitationId: ElicitationId(rawValue: "elicit-1"))

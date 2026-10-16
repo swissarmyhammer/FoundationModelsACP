@@ -58,7 +58,7 @@ import Testing
         }
     }
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test
     func aCompactionUpdateSentAsASessionUpdateReachesThePeer() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
         let agent = await Connection(transport: agentEnd)

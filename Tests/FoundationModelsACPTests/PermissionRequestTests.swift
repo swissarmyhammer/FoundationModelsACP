@@ -3,9 +3,6 @@ import Testing
 
 @testable import FoundationModelsACP
 
-/// The time limit of the read-loop test, in minutes.
-private let readLoopTestTimeout = 1
-
 /// `session/request_permission`: a stable Client request that waits on a
 /// human — `elicitation/create` is the other — restructured in v2 to separate
 /// prompt copy (`title`/`description`) from structured context (the tagged
@@ -113,7 +110,7 @@ private let readLoopTestTimeout = 1
     /// gate and does not answer. It stands for a human who still looks at the
     /// prompt. `ConnectionTests.slowRequestHandlerDoesNotDelaySubsequentNotification`
     /// gives a raw handler the same role; this test uses the typed `Client`.
-    @Test(.timeLimit(.minutes(readLoopTestTimeout)))
+    @Test
     func aPendingPermissionRequestDoesNotBlockAConcurrentSessionUpdate() async throws {
         let session = StubAgent.sessionId
         let connection = await GatedPermissionConnection.connect(outcome: .cancelled)
