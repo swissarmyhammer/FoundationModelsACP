@@ -26,6 +26,13 @@ comments:
     - evidence: one full run. `swift test`: 505 tests in 54 suites passed, and 135 tests in 17 suites passed. IntegrationTests: 7 tests passed. DocC with `--warnings-as-errors`: exit 0. New test `closeWithAnOpenHandlerIsNotACancelOfThePeer`. The other tests now also check the flag: true for a peer cancel with no `_meta` (with a nil meta), false for a handler with no cancel, and false outside a handler.
     - next: commit, push, watch CI.
   timestamp: 2026-10-16T13:22:25.576615+00:00
+- actor: claude-code
+  id: 01m52e1r7hdk4g77qreza5wyjb
+  text: |-
+    ### commit — changed
+    - evidence: 2c1abde feat(connection): tell a cancel of the peer from a close with cancelledByPeer
+    - next: push, watch CI.
+  timestamp: 2026-10-16T13:22:30.769901+00:00
 position_column: done
 position_ordinal: b580
 title: Carry an optional _meta on $/cancel_request (elicitation plan task 50)
