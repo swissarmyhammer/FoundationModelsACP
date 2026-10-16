@@ -10,8 +10,15 @@ comments:
     - scope added by the peer (ACPClient bug ^s39vtvg): `currentRequestArrival: UInt64?` on `Connection`, `ClientSideConnection` and `AgentSideConnection`. The value is the inbound token, given in read order.
     - next: commit and push in one batch, then watch CI.
   timestamp: 2026-10-16T12:56:57.007412+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01m52ck9318pa9816dcw5mgf0b
+  text: |-
+    ### commit — changed
+    - evidence: 7d78473 feat(connection): carry _meta on $/cancel_request and give the inbound arrival number
+    - next: push in one batch with this kanban record, then watch CI.
+  timestamp: 2026-10-16T12:57:07.937766+00:00
+position_column: done
+position_ordinal: b580
 title: Carry an optional _meta on $/cancel_request (elicitation plan task 50)
 ---
 ## Problem
