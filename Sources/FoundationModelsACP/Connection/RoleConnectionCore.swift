@@ -134,6 +134,29 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
         )
     }
 
+    /// Issues an outbound peer request and decodes its typed response. When
+    /// the task of the caller is cancelled, the `$/cancel_request` carries
+    /// the `_meta` of `cancellation`.
+    ///
+    /// - Parameters:
+    ///   - handler: The Swift handler name of the peer method to call.
+    ///   - params: The typed request parameters.
+    ///   - responseType: The expected response model type.
+    ///   - cancellation: Gives the `_meta` of the `$/cancel_request`.
+    /// - Returns: The decoded response.
+    /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
+    ///   disconnect.
+    func call<Request: Encodable, Response: Decodable>(
+        _ handler: String,
+        _ params: Request,
+        returning responseType: Response.Type,
+        cancellation: OutboundCancellation
+    ) async throws -> Response {
+        try await RoleDispatch.callResult(
+            connection, handler: handler, on: peerSide, params, returning: responseType, cancellation: cancellation
+        )
+    }
+
     /// Sends an outbound peer notification.
     ///
     /// - Parameters:

@@ -194,6 +194,44 @@ public final class AgentSideConnection: Sendable {
         try await core.call("createElicitation", params, returning: CreateElicitationResponse.self)
     }
 
+    /// Requests structured user input from the client, and sends the `_meta`
+    /// of `cancellation` in the `$/cancel_request` when the task of the
+    /// caller is cancelled.
+    ///
+    /// Use it to tell the client why the agent ended the question, for
+    /// example with the reason under
+    /// ``CancelRequestNotification/reasonMetaKey``:
+    ///
+    /// ```swift
+    /// let cancellation = OutboundCancellation()
+    /// let call = Task { try await connection.createElicitation(request, cancellation: cancellation) }
+    /// cancellation.setMeta(.object([CancelRequestNotification.reasonMetaKey: .string("run cancelled")]))
+    /// call.cancel()
+    /// ```
+    ///
+    /// Contract: call ``OutboundCancellation/setMeta(_:)`` before
+    /// `Task.cancel()`. The connection reads the box one time, when it
+    /// writes the `$/cancel_request`. When the response, a timeout or a close
+    /// comes first, the connection sends no `$/cancel_request`, and the meta
+    /// is not used. The client reads the meta with
+    /// ``ClientSideConnection/cancelRequestMeta``.
+    ///
+    /// - Parameters:
+    ///   - params: The elicitation request.
+    ///   - cancellation: Gives the `_meta` of the `$/cancel_request`.
+    /// - Returns: The user's response — accept with content, decline, or
+    ///   cancel — as raw JSON (`CreateElicitationResponse`).
+    /// - Throws: `RequestError` on a peer error, `ConnectionError` on
+    ///   disconnect, or `CancellationError` when the task of the caller is
+    ///   cancelled.
+    public func createElicitation(
+        _ params: CreateElicitationRequest,
+        cancellation: OutboundCancellation
+    ) async throws -> CreateElicitationResponse {
+        try await core.call(
+            "createElicitation", params, returning: CreateElicitationResponse.self, cancellation: cancellation)
+    }
+
     /// Notifies the client that a URL-based elicitation finished.
     ///
     /// - Parameter notification: The completion notification.

@@ -333,6 +333,34 @@ enum RoleDispatch {
         return try result.decoded(as: Response.self)
     }
 
+    /// Issues an outbound request and decodes its typed response. When the
+    /// task of the caller is cancelled, the `$/cancel_request` carries the
+    /// `_meta` of `cancellation`.
+    ///
+    /// - Parameters:
+    ///   - connection: The underlying full-duplex connection.
+    ///   - handler: The Swift handler name to resolve to a wire method.
+    ///   - side: The serving side of the target method.
+    ///   - params: The typed request parameters.
+    ///   - responseType: The expected response model type.
+    ///   - cancellation: Gives the `_meta` of the `$/cancel_request`.
+    /// - Returns: The decoded response.
+    /// - Throws: `RequestError` on a peer error, `ConnectionError` on
+    ///   disconnect, or a decode failure on a malformed response.
+    static func callResult<Request: Encodable, Response: Decodable>(
+        _ connection: Connection,
+        handler: String,
+        on side: MethodSide,
+        _ params: Request,
+        returning responseType: Response.Type,
+        cancellation: OutboundCancellation
+    ) async throws -> Response {
+        let wire = try wireCall(handler: handler, on: side, params)
+        let result = try await connection.request(
+            method: wire.method, params: wire.params, cancellation: cancellation)
+        return try result.decoded(as: Response.self)
+    }
+
     /// Sends an outbound notification; no response is expected.
     ///
     /// - Parameters:

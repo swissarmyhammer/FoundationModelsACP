@@ -404,6 +404,11 @@ public actor Connection {
     /// (`cancelOutbound`) so both agree on the same field name.
     private static let requestIdKey = "requestId"
 
+    /// The `$/cancel_request` notification's `_meta` field key, shared by the
+    /// read side (`handleCancelRequest`) and the write side
+    /// (`cancelOutbound`).
+    private static let metaKey = "_meta"
+
     /// A closure that gets the `result` of one successful response. It runs
     /// on this actor, in the read loop, before the caller resumes and before
     /// the read loop dispatches the next frame.
@@ -419,6 +424,18 @@ public actor Connection {
         /// Gets the `result` of a successful response before `continuation`
         /// resumes. `nil` for no hook.
         let onResult: ResultHook?
+        /// Gives the `_meta` of the `$/cancel_request` when the task of the
+        /// caller is cancelled. `nil` for no `_meta`.
+        let cancellation: OutboundCancellation?
+    }
+
+    /// One inbound request handler that runs.
+    private struct InboundEntry {
+        /// The task that runs the handler.
+        let task: Task<Void, Never>
+        /// Gets the `_meta` of a `$/cancel_request` before `task` is
+        /// cancelled.
+        let cancellation: InboundCancellation
     }
 
     /// One in-flight batch call's response collector: how many owed responses
@@ -456,7 +473,7 @@ public actor Connection {
     /// In-flight inbound request handlers, keyed by the request's own wire
     /// id — the same id a `$/cancel_request` names — and cancelled on
     /// disconnect.
-    private var inboundTasks: [RequestId: Task<Void, Never>] = [:]
+    private var inboundTasks: [RequestId: InboundEntry] = [:]
     /// Each inbound request task that did not end, keyed by a monotonic
     /// token local to this connection. A task stays here until its last
     /// step, also after `inboundTasks` dropped it to write its response and
@@ -606,6 +623,33 @@ public actor Connection {
         try await request(method: method, params: params, timeout: timeout, onResult: nil)
     }
 
+    /// Sends one request and suspends until the peer responds. When the task
+    /// of the caller is cancelled, the `$/cancel_request` carries the `_meta`
+    /// of `cancellation`.
+    ///
+    /// Contract: call ``OutboundCancellation/setMeta(_:)`` before
+    /// `Task.cancel()`. The connection reads the box one time, when it writes
+    /// the `$/cancel_request`. When the response, a timeout or a close comes
+    /// first, the connection sends no `$/cancel_request`, and the meta is not
+    /// used.
+    ///
+    /// - Parameters:
+    ///   - method: The JSON-RPC method name.
+    ///   - params: The request parameters, passed through verbatim.
+    ///   - timeout: Overrides the connection's default request timeout when
+    ///     non-`nil`.
+    ///   - cancellation: Gives the `_meta` of the `$/cancel_request`.
+    /// - Returns: The response's `result` value.
+    /// - Throws: The same errors as `request(method:params:timeout:)`.
+    public func request(
+        method: String,
+        params: JSONValue? = nil,
+        timeout: Duration? = nil,
+        cancellation: OutboundCancellation
+    ) async throws -> JSONValue {
+        try await request(method: method, params: params, timeout: timeout, onResult: nil, cancellation: cancellation)
+    }
+
     /// Sends one request and suspends until the peer responds. `onResult`
     /// gets the `result` of a successful response in the read loop, before
     /// this call returns and before the read loop dispatches the next frame.
@@ -618,13 +662,16 @@ public actor Connection {
     ///   - onResult: Runs one time with the `result` of a successful
     ///     response. It does not run on an error response, a timeout, a
     ///     cancel or a close. `nil` for no hook.
+    ///   - cancellation: Gives the `_meta` of the `$/cancel_request` when the
+    ///     task of the caller is cancelled. `nil` for no `_meta`.
     /// - Returns: The response's `result` value.
     /// - Throws: The same errors as `request(method:params:timeout:)`.
     func request(
         method: String,
         params: JSONValue?,
         timeout: Duration?,
-        onResult: ResultHook?
+        onResult: ResultHook?,
+        cancellation: OutboundCancellation? = nil
     ) async throws -> JSONValue {
         guard !isClosed else { throw ConnectionError.closed }
         let id: RequestId = .number(Double(nextRequestID))
@@ -647,7 +694,8 @@ public actor Connection {
                     return
                 }
                 let timeoutTask = makeTimeoutTask(for: id, after: limit)
-                pending[id] = PendingRequest(continuation: continuation, timeout: timeoutTask, onResult: onResult)
+                pending[id] = PendingRequest(
+                    continuation: continuation, timeout: timeoutTask, onResult: onResult, cancellation: cancellation)
                 outgoingRequests.start(id: id, method: method, params: params)
                 // Write only after registering, so a response arriving
                 // immediately always finds its continuation, and a peer
@@ -934,13 +982,19 @@ public actor Connection {
     /// already-completed id — cancellation racing completion is expected,
     /// not an error.
     ///
+    /// The `_meta` of the notification goes into the cancel box of the
+    /// handler before the task is cancelled, so the handler reads it with
+    /// `cancelRequestMeta` when it sees the cancel.
+    ///
     /// - Parameter params: The notification's raw parameters.
     private func handleCancelRequest(params: JSONValue?) {
         guard case .object(let fields) = params ?? .null, let requestId = fields[Self.requestIdKey] else {
             log("dropping $/cancel_request with no requestId")
             return
         }
-        inboundTasks[requestId]?.cancel()
+        guard let entry = inboundTasks[requestId] else { return }
+        entry.cancellation.store(fields[Self.metaKey])
+        entry.task.cancel()
     }
 
     /// Runs one inbound request in its own `Task` so it never blocks the read
@@ -982,6 +1036,7 @@ public actor Connection {
         let handler = requestHandler
         let token = nextInboundToken
         nextInboundToken += 1
+        let cancellation = InboundCancellation()
         let task = Task {
             // Bound around the handler call so `afterRespondingToCurrentRequest`
             // finds the right collector no matter how deep the handler's own
@@ -995,7 +1050,11 @@ public actor Connection {
             // cancellation (`ResponseHooks.settle(_:)`).
             let outcome = hooks.settle(
                 await Self.$currentResponseHooks.withValue(hooks) {
-                    await Self.outcome(of: handler, method: method, params: params)
+                    await Self.$currentInboundCancellation.withValue(cancellation) {
+                        await Self.$currentRequestArrivalNumber.withValue(UInt64(token)) {
+                            await Self.outcome(of: handler, method: method, params: params)
+                        }
+                    }
                 })
             // Only run deferred hooks when a response was actually written:
             // `completeInbound` skips writing if the connection closed while
@@ -1020,7 +1079,7 @@ public actor Connection {
             }
             self.retireInboundTask(token: token)
         }
-        inboundTasks[id] = task
+        inboundTasks[id] = InboundEntry(task: task, cancellation: cancellation)
         liveInboundTasks[token] = task
     }
 
@@ -1268,12 +1327,19 @@ public actor Connection {
     /// nobody is waiting for. The local rejection never waits on this
     /// notification landing.
     ///
+    /// The notification carries the `_meta` of the request's
+    /// `OutboundCancellation`, read here one time. With no box, or a box
+    /// with a `nil` meta, it has no `_meta` member.
+    ///
     /// - Parameter id: The cancelled request's wire id.
     private func cancelOutbound(id: RequestId) async {
+        let meta = pending[id]?.cancellation?.meta
         guard fail(id: id, with: CancellationError()) else { return }
         guard !isClosed else { return }
+        var params: [String: JSONValue] = [Self.requestIdKey: id]
+        params[Self.metaKey] = meta
         let notification = Self.outboundEnvelope(
-            id: nil, method: Self.cancelRequestMethod, params: .object([Self.requestIdKey: id]))
+            id: nil, method: Self.cancelRequestMethod, params: .object(params))
         await writeEncoded(notification, logMessage: "failed to send $/cancel_request")
     }
 
@@ -1309,8 +1375,8 @@ public actor Connection {
         }
         let cancelled = inboundTasks
         inboundTasks = [:]
-        for task in cancelled.values {
-            task.cancel()
+        for entry in cancelled.values {
+            entry.task.cancel()
         }
         // Incomplete batches can never flush now that inbound handlers are
         // cancelled and the transport is going away; drop them rather than
