@@ -1,8 +1,18 @@
 ---
 assignees:
 - claude-code
-position_column: todo
-position_ordinal: '8180'
+comments:
+- actor: claude-code
+  id: 01m5386gc4ekrwqz7cjpvs1s78
+  text: |-
+    ### implement and test, green
+    - Decision: a behavior fix, because it is simple and safe. The box now has an "ended" flag. dispatchRequest calls endHandler() right after the handler returns, before the response is written. An ended box gives nil for cancelRequestMeta and false for cancelledByPeer. A task that the handler starts still inherits the box, but it reads no cancel after the handler returned. Structured child tasks end before the handler returns, so they see no change.
+    - Docs: CancelRequestMeta.swift now tells that a started task inherits the value while the handler runs, and gets nil or false after the handler returns. The doc of currentRequestArrival had the same false sentence. Its value cannot change, so only its doc changed: a started task inherits the number, also after the handler returns.
+    - Test: InboundCancellationScopeTests. Before the fix, the started task read the meta and true after the response was on the wire. After the fix, it reads nil and false.
+    - Filtered run: 28 tests in 6 suites passed (cancel meta, permission and the new test). The full run comes before the push.
+  timestamp: 2026-10-16T20:59:29.540082+00:00
+position_column: done
+position_ordinal: b780
 title: 'Group D: currentInboundCancellation is inherited by tasks that a handler starts'
 ---
 Elicitation plan section 10, group D.

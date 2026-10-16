@@ -17,7 +17,9 @@ extension Connection {
     /// connection and can have gaps (for example, a request with a
     /// duplicate id gets no number).
     ///
-    /// It is `nil` when the current task handles no inbound request.
+    /// It is `nil` in a task that no handler started. A task that a handler
+    /// starts (for example with `Task { }`) inherits the number of that
+    /// handler, also after the handler returns.
     ///
     /// Read it as the first statement of a handler, before any `await`.
     public static var currentRequestArrival: UInt64? {

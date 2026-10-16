@@ -1098,6 +1098,9 @@ public actor Connection {
                         }
                     }
                 })
+            // A task that the handler started inherits the box. It must not
+            // read the cancel of this request after the handler returned.
+            cancellation.endHandler()
             // Only run deferred hooks when a response was actually written:
             // `completeInbound` skips writing if the connection closed while
             // the handler ran, and running hooks anyway would break the
