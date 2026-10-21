@@ -19,6 +19,16 @@ public final class AgentSideConnection: Sendable {
     /// The diagnostic sink that the caller gave to `init`.
     private let logger: ACPLogger
 
+    /// The id and the credential of the connection, from the transport, or
+    /// `nil` when the transport has no connection header.
+    ///
+    /// Over ``HTTPServerTransport`` it holds the `Acp-Connection-Id` and the
+    /// bearer token of the connection, so the agent can key its state by the
+    /// id and take the trust of the connection from the token. The value is
+    /// set before the factory runs, so the factory can read it. Nothing the
+    /// client sends in a JSON-RPC message changes it.
+    public let connectionInfo: ACPConnectionInfo?
+
     /// Creates the connection, wires the factory's agent, and starts serving.
     ///
     /// The factory receives this connection so the agent it builds can capture
@@ -39,6 +49,7 @@ public final class AgentSideConnection: Sendable {
         _ factory: @Sendable (AgentSideConnection) -> any Agent
     ) async {
         self.logger = logger
+        connectionInfo = stream.connectionInfo
         core = await RoleConnectionCore(
             stream: stream,
             logger: logger,

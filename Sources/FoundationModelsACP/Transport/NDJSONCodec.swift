@@ -53,6 +53,15 @@ public protocol ACPTransport: Sendable {
     /// - Parameter data: The bytes to send, already framed by the caller.
     /// - Throws: A transport-specific error if the peer is gone.
     func write(_ data: Data) async throws
+
+    /// The id and the credential of the connection, or `nil` when the
+    /// transport has no connection header (stdio, subprocess, in-memory).
+    ///
+    /// The HTTP transport gives the `Acp-Connection-Id` that it issued at
+    /// `initialize`, and the bearer token of the `Authorization` header.
+    /// The value never comes from the JSON-RPC messages, so a client cannot
+    /// change it.
+    var connectionInfo: ACPConnectionInfo? { get }
 }
 
 /// Incremental newline splitter for the read side of the wire.
