@@ -111,25 +111,25 @@ private let postRequest = "POST /acp HTTP/1.1\r\nHost: localhost\r\nContent-Leng
 // MARK: - The bearer token
 
 @Test func theBearerTokenIsTheCredentialOfTheAuthorizationHeader() {
-    let request = HTTPTestSupport.request("POST", token: nil, headers: ["Authorization": "Bearer abc"])
+    let request = HTTPTestSupport.makeRequest("POST", token: nil, headers: ["Authorization": "Bearer abc"])
 
     #expect(request.bearerToken == "abc")
 }
 
 @Test func theBearerSchemeMatchesInAnyCase() {
-    let request = HTTPTestSupport.request("POST", token: nil, headers: ["authorization": "BEARER abc"])
+    let request = HTTPTestSupport.makeRequest("POST", token: nil, headers: ["authorization": "BEARER abc"])
 
     #expect(request.bearerToken == "abc")
 }
 
 @Test func anotherAuthorizationSchemeGivesNoBearerToken() {
-    let request = HTTPTestSupport.request("POST", token: nil, headers: ["Authorization": "Basic abc"])
+    let request = HTTPTestSupport.makeRequest("POST", token: nil, headers: ["Authorization": "Basic abc"])
 
     #expect(request.bearerToken == nil)
 }
 
 @Test func anEmptyBearerCredentialGivesNoBearerToken() {
-    let request = HTTPTestSupport.request("POST", token: nil, headers: ["Authorization": "Bearer "])
+    let request = HTTPTestSupport.makeRequest("POST", token: nil, headers: ["Authorization": "Bearer "])
 
     #expect(request.bearerToken == nil)
 }

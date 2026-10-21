@@ -19,7 +19,7 @@ enum HTTPTestSupport {
     ///     a field of the same name above.
     ///   - body: The body of the request.
     /// - Returns: The request.
-    static func request(
+    static func makeRequest(
         _ method: String,
         target: String = "/acp",
         connectionId: String? = nil,
