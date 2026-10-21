@@ -136,6 +136,14 @@ public protocol Agent: Sendable {
     func setSessionConfigOption(
         _ params: SetSessionConfigOptionRequest
     ) async throws -> SetSessionConfigOptionResponse
+
+    /// The handlers of the extension methods and notifications (names that
+    /// start with `_`) that this agent serves.
+    ///
+    /// The connection reads this value one time, when the factory returns the
+    /// agent. A `_` request with no handler gives method-not-found, and a `_`
+    /// notification with no handler is ignored. See ``ExtensionHandlers``.
+    var extensionHandlers: ExtensionHandlers { get }
 }
 
 /// Default implementations for every capability-gated `Agent` method, so a
@@ -162,6 +170,11 @@ extension Agent {
         _ params: SetSessionConfigOptionRequest
     ) async throws -> SetSessionConfigOptionResponse {
         try throwMethodNotFound("session/set_config_option")
+    }
+
+    /// Default implementation; serves no extension method or notification.
+    public var extensionHandlers: ExtensionHandlers {
+        ExtensionHandlers()
     }
 
     /// Throws `RequestError.methodNotFound` naming `methodName`.

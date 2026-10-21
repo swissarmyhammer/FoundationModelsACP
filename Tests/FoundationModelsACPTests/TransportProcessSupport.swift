@@ -61,6 +61,10 @@ func terminateAndAwaitExit(_ process: Process) async {
 /// A do-nothing client that answers the reverse-direction methods a handshake
 /// never invokes, so a `ClientSideConnection` can drive an agent in tests.
 struct HandshakeClient: Client {
+    /// The extension methods and notifications that the client serves. The
+    /// default serves none.
+    var extensionHandlers = ExtensionHandlers()
+
     /// Ignores streamed session updates.
     ///
     /// - Parameter notification: The session-update notification.

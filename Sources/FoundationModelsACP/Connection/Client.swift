@@ -58,4 +58,20 @@ public protocol Client: Sendable {
     ///
     /// - Parameter notification: The completion notification.
     func elicitationComplete(_ notification: CompleteElicitationNotification) async
+
+    /// The handlers of the extension methods and notifications (names that
+    /// start with `_`) that this client serves.
+    ///
+    /// The connection reads this value one time, when the factory returns the
+    /// client. A `_` request with no handler gives method-not-found, and a `_`
+    /// notification with no handler is ignored. See ``ExtensionHandlers``.
+    var extensionHandlers: ExtensionHandlers { get }
+}
+
+/// The default for the optional member of `Client`.
+extension Client {
+    /// Default implementation; serves no extension method or notification.
+    public var extensionHandlers: ExtensionHandlers {
+        ExtensionHandlers()
+    }
 }

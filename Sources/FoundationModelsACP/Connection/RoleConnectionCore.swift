@@ -29,12 +29,15 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
 
     /// Creates the engine and starts its read loop with the role unset.
     ///
-    /// The owner calls `setRole(_:)` from its factory before the read loop can
-    /// dispatch; until then, inbound calls answer method-not-found.
+    /// The owner calls `setRole(_:extensionHandlers:)` from its factory before
+    /// the read loop can dispatch; until then, inbound calls answer
+    /// method-not-found.
     ///
     /// - Parameters:
     ///   - stream: The bidirectional transport to run over.
     ///   - logger: Diagnostic sink; never stdout.
+    ///   - logPrefix: The prefix of each diagnostic of the owner type. The
+    ///     warning for an extension notification that does not decode has it.
     ///   - requestTimeout: Default outbound request timeout; `nil` waits
     ///     forever.
     ///   - servedSide: The side whose methods this connection serves inbound.
@@ -53,6 +56,7 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
     init(
         stream: any ACPTransport,
         logger: ACPLogger,
+        logPrefix: String,
         requestTimeout: Duration?,
         servedSide: MethodSide,
         peerSide: MethodSide,
@@ -70,16 +74,13 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
             logger: logger,
             requestTimeout: requestTimeout,
             requestHandler: { method, params in
-                guard let info = served[method], info.kind == .request, let role = holder.role else {
-                    throw RequestError.methodNotFound(method)
-                }
-                return try await dispatchRequest(info.handlerName, params, role)
+                try await Self.routeRequest(method, params: params, served: served, holder: holder, to: dispatchRequest)
             },
             notificationHandler: { method, params in
-                guard let info = served[method], info.kind == .notification, let role = holder.role else {
-                    return
-                }
-                await dispatchNotification(info.handlerName, params, role)
+                await Self.routeNotification(
+                    method, params: params, served: served, holder: holder, to: dispatchNotification,
+                    logPrefix: logPrefix, logger: logger
+                )
             },
             onClose: onClose,
             outgoingRequests: outgoingRequests,
@@ -88,11 +89,86 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
         self.holder = holder
     }
 
-    /// Stores the served role; called once before the read loop dispatches.
+    /// Stores the served role and its extension handlers; called once before
+    /// the read loop dispatches.
     ///
-    /// - Parameter role: The role object to serve inbound calls.
-    func setRole(_ role: Role) {
-        holder.set(role)
+    /// - Parameters:
+    ///   - role: The role object to serve inbound calls.
+    ///   - extensionHandlers: The handlers of the `_` methods and
+    ///     notifications that the role serves.
+    func setRole(_ role: Role, extensionHandlers: ExtensionHandlers) {
+        holder.set(ServedRole(role: role, extensionHandlers: extensionHandlers))
+    }
+
+    // MARK: - Inbound routing
+
+    /// Routes one inbound request to the role, or to its extension handler.
+    ///
+    /// A method of the routing table goes to the role. Any other method goes
+    /// to the extension handler that the role registered for it.
+    ///
+    /// - Parameters:
+    ///   - method: The wire method.
+    ///   - params: The raw request parameters.
+    ///   - served: The routing-table entries of the served side, by wire
+    ///     method.
+    ///   - holder: The cell that holds the served role.
+    ///   - dispatch: Routes a routing-table request to the role's handler.
+    /// - Returns: The encoded response value.
+    /// - Throws: `RequestError.methodNotFound` before the role is set, or for
+    ///   a method with no handler; otherwise any error the handler throws.
+    private static func routeRequest(
+        _ method: String,
+        params: JSONValue?,
+        served: [String: MethodInfo],
+        holder: RoleHolder<Role>,
+        to dispatch: RequestDispatch
+    ) async throws -> JSONValue {
+        guard let servedRole = holder.servedRole else {
+            throw RequestError.methodNotFound(method)
+        }
+        if let info = served[method], info.kind == .request {
+            return try await dispatch(info.handlerName, params, servedRole.role)
+        }
+        guard let handler = servedRole.extensionHandlers.methodHandler(for: method) else {
+            throw RequestError.methodNotFound(method)
+        }
+        return try await handler(params)
+    }
+
+    /// Routes one inbound notification to the role, or to its extension
+    /// handler. A notification with no handler is ignored.
+    ///
+    /// - Parameters:
+    ///   - method: The wire method.
+    ///   - params: The raw notification parameters.
+    ///   - served: The routing-table entries of the served side, by wire
+    ///     method.
+    ///   - holder: The cell that holds the served role.
+    ///   - dispatch: Routes a routing-table notification to the role's
+    ///     handler.
+    ///   - logPrefix: The prefix of each diagnostic of the owner type.
+    ///   - logger: The connection logger.
+    private static func routeNotification(
+        _ method: String,
+        params: JSONValue?,
+        served: [String: MethodInfo],
+        holder: RoleHolder<Role>,
+        to dispatch: NotificationDispatch,
+        logPrefix: String,
+        logger: ACPLogger
+    ) async {
+        guard let servedRole = holder.servedRole else {
+            return
+        }
+        if let info = served[method], info.kind == .notification {
+            await dispatch(info.handlerName, params, servedRole.role)
+            return
+        }
+        guard let handler = servedRole.extensionHandlers.notificationHandler(for: method) else {
+            return
+        }
+        await handler(params, logPrefix, logger)
     }
 
     /// Issues an outbound peer request and decodes its typed response.
@@ -172,6 +248,37 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
         try await RoleDispatch.notify(connection, handler: handler, on: peerSide, params)
     }
 
+    /// Issues an outbound extension request and decodes its typed result.
+    ///
+    /// - Parameters:
+    ///   - method: The wire method. It must start with `_`.
+    ///   - params: The typed request parameters.
+    ///   - resultType: The expected result model type.
+    /// - Returns: The decoded result.
+    /// - Throws: `RequestError` on a peer error, `ConnectionError` on
+    ///   disconnect, or a decode failure on a malformed result.
+    func callExtension<Params: Encodable, Result: Decodable>(
+        _ method: String,
+        _ params: Params,
+        returning resultType: Result.Type
+    ) async throws -> Result {
+        ExtensionHandlers.requireExtensionName(method)
+        let result = try await connection.request(method: method, params: JSONValue.encode(result: params))
+        return try result.decoded(as: resultType)
+    }
+
+    /// Sends an outbound extension notification.
+    ///
+    /// - Parameters:
+    ///   - method: The wire method. It must start with `_`.
+    ///   - params: The typed notification parameters.
+    /// - Throws: `ConnectionError.closed` after disconnect, or an encoding
+    ///   failure.
+    func notifyExtension<Params: Encodable>(_ method: String, _ params: Params) async throws {
+        ExtensionHandlers.requireExtensionName(method)
+        try await connection.notify(method: method, params: JSONValue.encode(result: params))
+    }
+
     /// The outbound peer requests that wait for a response, and the events
     /// that tell when each one starts and finishes.
     var outgoingRequests: OutgoingRequestTracker {
@@ -192,6 +299,16 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
 
 // MARK: - Role holder
 
+/// The role object a connection serves, and the extension handlers that the
+/// role gave when the connection stored it.
+struct ServedRole<Role: Sendable>: Sendable {
+    /// The role object that serves the routing-table methods.
+    let role: Role
+
+    /// The handlers of the `_` methods and notifications of the role.
+    let extensionHandlers: ExtensionHandlers
+}
+
 /// A write-once, thread-safe cell holding the role object a connection serves.
 ///
 /// The connection's inbound handlers capture this holder rather than the
@@ -199,17 +316,18 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
 /// connection and the role its own factory builds from it.
 final class RoleHolder<Role: Sendable>: Sendable {
     /// The stored role, guarded for the read loop and inbound handler tasks.
-    private let storage = Mutex<Role?>(nil)
+    private let storage = Mutex<ServedRole<Role>?>(nil)
 
     /// Stores the role, called once before the read loop can dispatch.
     ///
-    /// - Parameter role: The role object to serve inbound calls.
-    func set(_ role: Role) {
-        storage.withLock { $0 = role }
+    /// - Parameter servedRole: The role object to serve inbound calls, and
+    ///   its extension handlers.
+    func set(_ servedRole: ServedRole<Role>) {
+        storage.withLock { $0 = servedRole }
     }
 
     /// The stored role, or `nil` before wiring completes.
-    var role: Role? {
+    var servedRole: ServedRole<Role>? {
         storage.withLock { $0 }
     }
 }

@@ -42,6 +42,7 @@ public final class AgentSideConnection: Sendable {
         core = await RoleConnectionCore(
             stream: stream,
             logger: logger,
+            logPrefix: Self.logPrefix,
             requestTimeout: requestTimeout,
             servedSide: .agent,
             peerSide: .client,
@@ -52,7 +53,8 @@ public final class AgentSideConnection: Sendable {
                 await Self.serveNotification(handler, params: params, to: agent, logger: logger)
             }
         )
-        core.setRole(factory(self))
+        let agent = factory(self)
+        core.setRole(agent, extensionHandlers: agent.extensionHandlers)
     }
 
     // MARK: - Inbound dispatch (Client → Agent)
@@ -276,6 +278,45 @@ public final class AgentSideConnection: Sendable {
     /// - Throws: `ConnectionError.closed` after disconnect.
     public func elicitationComplete(_ notification: CompleteElicitationNotification) async throws {
         try await core.notify("elicitationComplete", notification)
+    }
+
+    // MARK: - Extensions (Agent → Client)
+
+    /// Calls an extension method of the client: a method whose name starts
+    /// with `_`.
+    ///
+    /// The client serves it with a handler of ``Client/extensionHandlers``.
+    /// A client with no handler for `method` answers method-not-found.
+    ///
+    /// - Parameters:
+    ///   - method: The wire method. It must start with `_`.
+    ///   - params: The params of the call.
+    ///   - resultType: The type that the result decodes to. Use ``JSONValue``
+    ///     for the raw result.
+    /// - Returns: The decoded result.
+    /// - Throws: `RequestError` on a peer error, `ConnectionError` on
+    ///   disconnect, or a decode failure on a malformed result.
+    public func callExtensionMethod<Params: Encodable, Result: Decodable>(
+        _ method: String,
+        _ params: Params,
+        returning resultType: Result.Type
+    ) async throws -> Result {
+        try await core.callExtension(method, params, returning: resultType)
+    }
+
+    /// Sends an extension notification to the client: a notification whose
+    /// name starts with `_`.
+    ///
+    /// The client gives it to a handler of ``Client/extensionHandlers``, or
+    /// ignores it when it has no handler for `method`.
+    ///
+    /// - Parameters:
+    ///   - method: The wire method. It must start with `_`.
+    ///   - params: The params of the notification.
+    /// - Throws: `ConnectionError.closed` after disconnect, or an encoding
+    ///   failure.
+    public func sendExtensionNotification<Params: Encodable>(_ method: String, _ params: Params) async throws {
+        try await core.notifyExtension(method, params)
     }
 
     /// Shuts the connection down, rejecting every pending request.

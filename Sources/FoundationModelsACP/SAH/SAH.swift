@@ -30,54 +30,6 @@ public enum SAH {
 // MARK: - _meta placement
 
 extension SAH {
-    /// Reads a SAH payload from one member of a JSON object.
-    ///
-    /// - Parameters:
-    ///   - type: The payload type.
-    ///   - object: The object that holds the member, or `nil`.
-    ///   - key: The member name.
-    /// - Returns: The payload, or `nil` when `object` is not an object, has no
-    ///   member `key`, or has a member that is not a valid `type`.
-    static func payload<Payload: Decodable>(
-        _ type: Payload.Type,
-        in object: JSONValue?,
-        member key: String
-    ) -> Payload? {
-        guard case .object(let members)? = object, let value = members[key] else {
-            return nil
-        }
-        guard let data = try? JSONEncoder().encode(value) else {
-            return nil
-        }
-        return try? JSONDecoder().decode(type, from: data)
-    }
-
-    /// Writes a SAH payload into one member of a JSON object.
-    ///
-    /// The function keeps every other member of `object`. When `object` is
-    /// `nil` or JSON `null`, it starts from an empty object. When `object` is
-    /// a different value that is not an object, it returns `object` unchanged.
-    /// It does not replace the value of the peer.
-    ///
-    /// - Parameters:
-    ///   - payload: The payload to write.
-    ///   - object: The object to write the member into.
-    ///   - key: The member name.
-    /// - Returns: The object with the member.
-    /// - Throws: `EncodingError` when the payload cannot be encoded, for
-    ///   example when a ``JSONValue`` in it holds a number that is not finite.
-    static func inject(
-        _ payload: some Encodable,
-        into object: JSONValue?,
-        member key: String
-    ) throws -> JSONValue {
-        guard var members = writableMembers(of: object) else {
-            return object ?? .null
-        }
-        members[key] = try json(payload)
-        return .object(members)
-    }
-
     /// Reads a SAH payload from one member of `_meta.sah`.
     ///
     /// - Parameters:
@@ -90,10 +42,7 @@ extension SAH {
         inSAHObjectOf meta: JSONValue?,
         member key: String
     ) -> Payload? {
-        guard case .object(let members)? = meta else {
-            return nil
-        }
-        return payload(type, in: members[metaKey], member: key)
+        ExtensionMeta.payload(type, in: sahObject(of: meta), member: key)
     }
 
     /// Writes a SAH payload into one member of `_meta.sah`.
@@ -114,39 +63,16 @@ extension SAH {
         intoSAHObjectOf meta: JSONValue?,
         member key: String
     ) throws -> JSONValue {
-        guard var members = writableMembers(of: meta),
-            var sahMembers = writableMembers(of: members[metaKey])
-        else {
-            return meta ?? .null
-        }
-        sahMembers[key] = try json(payload)
-        members[metaKey] = .object(sahMembers)
-        return .object(members)
+        let updatedSAHObject = try ExtensionMeta.inject(payload, into: sahObject(of: meta), member: key)
+        return try ExtensionMeta.inject(updatedSAHObject, into: meta, member: metaKey)
     }
 
-    /// Gives the members that a write starts from.
+    /// Gives the SAH object of a `_meta` value: `_meta.sah`.
     ///
-    /// - Parameter value: The value to write into, or `nil`.
-    /// - Returns: The members of an object, an empty set for `nil` or JSON
-    ///   `null`, or `nil` for a different value, which a write must not
-    ///   replace.
-    private static func writableMembers(of value: JSONValue?) -> [String: JSONValue]? {
-        switch value {
-        case nil, .null?:
-            return [:]
-        case .object(let members)?:
-            return members
-        case .bool?, .number?, .string?, .array?:
-            return nil
-        }
-    }
-
-    /// Encodes a value as a ``JSONValue``.
-    ///
-    /// - Parameter value: The value to encode.
-    /// - Returns: The JSON of the value.
-    /// - Throws: `EncodingError` when the value cannot be encoded.
-    private static func json(_ value: some Encodable) throws -> JSONValue {
-        try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(value))
+    /// - Parameter meta: The `_meta` value, or `nil`.
+    /// - Returns: The value of `_meta.sah`, or `nil` when `meta` is not an
+    ///   object or has no `sah` member.
+    private static func sahObject(of meta: JSONValue?) -> JSONValue? {
+        ExtensionMeta.payload(JSONValue.self, in: meta, member: metaKey)
     }
 }

@@ -25,11 +25,19 @@ struct StubAgent: Agent {
     /// ignores it.
     var onSessionCancel: @Sendable (CancelSessionNotification) -> Void = { _ in }
 
+    /// The extension methods and notifications that the agent serves. The
+    /// default serves none.
+    var extensionHandlers = ExtensionHandlers()
+
+    /// The `_meta` of the `initialize` response. The default sends none.
+    var initializeMeta: JSONValue?
+
     func initialize(_ params: InitializeRequest) async throws -> InitializeResponse {
         InitializeResponse(
             info: Implementation(name: "stub-agent", version: "0.0.0"),
             protocolVersion: .v2,
-            capabilities: AgentCapabilities(session: SessionCapabilities())
+            capabilities: AgentCapabilities(session: SessionCapabilities()),
+            meta: initializeMeta
         )
     }
 

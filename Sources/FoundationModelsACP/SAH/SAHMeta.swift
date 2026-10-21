@@ -39,7 +39,7 @@ extension SAH {
         /// - Returns: The SAH object, or `nil` when `_meta.sah` is absent or
         ///   is not a valid object.
         public static func extract(from meta: JSONValue?) -> InitializeMeta? {
-            SAH.payload(InitializeMeta.self, in: meta, member: SAH.metaKey)
+            ExtensionMeta.payload(InitializeMeta.self, in: meta, member: SAH.metaKey)
         }
 
         /// Writes this SAH object into `_meta.sah` of a `_meta` value.
@@ -52,7 +52,7 @@ extension SAH {
         /// - Returns: The `_meta` value to send.
         /// - Throws: `EncodingError` when the object cannot be encoded.
         public func inject(into meta: JSONValue?) throws -> JSONValue {
-            try SAH.inject(self, into: meta, member: SAH.metaKey)
+            try ExtensionMeta.inject(self, into: meta, member: SAH.metaKey)
         }
     }
 }
@@ -374,7 +374,7 @@ extension SAH {
         /// - Parameter meta: The `_meta` value, or `nil`.
         /// - Returns: The denial, or `nil` when it is absent or is not valid.
         public static func extract(from meta: JSONValue?) -> RuleDenial? {
-            SAH.payload(RuleDenial.self, in: meta, member: metaKey)
+            ExtensionMeta.payload(RuleDenial.self, in: meta, member: metaKey)
         }
 
         /// Writes this denial into `_meta["sah/ruleDenial"]` of a `_meta`
@@ -387,7 +387,7 @@ extension SAH {
         /// - Returns: The `_meta` value to send.
         /// - Throws: `EncodingError` when the denial cannot be encoded.
         public func inject(into meta: JSONValue?) throws -> JSONValue {
-            try SAH.inject(self, into: meta, member: Self.metaKey)
+            try ExtensionMeta.inject(self, into: meta, member: Self.metaKey)
         }
     }
 }

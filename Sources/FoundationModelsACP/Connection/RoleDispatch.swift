@@ -256,10 +256,41 @@ enum RoleDispatch {
         logger: ACPLogger,
         fields: (JSONValue?) -> [WarningField] = { _ in [] }
     ) -> Params? {
+        decodeNotification(
+            params, as: paramsType, method: RoleRouting.wireMethod(for: handler, on: side),
+            logPrefix: logPrefix, logger: logger, fields: fields
+        )
+    }
+
+    /// Decodes the params of one inbound notification that a wire method
+    /// names, and writes a warning when they do not decode.
+    ///
+    /// The extension notifications use it, because the routing table does not
+    /// name them. The warning is the one of
+    /// ``decodeNotification(_:as:handler:on:logPrefix:logger:fields:)``.
+    ///
+    /// - Parameters:
+    ///   - params: The raw notification parameters.
+    ///   - paramsType: The parameters' model type.
+    ///   - method: The wire method of the notification. The connection reads
+    ///     it only when the params do not decode.
+    ///   - logPrefix: The prefix of each diagnostic of the connection type.
+    ///   - logger: The connection logger.
+    ///   - fields: Reads more values for the warning from the raw params. The
+    ///     connection calls it only when the params do not decode.
+    /// - Returns: The decoded parameters, or `nil` when they do not decode.
+    static func decodeNotification<Params: Decodable>(
+        _ params: JSONValue?,
+        as paramsType: Params.Type,
+        method: @autoclosure () -> String,
+        logPrefix: String,
+        logger: ACPLogger,
+        fields: (JSONValue?) -> [WarningField] = { _ in [] }
+    ) -> Params? {
         do {
             return try JSONValue.decodeParamsKeepingCause(paramsType, from: params)
         } catch {
-            let method = RoleRouting.wireMethod(for: handler, on: side)
+            let method = method()
             let session: WarningField = (SessionId.paramsMemberKey, SessionId(namedIn: params)?.rawValue)
             let shown = [session] + fields(params)
             let details = shown.map { "\($0.name): \($0.value ?? absentValueText)" }.joined(separator: ", ")

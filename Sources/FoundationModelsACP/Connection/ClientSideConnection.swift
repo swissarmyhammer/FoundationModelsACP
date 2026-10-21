@@ -97,6 +97,7 @@ public final class ClientSideConnection: Sendable {
         core = await RoleConnectionCore(
             stream: stream,
             logger: logger,
+            logPrefix: Self.logPrefix,
             requestTimeout: requestTimeout,
             servedSide: .client,
             peerSide: .agent,
@@ -118,7 +119,8 @@ public final class ClientSideConnection: Sendable {
         self.router = router
         self.permissions = permissions
         self.promptEchoes = promptEchoes
-        core.setRole(factory(self))
+        let client = factory(self)
+        core.setRole(client, extensionHandlers: client.extensionHandlers)
     }
 
     // MARK: - Session update streams
@@ -598,6 +600,45 @@ public final class ClientSideConnection: Sendable {
         _ params: SetSessionConfigOptionRequest
     ) async throws -> SetSessionConfigOptionResponse {
         try await core.call("setSessionConfigOption", params, returning: SetSessionConfigOptionResponse.self)
+    }
+
+    // MARK: - Extensions (Client → Agent)
+
+    /// Calls an extension method of the agent: a method whose name starts
+    /// with `_`, for example `_sah/graphql/execute`.
+    ///
+    /// The agent serves it with a handler of ``Agent/extensionHandlers``. An
+    /// agent with no handler for `method` answers method-not-found.
+    ///
+    /// - Parameters:
+    ///   - method: The wire method. It must start with `_`.
+    ///   - params: The params of the call.
+    ///   - resultType: The type that the result decodes to. Use ``JSONValue``
+    ///     for the raw result.
+    /// - Returns: The decoded result.
+    /// - Throws: `RequestError` on a peer error, `ConnectionError` on
+    ///   disconnect, or a decode failure on a malformed result.
+    public func callExtensionMethod<Params: Encodable, Result: Decodable>(
+        _ method: String,
+        _ params: Params,
+        returning resultType: Result.Type
+    ) async throws -> Result {
+        try await core.callExtension(method, params, returning: resultType)
+    }
+
+    /// Sends an extension notification to the agent: a notification whose
+    /// name starts with `_`, for example `_sah/graphql/unsubscribe`.
+    ///
+    /// The agent gives it to a handler of ``Agent/extensionHandlers``, or
+    /// ignores it when it has no handler for `method`.
+    ///
+    /// - Parameters:
+    ///   - method: The wire method. It must start with `_`.
+    ///   - params: The params of the notification.
+    /// - Throws: `ConnectionError.closed` after disconnect, or an encoding
+    ///   failure.
+    public func sendExtensionNotification<Params: Encodable>(_ method: String, _ params: Params) async throws {
+        try await core.notifyExtension(method, params)
     }
 
     /// Shuts the connection down, rejecting every pending request.
