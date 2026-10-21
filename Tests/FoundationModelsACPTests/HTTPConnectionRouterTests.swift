@@ -6,9 +6,6 @@ import Testing
 
 // MARK: - Helpers
 
-/// The bearer token that the connections of these tests send.
-private let clientToken = "device-token"
-
 /// The JSON-RPC `initialize` request that opens a connection.
 ///
 /// - Returns: The encoded request body.
@@ -29,31 +26,6 @@ private let initializeRequestId = JSONValue.number(1)
 private let cancelBody = Data(
     #"{"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"s"}}"#.utf8
 )
-
-/// Makes one HTTP request of the client.
-///
-/// - Parameters:
-///   - method: The HTTP method.
-///   - connectionId: The `Acp-Connection-Id` header, or `nil` for none.
-///   - token: The bearer token of the `Authorization` header, or `nil` for
-///     none.
-///   - body: The body of the request.
-/// - Returns: The request.
-private func request(
-    _ method: String,
-    connectionId: String? = nil,
-    token: String? = clientToken,
-    body: Data = Data()
-) -> HTTPRequest {
-    var headers: [String: String] = [:]
-    if let connectionId {
-        headers[HTTPServerTransport.connectionIdHeader] = connectionId
-    }
-    if let token {
-        headers["Authorization"] = "Bearer \(token)"
-    }
-    return HTTPRequest(method: method, target: "/acp", headers: headers, body: body)
-}
 
 /// The response of a route that must answer at once.
 ///
@@ -111,7 +83,7 @@ private struct OpenConnection {
     /// - Throws: An error when the router does not open a connection.
     static func open() async throws -> OpenConnection {
         let router = HTTPConnectionRouter(logger: .disabled)
-        let answer = try response(of: router.route(request("POST", body: initializeBody())))
+        let answer = try response(of: router.route(HTTPTestSupport.request("POST", body: initializeBody())))
         let id = try #require(answer.headers[HTTPServerTransport.connectionIdHeader])
         var accepted = router.connections.makeAsyncIterator()
         let transport = try #require(await accepted.next())
@@ -135,7 +107,7 @@ private func nextMessage(from iterator: inout AsyncStream<Data>.Iterator) async 
 @Test func initializeWithNoConnectionIdAnswersAConnectionId() async throws {
     let router = HTTPConnectionRouter(logger: .disabled)
 
-    let answer = try response(of: router.route(request("POST", body: initializeBody())))
+    let answer = try response(of: router.route(HTTPTestSupport.request("POST", body: initializeBody())))
 
     #expect(answer.status == .accepted)
     let id = try #require(answer.headers[HTTPServerTransport.connectionIdHeader])
@@ -147,14 +119,14 @@ private func nextMessage(from iterator: inout AsyncStream<Data>.Iterator) async 
 
     let info = try #require(connection.transport.connectionInfo)
     #expect(info.id.rawValue == connection.id)
-    #expect(info.bearerToken == clientToken)
+    #expect(info.bearerToken == HTTPTestSupport.clientToken)
 }
 
 @Test func twoInitializeRequestsOpenTwoConnections() async throws {
     let router = HTTPConnectionRouter(logger: .disabled)
 
-    let first = try response(of: router.route(request("POST", body: initializeBody())))
-    let second = try response(of: router.route(request("POST", body: initializeBody())))
+    let first = try response(of: router.route(HTTPTestSupport.request("POST", body: initializeBody())))
+    let second = try response(of: router.route(HTTPTestSupport.request("POST", body: initializeBody())))
 
     #expect(
         first.headers[HTTPServerTransport.connectionIdHeader]
@@ -164,7 +136,7 @@ private func nextMessage(from iterator: inout AsyncStream<Data>.Iterator) async 
 
 @Test func initializeWithNoAuthorizationGivesAConnectionWithNoToken() async throws {
     let router = HTTPConnectionRouter(logger: .disabled)
-    _ = router.route(request("POST", token: nil, body: try initializeBody()))
+    _ = router.route(HTTPTestSupport.request("POST", token: nil, body: try initializeBody()))
     var accepted = router.connections.makeAsyncIterator()
 
     let transport = try #require(await accepted.next())
@@ -178,7 +150,7 @@ private func nextMessage(from iterator: inout AsyncStream<Data>.Iterator) async 
     let connection = try await OpenConnection.open()
 
     let answer = try response(
-        of: connection.router.route(request("POST", connectionId: connection.id, body: cancelBody))
+        of: connection.router.route(HTTPTestSupport.request("POST", connectionId: connection.id, body: cancelBody))
     )
 
     #expect(answer.status == .accepted)
@@ -192,7 +164,7 @@ private func nextMessage(from iterator: inout AsyncStream<Data>.Iterator) async 
 @Test func aRequestWithNoConnectionIdIsRefused() async throws {
     let connection = try await OpenConnection.open()
 
-    let answer = try response(of: connection.router.route(request("POST", body: cancelBody)))
+    let answer = try response(of: connection.router.route(HTTPTestSupport.request("POST", body: cancelBody)))
 
     #expect(answer.status == .badRequest)
 }
@@ -201,7 +173,7 @@ private func nextMessage(from iterator: inout AsyncStream<Data>.Iterator) async 
     let connection = try await OpenConnection.open()
 
     let answer = try response(
-        of: connection.router.route(request("POST", connectionId: "not-a-connection", body: cancelBody))
+        of: connection.router.route(HTTPTestSupport.request("POST", connectionId: "not-a-connection", body: cancelBody))
     )
 
     #expect(answer.status == .notFound)
@@ -212,7 +184,7 @@ private func nextMessage(from iterator: inout AsyncStream<Data>.Iterator) async 
 
     let answer = try response(
         of: connection.router.route(
-            request("POST", connectionId: connection.id, token: "other-token", body: cancelBody)
+            HTTPTestSupport.request("POST", connectionId: connection.id, token: "other-token", body: cancelBody)
         )
     )
 
@@ -221,12 +193,12 @@ private func nextMessage(from iterator: inout AsyncStream<Data>.Iterator) async 
 
 @Test func aConnectionIdHeaderOfAnotherCaseReachesTheConnection() async throws {
     let connection = try await OpenConnection.open()
-    let lowerCase = HTTPRequest(
-        method: "POST",
-        target: "/acp",
+    let lowerCase = HTTPTestSupport.request(
+        "POST",
+        token: nil,
         headers: [
             HTTPServerTransport.connectionIdHeader.lowercased(): connection.id,
-            "authorization": "bearer \(clientToken)",
+            "authorization": "bearer \(HTTPTestSupport.clientToken)",
         ],
         body: cancelBody
     )
@@ -239,7 +211,7 @@ private func nextMessage(from iterator: inout AsyncStream<Data>.Iterator) async 
 @Test func anUnknownMethodIsRefused() async throws {
     let connection = try await OpenConnection.open()
 
-    let answer = try response(of: connection.router.route(request("PUT", connectionId: connection.id)))
+    let answer = try response(of: connection.router.route(HTTPTestSupport.request("PUT", connectionId: connection.id)))
 
     #expect(answer.status == .methodNotAllowed)
 }
@@ -248,7 +220,7 @@ private func nextMessage(from iterator: inout AsyncStream<Data>.Iterator) async 
 
 @Test func theStreamRequestCarriesWhatTheAgentWrites() async throws {
     let connection = try await OpenConnection.open()
-    let streamed = try streamedConnection(of: connection.router.route(request("GET", connectionId: connection.id)))
+    let streamed = try streamedConnection(of: connection.router.route(HTTPTestSupport.request("GET", connectionId: connection.id)))
     #expect(streamed === connection.transport)
 
     try await connection.transport.write(NDJSONCodec.encode(JSONValue.object(["method": .string("x")])))
@@ -260,9 +232,9 @@ private func nextMessage(from iterator: inout AsyncStream<Data>.Iterator) async 
 
 @Test func aSecondStreamRequestIsRefused() async throws {
     let connection = try await OpenConnection.open()
-    _ = connection.router.route(request("GET", connectionId: connection.id))
+    _ = connection.router.route(HTTPTestSupport.request("GET", connectionId: connection.id))
 
-    let answer = try response(of: connection.router.route(request("GET", connectionId: connection.id)))
+    let answer = try response(of: connection.router.route(HTTPTestSupport.request("GET", connectionId: connection.id)))
 
     #expect(answer.status == .conflict)
 }
@@ -272,7 +244,7 @@ private func nextMessage(from iterator: inout AsyncStream<Data>.Iterator) async 
 @Test func deleteEndsTheConnectionAndForgetsItsId() async throws {
     let connection = try await OpenConnection.open()
 
-    let answer = try response(of: connection.router.route(request("DELETE", connectionId: connection.id)))
+    let answer = try response(of: connection.router.route(HTTPTestSupport.request("DELETE", connectionId: connection.id)))
 
     #expect(answer.status == .noContent)
     var received: [Data] = []
@@ -281,14 +253,14 @@ private func nextMessage(from iterator: inout AsyncStream<Data>.Iterator) async 
     }
     #expect(received.count == 1)
     let later = try response(
-        of: connection.router.route(request("POST", connectionId: connection.id, body: cancelBody))
+        of: connection.router.route(HTTPTestSupport.request("POST", connectionId: connection.id, body: cancelBody))
     )
     #expect(later.status == .notFound)
 }
 
 @Test func aClosedTransportFinishesItsStream() async throws {
     let connection = try await OpenConnection.open()
-    _ = connection.router.route(request("GET", connectionId: connection.id))
+    _ = connection.router.route(HTTPTestSupport.request("GET", connectionId: connection.id))
 
     connection.transport.close()
 
@@ -306,7 +278,7 @@ private func nextMessage(from iterator: inout AsyncStream<Data>.Iterator) async 
 
     var stream = connection.transport.outgoing.makeAsyncIterator()
     #expect(await stream.next() == nil)
-    let later = try response(of: connection.router.route(request("POST", body: initializeBody())))
+    let later = try response(of: connection.router.route(HTTPTestSupport.request("POST", body: initializeBody())))
     #expect(later.status == .serviceUnavailable)
 }
 
@@ -323,13 +295,13 @@ private func nextMessage(from iterator: inout AsyncStream<Data>.Iterator) async 
     defer { connection.transport.close() }
 
     #expect(agent.connectionInfo?.id.rawValue == connection.id)
-    #expect(agent.connectionInfo?.bearerToken == clientToken)
+    #expect(agent.connectionInfo?.bearerToken == HTTPTestSupport.clientToken)
     #expect(seen.withLock { $0 } == agent.connectionInfo)
 }
 
 @Test func theInitializeResponseReachesTheStream() async throws {
     let connection = try await OpenConnection.open()
-    let streamed = try streamedConnection(of: connection.router.route(request("GET", connectionId: connection.id)))
+    let streamed = try streamedConnection(of: connection.router.route(HTTPTestSupport.request("GET", connectionId: connection.id)))
     let agent = await AgentSideConnection(stream: connection.transport) { _ in StubAgent() }
     defer { connection.transport.close() }
 

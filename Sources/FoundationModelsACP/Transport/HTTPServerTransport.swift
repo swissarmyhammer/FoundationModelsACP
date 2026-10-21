@@ -191,8 +191,8 @@ private final class OneShot<Value: Sendable>: Sendable {
 /// One TCP socket of a client: it reads requests, sends each to the router,
 /// and writes the responses or the agent-to-client stream.
 private final class HTTPSocketSession: Sendable {
-    /// The most bytes that one read takes.
-    private static let readSize = 64 * 1024
+    /// The most bytes that one read takes: 64 KiB.
+    private static let readSize = 65_536
 
     /// The socket.
     private let socket: NWConnection

@@ -162,11 +162,11 @@ struct HTTPRequest: Sendable {
 /// Chunk boundaries may fall anywhere: bytes of an unfinished request stay
 /// until a later chunk completes it.
 struct HTTPRequestParser {
-    /// The largest header section that the parser accepts.
-    static let maximumHeaderBytes = 64 * 1024
+    /// The largest header section that the parser accepts: 64 KiB.
+    static let maximumHeaderBytes = 65_536
 
-    /// The largest body that the parser accepts.
-    static let maximumBodyBytes = 16 * 1024 * 1024
+    /// The largest body that the parser accepts: 16 MiB.
+    static let maximumBodyBytes = 16_777_216
 
     /// The bytes that end the header section.
     private static let headerEnd = Data((lineEnd + lineEnd).utf8)
