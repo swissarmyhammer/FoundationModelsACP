@@ -825,6 +825,39 @@ enum SessionMergeEngineFixtures {
         #expect(engine.entry(withID: .toolCall(id))?.kind.toolCall?.capabilities == .cleared)
     }
 
+    @Test func aLaterObjectReplacesTheWholePreviousToolCallCapabilities() throws {
+        var engine = SessionMergeEngine()
+        let id = ToolCallId(rawValue: "c")
+        let replacement = ToolCallCapabilities(cancel: nil, meta: .object(["v": .number(2)]))
+        engine.apply(.toolCallUpdate(ToolCallUpdate(toolCallId: id, capabilities: .value(Self.cancellable))))
+        engine.apply(.toolCallUpdate(ToolCallUpdate(toolCallId: id, capabilities: .value(replacement))))
+        #expect(engine.entry(withID: .toolCall(id))?.kind.toolCall?.capabilities == .value(replacement))
+    }
+
+    @Test func aNullTerminalCapabilitiesClearsThemAndKeepsTheSizeThroughReplay() throws {
+        let id = TerminalId(rawValue: "t")
+        let first = TerminalCapabilities(cancel: TerminalCancelCapabilities())
+        let second = TerminalCapabilities(cancel: nil, meta: .object(["v": .number(2)]))
+        let size = TerminalSize(cols: 80, rows: 24)
+        var engine = SessionMergeEngine()
+        engine.apply(.terminalUpdate(TerminalUpdate(terminalId: id, capabilities: .value(first), size: size)))
+        engine.apply(.terminalUpdate(TerminalUpdate(terminalId: id, capabilities: .value(second))))
+        #expect(engine.entry(withID: .terminal(id))?.kind.terminal?.capabilities == .value(second))
+        engine.apply(.terminalUpdate(TerminalUpdate(terminalId: id, capabilities: .cleared)))
+        let terminal = try #require(engine.entry(withID: .terminal(id))?.kind.terminal)
+        #expect(terminal.capabilities == .cleared)
+        #expect(terminal.size == size)
+
+        var replayed = SessionMergeEngine()
+        for update in engine.transcriptUpdates {
+            replayed.apply(update)
+        }
+        #expect(replayed.entry(withID: .terminal(id))?.kind.terminal?.capabilities == .cleared)
+        #expect(replayed.entry(withID: .terminal(id))?.kind.terminal?.size == size)
+        let decoded = try WireRoundTrip.expectLossless(TerminalUpdate.self, #"{"terminalId":"t","capabilities":null}"#)
+        #expect(decoded.capabilities == .cleared)
+    }
+
     @Test func aTerminalKeepsItsCapabilitiesAndSizeThroughLaterUpdatesAndReplay() throws {
         let id = TerminalId(rawValue: "t")
         let capabilities = TerminalCapabilities(cancel: TerminalCancelCapabilities())
