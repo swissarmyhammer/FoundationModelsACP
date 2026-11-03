@@ -518,14 +518,15 @@ public actor Connection {
     /// id — the same id a `$/cancel_request` names — and cancelled on
     /// disconnect.
     private var inboundTasks: [RequestId: InboundEntry] = [:]
-    /// Each inbound request task that did not end, keyed by a monotonic
-    /// token local to this connection. A task stays here until its last
+    /// Each inbound request task that did not end, keyed by the wire
+    /// sequence number of its request. A task stays here until its last
     /// step, also after `inboundTasks` dropped it to write its response and
     /// to run its deferred work. The read loop waits for these tasks before
     /// `closed` gives its reason.
-    private var liveInboundTasks: [Int: Task<Void, Never>] = [:]
-    /// Monotonic key for `liveInboundTasks` entries.
-    private var nextInboundToken = 0
+    private var liveInboundTasks: [UInt64: Task<Void, Never>] = [:]
+    /// The wire sequence number of the next inbound frame. Each frame that
+    /// the read loop dispatches gets the next number, whatever its kind.
+    private var nextWireSequence: UInt64 = 0
     /// Why the connection closed, or `nil` while it is open. Set exactly
     /// once, by `shutDown(reason:)`, before pending requests are rejected.
     private var closeReason: ConnectionCloseReason?
@@ -833,7 +834,7 @@ public actor Connection {
     /// Forgets one inbound request task at its last step.
     ///
     /// - Parameter token: The `liveInboundTasks` key of the task.
-    private func retireInboundTask(token: Int) {
+    private func retireInboundTask(token: UInt64) {
         liveInboundTasks.removeValue(forKey: token)
     }
 
@@ -951,6 +952,8 @@ public actor Connection {
     /// - Parameters:
     ///   - message: The decoded envelope.
     private func dispatchSingle(_ message: JSONValue) async {
+        let sequence = nextWireSequence
+        nextWireSequence += 1
         guard case .object(let fields) = message else {
             log("dropping non-object message")
             return
@@ -963,13 +966,17 @@ public actor Connection {
         }
         switch Self.classify(fields: fields) {
         case .request(let id, let method, let params):
-            await dispatchRequest(id: id, method: method, params: params)
+            await dispatchRequest(id: id, method: method, params: params, sequence: sequence)
         case .notification(let method, let params):
-            await notificationHandler?(method, params)
+            await Self.$currentWireSequence.withValue(sequence) {
+                await notificationHandler?(method, params)
+            }
         case .cancelRequest(let params):
             handleCancelRequest(params: params)
         case .response(let id, let responseFields):
-            resolve(id: id, fields: responseFields)
+            Self.$currentWireSequence.withValue(sequence) {
+                resolve(id: id, fields: responseFields)
+            }
         case .unclassifiable(let id):
             await respond(id: id, outcome: .failure(.invalidRequest))
         case .malformed:
@@ -1042,7 +1049,9 @@ public actor Connection {
     ///     and the same key a `$/cancel_request` names to cancel this task.
     ///   - method: The JSON-RPC method name.
     ///   - params: The request parameters, passed through verbatim.
-    private func dispatchRequest(id: RequestId, method: String, params: JSONValue?) async {
+    ///   - sequence: The wire sequence number of the request frame. It is the
+    ///     arrival number that the handler reads.
+    private func dispatchRequest(id: RequestId, method: String, params: JSONValue?, sequence: UInt64) async {
         // The read loop can still dispatch a frame after `close()`. A handler
         // that starts now cannot write a response, and `closed` could give its
         // reason while that handler runs; thus it does not start.
@@ -1056,8 +1065,7 @@ public actor Connection {
             return
         }
         let handler = requestHandler
-        let token = nextInboundToken
-        nextInboundToken += 1
+        let token = sequence
         let cancellation = InboundCancellation()
         let task = Task {
             // Bound around the handler call so `afterRespondingToCurrentRequest`
@@ -1073,7 +1081,7 @@ public actor Connection {
             let outcome = hooks.settle(
                 await Self.$currentResponseHooks.withValue(hooks) {
                     await Self.$currentInboundCancellation.withValue(cancellation) {
-                        await Self.$currentRequestArrivalNumber.withValue(UInt64(token)) {
+                        await Self.$currentRequestArrivalNumber.withValue(token) {
                             await Self.outcome(of: handler, method: method, params: params)
                         }
                     }

@@ -38,6 +38,11 @@ final class SessionUpdateRouter: Sendable {
     /// read loop and subscribing tasks.
     private let broadcaster: EventBroadcaster<SessionId, SessionStreamEvent, PendingSessionUpdates>
 
+    /// The subscribers of the stream of all sessions, and the kept events as
+    /// the context. The delivery step of an event publishes to both
+    /// broadcasters, in the same call.
+    private let allSessions: EventBroadcaster<Int, SequencedSessionEvent, PendingSequencedEvents>
+
     /// The limits on the updates kept for sessions with no subscriber.
     private let limits: SessionUpdateBufferLimits
 
@@ -56,6 +61,28 @@ final class SessionUpdateRouter: Sendable {
         self.limits = limits
         self.logger = logger
         broadcaster = EventBroadcaster(context: PendingSessionUpdates(limits: limits))
+        allSessions = EventBroadcaster(context: PendingSequencedEvents(limits: limits))
+    }
+
+    /// The topic of the one stream of all sessions.
+    private static let allSessionsTopic = 0
+
+    /// Attaches a new subscriber to the events of all sessions.
+    ///
+    /// The first subscriber also gets the kept events and the overflow marks,
+    /// and then the router clears both. A subscription made after the
+    /// connection has closed yields an immediately-finished stream.
+    ///
+    /// - Returns: The subscription.
+    func subscribeToAllSessions() -> SessionEventSubscription {
+        let subscription = allSessions.subscribe(to: Self.allSessionsTopic) { pending in
+            let kept = pending.take()
+            return (kept.events, kept.missedSessions)
+        }
+        return SessionEventSubscription(
+            events: subscription.events,
+            sessionsWithMissedEvents: subscription.attachment ?? []
+        )
     }
 
     /// Attaches a new subscriber to one session.
@@ -113,6 +140,7 @@ final class SessionUpdateRouter: Sendable {
     ///   - event: The event to deliver.
     ///   - sessionId: The session of the event.
     private func deliver(_ event: SessionStreamEvent, for sessionId: SessionId) {
+        deliverToAllSessions(event, for: sessionId)
         let overflow = broadcaster.withState { state -> PendingSessionUpdates.Overflow? in
             guard !state.isFinished else { return nil }
             guard !state.publish(event, to: sessionId) else { return nil }
@@ -120,6 +148,27 @@ final class SessionUpdateRouter: Sendable {
         }
         if let overflow {
             logger.log(overflow.warning(limits: limits))
+        }
+    }
+
+    /// Delivers one event to the stream of all sessions, or keeps it for the
+    /// first subscriber.
+    ///
+    /// The event gets the wire sequence number of the frame that the read
+    /// loop dispatches, or, when no frame caused it, the next number above
+    /// every number given so far.
+    ///
+    /// - Parameters:
+    ///   - event: The event to deliver.
+    ///   - sessionId: The session of the event.
+    private func deliverToAllSessions(_ event: SessionStreamEvent, for sessionId: SessionId) {
+        let wireSequence = Connection.currentWireSequence
+        allSessions.withState { state in
+            guard !state.isFinished else { return }
+            let sequenced = SequencedSessionEvent(
+                sessionId: sessionId, event: event, sequence: state.context.sequence(for: wireSequence))
+            guard !state.publish(sequenced, to: Self.allSessionsTopic) else { return }
+            state.context.keep(sequenced)
         }
     }
 
@@ -133,6 +182,9 @@ final class SessionUpdateRouter: Sendable {
         broadcaster.withState { state in
             state.context.discard(for: sessionId)
         }
+        allSessions.withState { state in
+            state.context.discard(for: sessionId)
+        }
     }
 
     /// Finishes every subscribed stream, discards every kept update and
@@ -142,6 +194,9 @@ final class SessionUpdateRouter: Sendable {
     /// explicit close), which is the signal that no further updates can arrive.
     func finishAll() {
         broadcaster.finishAll { state in
+            state.context.removeAll()
+        }
+        allSessions.finishAll { state in
             state.context.removeAll()
         }
     }
@@ -281,5 +336,85 @@ struct PendingSessionUpdates {
         guard let events = buffers.removeValue(forKey: sessionId) else { return [] }
         bufferOrder.removeAll { $0 == sessionId }
         return events
+    }
+}
+
+/// The events that the stream of all sessions kept while it had no
+/// subscriber, the sessions whose kept events were discarded, and the last
+/// sequence number.
+struct PendingSequencedEvents {
+    /// The limits on the kept events.
+    private let limits: SessionUpdateBufferLimits
+
+    /// The kept events, in wire order.
+    private var kept: [SequencedSessionEvent] = []
+
+    /// The sessions whose kept events were discarded.
+    private var missedSessions: Set<SessionId> = []
+
+    /// The highest sequence number given so far, or `nil` when none.
+    private var lastSequence: UInt64?
+
+    /// Creates an empty store.
+    ///
+    /// - Parameter limits: The limits on the kept events.
+    init(limits: SessionUpdateBufferLimits) {
+        self.limits = limits
+    }
+
+    /// Gives the sequence number of an event.
+    ///
+    /// - Parameter wireSequence: The wire sequence number of the frame that
+    ///   caused the event, or `nil` when no frame caused it.
+    /// - Returns: The wire sequence number, or the next number above every
+    ///   number given so far.
+    mutating func sequence(for wireSequence: UInt64?) -> UInt64 {
+        let sequence = wireSequence ?? (lastSequence.map { $0 + 1 } ?? 0)
+        lastSequence = max(lastSequence ?? sequence, sequence)
+        return sequence
+    }
+
+    /// Keeps one event, and applies the limit.
+    ///
+    /// The store keeps up to ``SessionUpdateBufferLimits/maximumUpdatesPerSession``
+    /// events in total, because a client that uses only the streams of single
+    /// sessions never reads this stream. When the store is full, it discards
+    /// every kept event and the new event, and marks the sessions of all of
+    /// them. It does not log: the mark is the signal.
+    ///
+    /// - Parameter event: The event to keep.
+    mutating func keep(_ event: SequencedSessionEvent) {
+        guard kept.count < limits.maximumUpdatesPerSession else {
+            missedSessions.formUnion(kept.map(\.sessionId))
+            missedSessions.insert(event.sessionId)
+            kept.removeAll()
+            return
+        }
+        kept.append(event)
+    }
+
+    /// Removes and returns the kept events and the overflow marks.
+    ///
+    /// - Returns: The kept events, in order, and the marked sessions.
+    mutating func take() -> (events: [SequencedSessionEvent], missedSessions: Set<SessionId>) {
+        defer {
+            kept.removeAll()
+            missedSessions.removeAll()
+        }
+        return (kept, missedSessions)
+    }
+
+    /// Discards the kept events and the overflow mark of a session.
+    ///
+    /// - Parameter sessionId: The session to discard.
+    mutating func discard(for sessionId: SessionId) {
+        kept.removeAll { $0.sessionId == sessionId }
+        missedSessions.remove(sessionId)
+    }
+
+    /// Discards every kept event and every overflow mark.
+    mutating func removeAll() {
+        kept.removeAll()
+        missedSessions.removeAll()
     }
 }

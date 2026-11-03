@@ -6,16 +6,26 @@ extension Connection {
     /// around the handler call.
     @TaskLocal static var currentRequestArrivalNumber: UInt64?
 
+    /// The wire sequence number of the inbound notification or response that
+    /// the current task handles, or `nil` in any other task. The read loop
+    /// binds it around the notification handler and around the resolution of
+    /// a response. It comes from the same counter as
+    /// ``currentRequestArrival``.
+    @TaskLocal static var currentWireSequence: UInt64?
+
     /// The arrival number of the inbound request that the current task
     /// handles.
     ///
     /// Each inbound request runs in its own task, so two handlers can start
     /// in an order that is not the wire order. This number gives the wire
-    /// order: the connection gives each inbound request that it dispatches
-    /// the next number, in the order that it reads the frames. A later
-    /// request always has a larger number. The numbers are local to one
-    /// connection and can have gaps (for example, a request with a
-    /// duplicate id gets no number).
+    /// order: the connection gives each inbound frame the next number, in
+    /// the order that it reads the frames. The frame can be a request, a
+    /// notification, or a response. No two frames have the same number. A
+    /// later frame always has a larger number. Thus an inbound request has a
+    /// larger number than every earlier `session/update`, and the sequence
+    /// number of ``SequencedSessionEvent`` is comparable with it. The numbers
+    /// are local to one connection and can have gaps (for example, a frame
+    /// that is not a message gets a number and no event).
     ///
     /// It is `nil` in a task that no handler started. A task that a handler
     /// starts (for example with `Task { }`) inherits the number of that

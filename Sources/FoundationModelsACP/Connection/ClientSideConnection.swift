@@ -170,6 +170,38 @@ public final class ClientSideConnection: Sendable {
         router.subscribe(to: sessionId)
     }
 
+    /// Subscribes to the events of every session of this connection, in wire
+    /// order.
+    ///
+    /// The stream holds one ``SequencedSessionEvent`` for each event that
+    /// ``subscribe(to:)`` gives for any session: the `session/update`
+    /// notifications and the request-finished markers. All of them are in one
+    /// stream, in the order that the connection read them from the wire. Thus
+    /// a client that reads this stream with one task applies the events in
+    /// wire order. For example, the announcement of a child session in the
+    /// stream of its parent comes before the first event of the child, and the
+    /// marker of a `session/resume` comes after the replayed updates of every
+    /// session.
+    ///
+    /// Each event has a ``SequencedSessionEvent/sequence``. It comes from the
+    /// same counter as ``currentRequestArrival``. A handler of an inbound
+    /// request, for example `requestPermission`, reads its arrival number as
+    /// its first statement. It can then wait until the reader of the stream
+    /// applied each event with a lower sequence. Then it knows that the client
+    /// applied everything that the agent sent before the request. The wait is
+    /// the work of the client.
+    ///
+    /// The stream keeps events from the start of the connection until the
+    /// first subscription, so the client loses nothing between the connect
+    /// and its first read. Call this method as soon as the connection exists.
+    /// See ``SessionEventSubscription`` for the limits.
+    ///
+    /// - Returns: The subscription: the stream of all events, and the sessions
+    ///   that discarded events before it was attached.
+    public func subscribeToAllSessions() -> SessionEventSubscription {
+        router.subscribeToAllSessions()
+    }
+
     // MARK: - Outgoing requests
 
     /// Subscribes to the start and the finish of each request that this
