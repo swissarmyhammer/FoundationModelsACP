@@ -55,6 +55,18 @@ import Testing
         #expect(outcome(.turnResponse, in: ConformanceEvaluator.turn(run, session: F.session)) == .fail)
     }
 
+    @Test func theFailureOfTheRunIsInTheResponseMessage() {
+        let run = RecordedRun(name: "turn", failure: "boom", entries: [])
+        let result = ConformanceEvaluator.turn(run, session: F.session).first { $0.check == .turnResponse }
+        #expect(result?.message?.contains("boom") == true)
+    }
+
+    @Test func theFailureOfTheRunIsInTheResumeMessage() {
+        let run = RecordedRun(name: "resume", resumeSessionId: F.session, failure: "boom", entries: [])
+        let result = ConformanceEvaluator.resume(run, replaysHistory: false).first { $0.check == .resumeAccepted }
+        #expect(result?.message?.contains("boom") == true)
+    }
+
     // MARK: cancel
 
     @Test func aCancelThatEndsInIdlePasses() {

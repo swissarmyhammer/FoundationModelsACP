@@ -3,6 +3,9 @@ import FoundationModelsACP
 
 /// One running agent process with a connection and a recorder.
 final class AgentProcess: Sendable {
+    /// How often `wait` looks at the recorder.
+    private static let pollInterval = Duration.milliseconds(20)
+
     let client: ClientSideConnection
     let recorder: WireRecorder
     private let transport: SubprocessTransport
@@ -61,7 +64,7 @@ final class AgentProcess: Sendable {
             } else if !needsCondition, clock.now - lastChange >= configuration.quiet {
                 return false
             }
-            try? await Task.sleep(for: .milliseconds(20))
+            try? await Task.sleep(for: Self.pollInterval)
         }
         return false
     }

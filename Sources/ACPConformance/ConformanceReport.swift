@@ -49,6 +49,9 @@ struct ConformanceResult: Sendable, Encodable {
 
 /// The result of a conformance run: one result for each check.
 struct ConformanceReport: Sendable {
+    /// The width of the outcome column in the text list.
+    private static let outcomeColumnWidth = 7
+
     let results: [ConformanceResult]
 
     /// Whether no check failed. A skipped check does not fail the run.
@@ -60,7 +63,7 @@ struct ConformanceReport: Sendable {
     /// One line for each check.
     var text: String {
         results.map { result in
-            var line = "\(result.outcome.rawValue.uppercased().padding(toLength: 7, withPad: " ", startingAt: 0))"
+            var line = "\(result.outcome.rawValue.uppercased().padding(toLength: Self.outcomeColumnWidth, withPad: " ", startingAt: 0))"
             line += "\(result.check.id)  \(result.check.title)"
             if let scenario = result.scenario { line += " [\(scenario)]" }
             if let position = result.position { line += " position \(position)" }

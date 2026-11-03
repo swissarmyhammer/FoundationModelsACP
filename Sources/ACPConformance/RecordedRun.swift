@@ -25,7 +25,20 @@ struct RecordedRun: Sendable {
 
     var entries: [Entry]
 
-    init(name: String, resumeSessionId: SessionId? = nil, resumeUnsupported: Bool = false, entries: [Entry]) {
+    /// The error that stopped the scenario (a start failure or a failed
+    /// request), when there is one. The checks put it in their messages.
+    var failure: String?
+
+    /// `message`, with the failure of the run added when there is one.
+    func failureText(_ message: String) -> String {
+        failure.map { "\(message) (\($0))" } ?? message
+    }
+
+    init(
+        name: String, resumeSessionId: SessionId? = nil, resumeUnsupported: Bool = false, failure: String? = nil,
+        entries: [Entry]
+    ) {
+        self.failure = failure
         self.name = name
         self.resumeSessionId = resumeSessionId
         self.resumeUnsupported = resumeUnsupported

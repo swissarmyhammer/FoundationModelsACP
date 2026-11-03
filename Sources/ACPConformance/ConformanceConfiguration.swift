@@ -2,6 +2,12 @@ import Foundation
 
 /// The agent under test and the limits of a run.
 struct ConformanceConfiguration: Sendable {
+    /// The default longest wait for one step.
+    static let defaultTimeout = Duration.seconds(60)
+
+    /// The default quiet time.
+    static let defaultQuiet = Duration.seconds(2)
+
     /// The agent executable. The runner starts it once for each scenario.
     var executable: URL
 
@@ -18,11 +24,11 @@ struct ConformanceConfiguration: Sendable {
     var cwd = "/"
 
     /// The longest wait for one step.
-    var timeout: Duration = .seconds(60)
+    var timeout = defaultTimeout
 
     /// How long the wire must be quiet before the runner decides that an agent
     /// will send nothing more. A turn that never reports `idle` ends this way.
-    var quiet: Duration = .seconds(2)
+    var quiet = defaultQuiet
 }
 
 /// The resume scenarios for an agent under test, read from a JSON file:

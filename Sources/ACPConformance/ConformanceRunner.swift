@@ -3,7 +3,6 @@ import FoundationModelsACP
 
 /// Plays the scripted client scenarios against an agent and checks the wire.
 enum ConformanceRunner {
-    private static let promptMethod = WireMethod.prompt
     private static let holdText = "Keep working until cancelled."
 
     static func run(_ configuration: ConformanceConfiguration) async -> ConformanceReport {
@@ -24,9 +23,7 @@ enum ConformanceRunner {
         results.append(ConformanceEvaluator.cancel(cancelled.run, session: cancelled.session))
         runs.append(cancelled.run)
 
-        let steps =
-            configuration.script?.resumes
-            ?? [.init(replayFrom: true), .init(replayFrom: false)]
+        let steps = configuration.script?.resumes ?? [.init(replayFrom: true), .init(replayFrom: false)]
         for (index, step) in steps.enumerated() {
             let replays = step.replayFrom ?? true
             let run = await playResume(
@@ -61,8 +58,7 @@ enum ConformanceRunner {
         }
         var results: [ConformanceResult] = []
         do {
-            _ = try await agent.client.initialize(
-                InitializeRequest(info: Implementation(name: "acp-conformance", version: "0.0.0"), protocolVersion: .latest))
+            try await initialize(agent)
             results.append(ConformanceResult(check: .initialize, outcome: .pass, scenario: name))
         } catch {
             await agent.close()
@@ -79,11 +75,15 @@ enum ConformanceRunner {
             results.append(ConformanceResult(check: .newSession, outcome: .fail, scenario: name, message: "\(error)"))
             return TurnOutcome(results: results, session: nil, run: empty)
         }
-        _ = try? await agent.client.prompt(
-            PromptRequest(prompt: [.text(TextContent(text: "Say hello."))], sessionId: session))
-        await agent.wait { idleSeen($0, session) }
-        let run = RecordedRun(name: name, entries: await agent.recorder.entries)
-        await agent.close()
+        var failure: String?
+        do {
+            _ = try await agent.client.prompt(
+                PromptRequest(prompt: [.text(TextContent(text: "Say hello."))], sessionId: session))
+        } catch {
+            failure = "\(error)"
+        }
+        await agent.wait { stateSeen($0, session, idle: true) }
+        let run = await finish(agent, name: name, failure: failure)
         results += ConformanceEvaluator.turn(run, session: session)
         return TurnOutcome(results: results, session: session, run: run)
     }
@@ -93,23 +93,26 @@ enum ConformanceRunner {
         _ configuration: ConformanceConfiguration, session: SessionId
     ) async -> (run: RecordedRun, session: SessionId) {
         let name = "cancel"
-        guard let agent = try? await AgentProcess(configuration) else { return (RecordedRun(name: name, entries: []), session) }
-        var created = session
+        let agent: AgentProcess
         do {
-            _ = try await agent.client.initialize(
-                InitializeRequest(info: Implementation(name: "acp-conformance", version: "0.0.0"), protocolVersion: .latest))
+            agent = try await AgentProcess(configuration)
+        } catch {
+            return (RecordedRun(name: name, failure: "cannot start the agent: \(error)", entries: []), session)
+        }
+        var created = session
+        var failure: String?
+        do {
+            try await initialize(agent)
             created = try await agent.client.newSession(NewSessionRequest(cwd: AbsolutePath(rawValue: configuration.cwd))).sessionId
             _ = try await agent.client.prompt(
                 PromptRequest(prompt: [.text(TextContent(text: holdText))], sessionId: created))
-            await agent.wait { runningSeen($0, created) }
+            await agent.wait { stateSeen($0, created, idle: false) }
             try await agent.client.sessionCancel(CancelSessionNotification(sessionId: created))
-            await agent.wait { idleSeen($0, created) }
+            await agent.wait { stateSeen($0, created, idle: true) }
         } catch {
-            // The checks report what the wire shows.
+            failure = "\(error)"
         }
-        let run = RecordedRun(name: name, entries: await agent.recorder.entries)
-        await agent.close()
-        return (run, created)
+        return (await finish(agent, name: name, failure: failure), created)
     }
 
     /// One session/resume.
@@ -117,13 +120,17 @@ enum ConformanceRunner {
         _ configuration: ConformanceConfiguration, step: ConformanceScript.Resume, name: String, createdSession: SessionId
     ) async -> RecordedRun {
         let session = step.sessionId.map { SessionId(rawValue: $0) } ?? createdSession
-        guard let agent = try? await AgentProcess(configuration) else {
-            return RecordedRun(name: name, resumeSessionId: session, entries: [])
+        let agent: AgentProcess
+        do {
+            agent = try await AgentProcess(configuration)
+        } catch {
+            return RecordedRun(
+                name: name, resumeSessionId: session, failure: "cannot start the agent: \(error)", entries: [])
         }
         var unsupported = false
+        var failure: String?
         do {
-            _ = try await agent.client.initialize(
-                InitializeRequest(info: Implementation(name: "acp-conformance", version: "0.0.0"), protocolVersion: .latest))
+            try await initialize(agent)
             let request = ResumeSessionRequest(
                 cwd: AbsolutePath(rawValue: configuration.cwd), sessionId: session,
                 replayFrom: (step.replayFrom ?? true) ? .start(ReplayFromStart()) : nil)
@@ -136,25 +143,39 @@ enum ConformanceRunner {
         } catch let error as RequestError where error.code == .methodNotFound {
             unsupported = true
         } catch {
-            // The response marker shows the failure.
+            failure = "\(error)"
         }
-        let run = RecordedRun(
-            name: name, resumeSessionId: session, resumeUnsupported: unsupported, entries: await agent.recorder.entries)
-        await agent.close()
-        return run
+        return await finish(agent, name: name, resumeSessionId: session, resumeUnsupported: unsupported, failure: failure)
     }
 
     // MARK: helpers
 
-    private static func idleSeen(_ entries: [RecordedRun.Entry], _ session: SessionId) -> Bool {
-        entries.contains { entry in
-            if case .update(session, .stateUpdate(.idle)) = entry { true } else { false }
-        }
+    private static func initialize(_ agent: AgentProcess) async throws {
+        _ = try await agent.client.initialize(
+            InitializeRequest(info: Implementation(name: "acp-conformance", version: "0.0.0"), protocolVersion: .latest))
     }
 
-    private static func runningSeen(_ entries: [RecordedRun.Entry], _ session: SessionId) -> Bool {
+    /// Records the entries, closes the agent, and returns the run.
+    private static func finish(
+        _ agent: AgentProcess, name: String, resumeSessionId: SessionId? = nil, resumeUnsupported: Bool = false,
+        failure: String? = nil
+    ) async -> RecordedRun {
+        let entries = await agent.recorder.entries
+        await agent.close()
+        return RecordedRun(
+            name: name, resumeSessionId: resumeSessionId, resumeUnsupported: resumeUnsupported, failure: failure,
+            entries: entries)
+    }
+
+    /// Whether the session reported `idle` (or, when `idle` is false, `running`).
+    private static func stateSeen(_ entries: [RecordedRun.Entry], _ session: SessionId, idle: Bool) -> Bool {
         entries.contains { entry in
-            if case .update(session, .stateUpdate(.running)) = entry { true } else { false }
+            guard case .update(session, .stateUpdate(let state)) = entry else { return false }
+            switch state {
+            case .idle: return idle
+            case .running: return !idle
+            default: return false
+            }
         }
     }
 

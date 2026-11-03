@@ -6,6 +6,13 @@ enum ConformanceEvaluator {
     private static let promptMethod = WireMethod.prompt
     private static let resumeMethod = WireMethod.resume
 
+    /// Whether the first response to `method` succeeded, or `nil` without a response.
+    private static func firstResponse(in run: RecordedRun, method: String) -> Bool? {
+        run.entries.lazy.compactMap { entry -> Bool? in
+            if case .response(_, let responded, let succeeded) = entry, responded == method { succeeded } else { nil }
+        }.first
+    }
+
     private enum StateKind { case running, idle, requiresAction, unknown }
 
     private static func states(of run: RecordedRun, session: SessionId) -> [(position: Int, kind: StateKind)] {
@@ -28,17 +35,14 @@ enum ConformanceEvaluator {
     }
 
     private static func turnResponse(_ run: RecordedRun) -> ConformanceResult {
-        let response = run.entries.lazy.compactMap { entry -> Bool? in
-            if case .response(_, promptMethod, let succeeded) = entry { return succeeded } else { return nil }
-        }.first
-        switch response {
+        switch firstResponse(in: run, method: promptMethod) {
         case true: return ConformanceResult(check: .turnResponse, outcome: .pass, scenario: run.name)
         case false:
             return ConformanceResult(
                 check: .turnResponse, outcome: .fail, scenario: run.name, message: "the agent answered session/prompt with an error")
         default:
             return ConformanceResult(
-                check: .turnResponse, outcome: .fail, scenario: run.name, message: "no session/prompt response")
+                check: .turnResponse, outcome: .fail, scenario: run.name, message: run.failureText("no session/prompt response"))
         }
     }
 
@@ -65,7 +69,7 @@ enum ConformanceEvaluator {
         let states = states(of: run, session: session)
         guard let last = states.last else {
             return ConformanceResult(
-                check: .cancelEndsTurn, outcome: .fail, scenario: run.name, message: "no state_update after the prompt")
+                check: .cancelEndsTurn, outcome: .fail, scenario: run.name, message: run.failureText("no state_update after the prompt"))
         }
         guard last.kind == .idle else {
             return ConformanceResult(
@@ -84,19 +88,15 @@ enum ConformanceEvaluator {
     ///   - replaysHistory: Whether the request had `replayFrom`.
     static func resume(_ run: RecordedRun, replaysHistory: Bool) -> [ConformanceResult] {
         if run.resumeUnsupported {
-            return [
-                ConformanceResult(check: .resumeAccepted, outcome: .skipped, scenario: run.name, message: "session/resume is not supported"),
-                ConformanceResult(
-                    check: .resumeNoHistoryWithoutReplayFrom, outcome: .skipped, scenario: run.name,
-                    message: "session/resume is not supported"),
-            ]
+            let message = "session/resume is not supported"
+            return [ConformanceCheck.resumeAccepted, .resumeNoHistoryWithoutReplayFrom].map {
+                ConformanceResult(check: $0, outcome: .skipped, scenario: run.name, message: message)
+            }
         }
-        let response = run.entries.lazy.compactMap { entry -> Bool? in
-            if case .response(_, resumeMethod, let succeeded) = entry { return succeeded } else { return nil }
-        }.first
+        let response = firstResponse(in: run, method: resumeMethod)
         let accepted = ConformanceResult(
             check: .resumeAccepted, outcome: response == true ? .pass : .fail, scenario: run.name,
-            message: response == true ? nil : "session/resume got no successful response")
+            message: response == true ? nil : run.failureText("session/resume got no successful response"))
         return [accepted, history(run, replaysHistory: replaysHistory)]
     }
 

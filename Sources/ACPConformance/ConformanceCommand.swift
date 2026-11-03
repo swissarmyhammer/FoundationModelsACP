@@ -7,6 +7,9 @@ import Foundation
 ///
 /// The exit code is 0 when no check failed, 1 when a check failed, and 2 for a usage error.
 public enum ConformanceCommand {
+    /// The exit code for a usage error or an unwritable report.
+    static let usageExitCode: Int32 = 2
+
     struct UsageError: Error, CustomStringConvertible {
         let description: String
     }
@@ -101,14 +104,15 @@ public enum ConformanceCommand {
             options = try parse(arguments)
         } catch {
             FileHandle.standardError.write(Data("acp-conformance: \(error)\n\(usage)\n".utf8))
-            return 2
+            return usageExitCode
         }
         let report = await ConformanceRunner.run(options.configuration)
         do {
-            print(options.json ? try report.json() : report.text)
+            let output = options.json ? try report.json() : report.text
+            FileHandle.standardOutput.write(Data((output + "\n").utf8))
         } catch {
             FileHandle.standardError.write(Data("acp-conformance: cannot write the report: \(error)\n".utf8))
-            return 2
+            return usageExitCode
         }
         return report.exitCode
     }

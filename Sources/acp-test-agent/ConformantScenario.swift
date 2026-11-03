@@ -27,10 +27,15 @@ enum ConformantScenario {
         /// Ends the held turn of the session, if there is one.
         func cancel(_ session: SessionId, on connection: AgentSideConnection) async {
             guard sessions.remove(session) != nil else { return }
-            try? await connection.sessionUpdate(
-                UpdateSessionNotification(
-                    sessionId: session, update: .stateUpdate(.idle(IdleStateUpdate(stopReason: .cancelled)))))
+            try? await ConformantScenario.sendIdle(session, stopReason: .cancelled, on: connection)
         }
+    }
+
+    /// Sends the final `idle` state of a turn.
+    static func sendIdle(_ session: SessionId, stopReason: StopReason, on connection: AgentSideConnection) async throws {
+        try await connection.sessionUpdate(
+            UpdateSessionNotification(
+                sessionId: session, update: .stateUpdate(.idle(IdleStateUpdate(stopReason: stopReason)))))
     }
 
     private static func isHeld(_ params: PromptRequest) -> Bool {
@@ -55,9 +60,7 @@ enum ConformantScenario {
                     update: .agentMessage(AgentMessage(
                         messageId: MessageId(rawValue: "conformant-reply"),
                         content: .value([.text(TextContent(text: "Hello"))])))))
-            try? await connection.sessionUpdate(
-                UpdateSessionNotification(
-                    sessionId: session, update: .stateUpdate(.idle(IdleStateUpdate(stopReason: .endTurn)))))
+            try? await sendIdle(session, stopReason: .endTurn, on: connection)
         }
     }
 
@@ -78,9 +81,7 @@ enum ConformantScenario {
                         messageId: MessageId(rawValue: "history-agent"),
                         content: .value([.text(TextContent(text: "Hello"))])))))
         }
-        try await connection.sessionUpdate(
-            UpdateSessionNotification(
-                sessionId: session, update: .stateUpdate(.idle(IdleStateUpdate(stopReason: .endTurn)))))
+        try await sendIdle(session, stopReason: .endTurn, on: connection)
         try await connection.sessionUpdate(
             UpdateSessionNotification(
                 sessionId: session, update: .sessionInfoUpdate(SessionInfoUpdate(title: .value("Conformance")))))
