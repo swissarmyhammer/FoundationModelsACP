@@ -18,6 +18,8 @@ connection over a transport, a merge engine that builds session state from
 - ``SessionMessageChunk``
 - ``SAH/AgentRun``
 - ``SAH/RestoreFailure``
+- ``SubagentWireTraceValidator``
+- ``WireTraceEvent``
 
 ### Session state
 

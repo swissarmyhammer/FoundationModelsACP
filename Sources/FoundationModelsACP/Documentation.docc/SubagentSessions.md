@@ -106,3 +106,12 @@ response. Thus one reader ends the replay of all sessions at the same place.
 Call ``ClientSideConnection/subscribeToAllSessions()`` as soon as the
 connection exists. The connection keeps the events before the first
 subscription, up to a limit.
+
+### Check a trace in a test
+
+``SubagentWireTraceValidator`` is a test oracle. Record the messages of a
+connection in wire order as ``WireTraceEvent`` values, and call
+``SubagentWireTraceValidator/validate(_:)``. It returns the violations of the
+rules in this article. Each violation has a ``SubagentWireTraceValidator/Rule``
+and the position in the trace. An empty result means that the trace follows the
+rules.

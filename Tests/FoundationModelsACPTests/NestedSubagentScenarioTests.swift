@@ -14,55 +14,12 @@ import Testing
     private static let failedGrandchild = SessionId(rawValue: "grandchild-2")
     private static let childCall = ToolCallId(rawValue: "call-child-1")
 
-    /// A client that answers the child elicitation, and tells when it did.
-    private struct ElicitedClient: Client {
-        let elicitations: AsyncStream<UInt64?>.Continuation
-
-        func sessionUpdate(_ notification: UpdateSessionNotification) async {}
-
-        func requestPermission(_ params: RequestPermissionRequest) async throws -> RequestPermissionResponse {
-            throw RequestError.methodNotFound("requestPermission")
-        }
-
-        func createElicitation(_ params: CreateElicitationRequest) async throws -> CreateElicitationResponse {
-            elicitations.yield(ClientSideConnection.currentRequestArrival)
-            return .object(["action": .string("cancel")])
-        }
-
-        func elicitationComplete(_ notification: CompleteElicitationNotification) async {}
-    }
-
     /// Plays the scenario, and returns every event up to the final update of
     /// the tool call that started `child-1`, and the arrival number of the
     /// elicitation request.
-    private func play() async throws -> (events: [SequencedSessionEvent], elicitationArrival: UInt64?) {
-        let transport = try SubprocessTransport(
-            executableURL: TransportTestSupport.helperAgentURL, arguments: ["--scenario", "nested-subagents"])
-        let (elicitations, continuation) = AsyncStream.makeStream(of: UInt64?.self)
-        let client = await ClientSideConnection(stream: transport) { _ in ElicitedClient(elicitations: continuation) }
-        var events = client.subscribeToAllSessions().events.makeAsyncIterator()
-        do {
-            _ = try await client.initialize(handshakeInitializeRequest())
-            _ = try await client.resumeSession(ResumeSessionRequest(cwd: AbsolutePath(rawValue: "/work"), sessionId: Self.root))
-        } catch {
-            await client.close()
-            transport.close()
-            throw error
-        }
-        var received: [SequencedSessionEvent] = []
-        while let event = await events.next() {
-            received.append(event)
-            if case .update(.toolCallUpdate(let call)) = event.event, event.sessionId == Self.root,
-                call.toolCallId == Self.childCall, call.status == .value(.completed)
-            {
-                break
-            }
-        }
-        var arrivals = elicitations.makeAsyncIterator()
-        let arrival = await arrivals.next() ?? nil
-        await client.close()
-        transport.close()
-        return (received, arrival)
+    private func play() async throws -> (events: [SequencedSessionEvent], elicitationArrival: UInt64) {
+        let recording = try await NestedScenarioRun.play()
+        return (recording.events, recording.request.arrival)
     }
 
     private static func sessions(_ events: some Sequence<SequencedSessionEvent>) -> [SessionId] {
@@ -152,7 +109,7 @@ import Testing
         let markerIndex = try #require(events.firstIndex {
             if case .requestFinished = $0.event { return true } else { return false }
         })
-        let elicitationArrival = try #require(arrival)
+        let elicitationArrival = arrival
         let lastSnapshot = events[markerIndex + 4]
         let finishStart = events[markerIndex + 5]
 

@@ -47,3 +47,14 @@ The order on the wire follows the "Ordering" rule of ACP v2 "Session Setup":
 Every announcement of a child is a `subagent_update` in the stream of its
 parent, with `_meta.sah.agentRun.toolCallId`. The tool call that started the
 child carries `_meta.sah.agentRun.sessionId`.
+
+## Check a trace with the validator
+
+The `SubagentWireTraceValidator` type of the `FoundationModelsACP` library is
+the test oracle for sub-agent traces. Record the messages of a connection in
+wire order as `WireTraceEvent` values: the `session/resume` request, the
+updates (a `SequencedSessionEvent` of `subscribeToAllSessions()` converts with
+`WireTraceEvent(_:)`), the requests of the agent, and the response. Then call
+`validate(_:)`. The result is a list of violations. Each one has the rule (1 to
+10) and the position in the trace. The trace of this scenario has no
+violations, and the tests break it once for each rule.
