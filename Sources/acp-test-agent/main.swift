@@ -7,6 +7,11 @@ import FoundationModelsACP
 /// test can prove stdout stays pure ndJSON while the agent logs internally —
 /// and answers the handshake with the latest protocol version.
 struct TestAgent: Agent {
+    /// Whether the agent plays `NestedSubagentScenario` when the client
+    /// resumes a session. The launch argument `--scenario nested-subagents`
+    /// turns it on.
+    let playsNestedSubagentScenario: Bool
+
     /// The connection that the factory gave this agent. The agent uses it to
     /// echo each prompt back to the client as a `user_message` update.
     let connection: AgentSideConnection
@@ -45,7 +50,8 @@ struct TestAgent: Agent {
     /// - Parameter params: The resume-session request.
     /// - Returns: An empty resume response.
     func resumeSession(_ params: ResumeSessionRequest) async throws -> ResumeSessionResponse {
-        ResumeSessionResponse()
+        guard playsNestedSubagentScenario else { return ResumeSessionResponse() }
+        return try await NestedSubagentScenario.resume(on: connection)
     }
 
     /// Closes the fixed session.
@@ -85,7 +91,9 @@ func runUntilTerminated(_ connection: AgentSideConnection) async {
     }
 }
 
+let scenarioArguments = Array(CommandLine.arguments.dropFirst())
+let playsNested = scenarioArguments == ["--scenario", NestedSubagentScenario.name]
 let connection = await AgentSideConnection(stream: .stdio, logger: .standardError) { conn in
-    TestAgent(connection: conn)
+    TestAgent(playsNestedSubagentScenario: playsNested, connection: conn)
 }
 await runUntilTerminated(connection)
