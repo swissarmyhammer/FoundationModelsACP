@@ -39,6 +39,11 @@ import Testing
                 "color": {
                   "type": ["string", "null"],
                   "x-deserialize-default-on-error": true
+                },
+                "_meta": {
+                  "type": ["object", "null"],
+                  "x-deserialize-default-on-error": true,
+                  "additionalProperties": true
                 }
               },
               "required": ["id"]
@@ -51,7 +56,7 @@ import Testing
     /// not, despite being just as nullable, to prove the config — not
     /// nullability — decides.
     private static let config = GeneratorConfig(
-        patchSemanticsFields: ["Widget.note", "Widget.tags", "Widget.code"]
+        patchSemanticsFields: ["Widget.note", "Widget.tags", "Widget.code", "Widget._meta"]
     )
 
     private func modelsSource() throws -> String {
@@ -118,6 +123,12 @@ import Testing
         #expect(source.contains("note: note.folded(onto: existing.note)"))
         #expect(source.contains("tags: tags.folded(onto: existing.tags)"))
         #expect(source.contains("code: code.folded(onto: existing.code)"))
+    }
+
+    @Test func aMetaPatchFieldFoldsByTopLevelKey() throws {
+        let source = try modelsSource()
+        #expect(source.contains("meta: meta.foldedAsMeta(onto: existing.meta)"))
+        #expect(!source.contains("meta: meta.folded(onto:"))
     }
 
     @Test func theFoldTakesEachFieldWithoutPatchSemanticsFromTheNewValue() throws {

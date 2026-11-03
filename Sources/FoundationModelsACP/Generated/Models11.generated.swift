@@ -133,7 +133,7 @@ public struct TerminalUpdate: Codable, Hashable, Sendable {
             exitStatus: exitStatus.folded(onto: existing.exitStatus),
             output: output.folded(onto: existing.output),
             size: size,
-            meta: meta.folded(onto: existing.meta)
+            meta: meta.foldedAsMeta(onto: existing.meta)
         )
     }
 }
@@ -829,7 +829,7 @@ public struct ToolCallUpdate: Codable, Hashable, Sendable {
             rawOutput: rawOutput.folded(onto: existing.rawOutput),
             status: status.folded(onto: existing.status),
             title: title.folded(onto: existing.title),
-            meta: meta.folded(onto: existing.meta)
+            meta: meta.foldedAsMeta(onto: existing.meta)
         )
     }
 }

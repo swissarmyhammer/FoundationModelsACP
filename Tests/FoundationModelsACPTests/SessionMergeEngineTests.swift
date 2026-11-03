@@ -245,7 +245,7 @@ enum SessionMergeEngineFixtures {
         #expect(cleared.meta == .cleared)
     }
 
-    @Test func aChunkWithMetaReplacesTheMessageMetaAndAChunkWithoutMetaKeepsIt() throws {
+    @Test func aChunkMetaIsScopedToTheChunkAndLeavesTheMessageMetaUnchanged() throws {
         var engine = SessionMergeEngine()
         engine.apply(
             .userMessageChunk(
@@ -254,7 +254,7 @@ enum SessionMergeEngineFixtures {
         )
         engine.apply(.userMessageChunk(ContentChunk(content: Fixtures.text("b"), messageId: Fixtures.messageId)))
         let message = try Fixtures.message(.userMessage(Fixtures.messageId), in: engine)
-        #expect(message.meta == .value(Fixtures.traceMeta))
+        #expect(message.meta == .unchanged)
     }
 
     // MARK: - Order of entries
@@ -334,7 +334,7 @@ enum SessionMergeEngineFixtures {
         )
         let toolCall = try Fixtures.toolCall(Fixtures.toolCallId, in: engine)
         #expect(toolCall.content == .value([first, second]))
-        #expect(toolCall.meta == .value(Fixtures.traceMeta))
+        #expect(toolCall.meta == .unchanged)
     }
 
     @Test func aToolCallUpdateWithContentReplacesTheChunksAndLaterChunksAppend() throws {
@@ -396,7 +396,7 @@ enum SessionMergeEngineFixtures {
         #expect(terminal.cwd == .cleared)
     }
 
-    @Test func aTerminalOutputChunkWithMetaReplacesTheTerminalMeta() throws {
+    @Test func aTerminalOutputChunkMetaLeavesTheTerminalMetaUnchanged() throws {
         var engine = SessionMergeEngine()
         engine.apply(.terminalUpdate(TerminalUpdate(terminalId: Fixtures.terminalId, meta: .value(Fixtures.traceMeta))))
         engine.apply(
@@ -408,7 +408,7 @@ enum SessionMergeEngineFixtures {
                 )
             )
         )
-        #expect(try Fixtures.terminal(Fixtures.terminalId, in: engine).meta == .value(Fixtures.otherMeta))
+        #expect(try Fixtures.terminal(Fixtures.terminalId, in: engine).meta == .value(Fixtures.traceMeta))
     }
 
     @Test func aFirstTerminalUpdateLeavesEachOmittedFieldUnknown() throws {

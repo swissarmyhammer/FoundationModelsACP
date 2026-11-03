@@ -351,7 +351,7 @@ public struct SessionInfoUpdate: Codable, Hashable, Sendable {
         SessionInfoUpdate(
             title: title.folded(onto: existing.title),
             updatedAt: updatedAt.folded(onto: existing.updatedAt),
-            meta: meta.folded(onto: existing.meta)
+            meta: meta.foldedAsMeta(onto: existing.meta)
         )
     }
 }
@@ -484,7 +484,7 @@ public struct SessionMessage: Codable, Hashable, Sendable {
             recipientSessionId: recipientSessionId.folded(onto: existing.recipientSessionId),
             senderMessageId: senderMessageId.folded(onto: existing.senderMessageId),
             senderSessionId: senderSessionId.folded(onto: existing.senderSessionId),
-            meta: meta.folded(onto: existing.meta)
+            meta: meta.foldedAsMeta(onto: existing.meta)
         )
     }
 }

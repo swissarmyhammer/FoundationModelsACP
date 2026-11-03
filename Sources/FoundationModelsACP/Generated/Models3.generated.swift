@@ -234,7 +234,7 @@ public struct CompactionUpdate: Codable, Hashable, Sendable {
             status: status,
             error: error.folded(onto: existing.error),
             summary: summary.folded(onto: existing.summary),
-            meta: meta.folded(onto: existing.meta)
+            meta: meta.foldedAsMeta(onto: existing.meta)
         )
     }
 }

@@ -178,3 +178,44 @@ extension KeyedEncodingContainer {
         }
     }
 }
+
+extension PatchField where Wrapped == JSONValue {
+    /// Folds a `_meta` patch onto the stored `_meta`.
+    ///
+    /// Since `schema-v2.0.0-alpha.9` a `_meta` is not an ordinary patch field:
+    ///
+    /// - Omitted leaves the stored `_meta`.
+    /// - `null` clears it.
+    /// - An object patches the stored object by top-level key. A key that the
+    ///   patch omits is unchanged, a key set to `null` is removed, and any
+    ///   other value replaces that key's value without merging nested
+    ///   objects. With no stored object, the patch starts from an empty
+    ///   object, so its `null` keys are dropped.
+    /// - A value that is not an object replaces the stored `_meta`.
+    ///
+    /// - Parameter previous: The stored `_meta`.
+    /// - Returns: The stored `_meta` after this patch.
+    internal func foldedAsMeta(onto previous: PatchField<JSONValue>) -> PatchField<JSONValue> {
+        switch self {
+        case .unchanged:
+            return previous
+        case .cleared:
+            return .cleared
+        case .value(.object(let patch)):
+            var stored: [String: JSONValue] = [:]
+            if case .value(.object(let existing)) = previous {
+                stored = existing
+            }
+            for (key, value) in patch {
+                if value == .null {
+                    stored.removeValue(forKey: key)
+                } else {
+                    stored[key] = value
+                }
+            }
+            return .value(.object(stored))
+        case .value:
+            return self
+        }
+    }
+}

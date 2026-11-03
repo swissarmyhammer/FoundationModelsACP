@@ -208,7 +208,7 @@ public struct AgentMessage: Codable, Hashable, Sendable {
         AgentMessage(
             messageId: messageId,
             content: content.folded(onto: existing.content),
-            meta: meta.folded(onto: existing.meta)
+            meta: meta.foldedAsMeta(onto: existing.meta)
         )
     }
 }
@@ -400,7 +400,7 @@ public struct AgentThought: Codable, Hashable, Sendable {
         AgentThought(
             messageId: messageId,
             content: content.folded(onto: existing.content),
-            meta: meta.folded(onto: existing.meta)
+            meta: meta.foldedAsMeta(onto: existing.meta)
         )
     }
 }

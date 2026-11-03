@@ -138,14 +138,12 @@ public struct SessionMergeEngine: Hashable, Sendable {
         case .toolCallContentChunk(let chunk):
             updateToolCall(chunk.toolCallId) { toolCall in
                 toolCall.appendContent(chunk.content)
-                toolCall.meta = PatchField(optional: chunk.meta).folded(onto: toolCall.meta)
             }
         case .terminalUpdate(let terminal):
             updateTerminal(terminal.terminalId) { $0.apply(terminal) }
         case .terminalOutputChunk(let chunk):
             updateTerminal(chunk.terminalId) { terminal in
                 terminal.appendOutput(base64: chunk.data)
-                terminal.meta = PatchField(optional: chunk.meta).folded(onto: terminal.meta)
             }
         case .planUpdate(let plan):
             updatePlan(plan)

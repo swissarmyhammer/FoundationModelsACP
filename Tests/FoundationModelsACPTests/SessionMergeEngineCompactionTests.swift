@@ -120,7 +120,7 @@ import Testing
         let change = engine.apply(Self.summaryChunk("two", meta: Fixtures.traceMeta))
         let compaction = try Self.compaction(in: engine)
         #expect(compaction.summary == [Fixtures.text("one"), Fixtures.text("two")])
-        #expect(compaction.meta == .value(Fixtures.traceMeta))
+        #expect(compaction.meta == .unchanged)
         #expect(change == .entryChanged(index: 0, entry: try Fixtures.entry(.compaction(Self.compactionId), in: engine)))
     }
 

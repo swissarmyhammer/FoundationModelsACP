@@ -43,7 +43,7 @@ extension AccumulatedTerminal {
         command = update.command.folded(onto: command)
         cwd = update.cwd.folded(onto: cwd)
         exitStatus = update.exitStatus.folded(onto: exitStatus)
-        meta = update.meta.folded(onto: meta)
+        meta = update.meta.foldedAsMeta(onto: meta)
         switch update.output {
         case .unchanged:
             break

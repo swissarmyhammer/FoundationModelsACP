@@ -294,13 +294,13 @@ extension SessionEntry.Compaction {
         meta = merged.meta
     }
 
-    /// Appends the content block of a summary chunk to the summary. A chunk
-    /// that has `_meta` replaces the `_meta` of the compaction.
+    /// Appends the content block of a summary chunk to the summary. The `_meta`
+    /// of a chunk is scoped to the chunk, so it does not change the `_meta` of
+    /// the compaction.
     ///
     /// - Parameter chunk: The summary chunk.
     internal mutating func append(_ chunk: CompactionSummaryChunk) {
         summary.append(chunk.content)
-        meta = PatchField(optional: chunk.meta).folded(onto: meta)
     }
 
     /// The one session update that carries this compaction as a
@@ -346,24 +346,22 @@ extension SessionEntry.InterSessionMessage {
         meta = merged.meta
     }
 
-    /// Appends the content block of a chunk. A chunk that has `_meta`
-    /// replaces the `_meta` of the message.
+    /// Appends the content block of a chunk. The `_meta` of a chunk is scoped to
+    /// the chunk, so it does not change the `_meta` of the message.
     ///
     /// - Parameter chunk: The streamed chunk.
     internal mutating func append(_ chunk: SessionMessageChunk) {
         content.append(chunk.content)
-        meta = PatchField(optional: chunk.meta).folded(onto: meta)
     }
 }
 
 extension SessionEntry.Message {
-    /// Appends the content of a chunk. A chunk that has `_meta` replaces the
-    /// `_meta` of the message.
+    /// Appends the content of a chunk. The `_meta` of a chunk is scoped to the
+    /// chunk, so it does not change the `_meta` of the message.
     ///
     /// - Parameter chunk: The streamed content chunk.
     internal mutating func append(_ chunk: ContentChunk) {
         content.append(chunk.content)
-        meta = PatchField(optional: chunk.meta).folded(onto: meta)
     }
 
     /// Applies a whole-message update. Each field follows the patch rules.
@@ -373,7 +371,7 @@ extension SessionEntry.Message {
     ///   - newMeta: The `_meta` field of the update.
     internal mutating func apply(content newContent: PatchField<[ContentBlock]>, meta newMeta: PatchField<JSONValue>) {
         content = newContent.resolved(onto: content)
-        meta = newMeta.folded(onto: meta)
+        meta = newMeta.foldedAsMeta(onto: meta)
     }
 }
 

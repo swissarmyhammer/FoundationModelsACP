@@ -374,7 +374,7 @@ public struct SubagentUpdate: Codable, Hashable, Sendable {
             description: description.folded(onto: existing.description),
             state: state.folded(onto: existing.state),
             title: title.folded(onto: existing.title),
-            meta: meta.folded(onto: existing.meta)
+            meta: meta.foldedAsMeta(onto: existing.meta)
         )
     }
 }

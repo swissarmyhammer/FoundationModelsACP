@@ -238,7 +238,7 @@ public struct UserMessage: Codable, Hashable, Sendable {
         UserMessage(
             messageId: messageId,
             content: content.folded(onto: existing.content),
-            meta: meta.folded(onto: existing.meta)
+            meta: meta.foldedAsMeta(onto: existing.meta)
         )
     }
 }

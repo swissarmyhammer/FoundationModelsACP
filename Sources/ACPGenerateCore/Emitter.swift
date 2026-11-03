@@ -372,7 +372,9 @@ enum Emitter {
         guard property.hasPatchSemantics else {
             return "\(name): \(name)"
         }
-        return "\(name): \(name).folded(onto: existing.\(name))"
+        // `_meta` patches by top-level key, not as a whole value.
+        let fold = property.wireName == metaWireName ? "foldedAsMeta" : "folded"
+        return "\(name): \(name).\(fold)(onto: existing.\(name))"
     }
 
     /// Renders the explicit CodingKeys enum mapping Swift names to wire names.
