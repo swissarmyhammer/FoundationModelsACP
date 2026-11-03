@@ -1,8 +1,8 @@
 ---
 assignees:
 - claude-code
-position_column: todo
-position_ordinal: '8480'
+position_column: done
+position_ordinal: be80
 title: Merge _meta by top-level key in SessionMergeEngine (alpha.9 rule)
 ---
 ## What

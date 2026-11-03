@@ -1,8 +1,8 @@
 ---
 depends_on:
 - 01M6GJ8GX6C0YRHJW0W2ADAVTE
-position_column: todo
-position_ordinal: '80'
+position_column: done
+position_ordinal: bc80
 title: Add the unstable subagent_update, session_message and session_message_chunk session updates to the generated Swift types
 ---
 ## What

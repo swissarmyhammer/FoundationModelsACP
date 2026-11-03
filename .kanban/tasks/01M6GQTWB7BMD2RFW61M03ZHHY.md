@@ -1,8 +1,8 @@
 ---
 assignees:
 - claude-code
-position_column: todo
-position_ordinal: '8380'
+position_column: done
+position_ordinal: bf80
 title: Remove JSON-RPC batching from Connection (ACP v2 removed it in alpha.11)
 ---
 ## What

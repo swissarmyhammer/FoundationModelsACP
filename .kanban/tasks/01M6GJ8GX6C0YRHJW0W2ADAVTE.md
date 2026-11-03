@@ -25,8 +25,8 @@ comments:
     (1) Yes. IdleStateUpdate, RequiresActionStateUpdate and RunningStateUpdate each have `background: [BackgroundWork]?`. In the stable schema BackgroundWork has the cases `.terminal` and `.toolCall` (plus `.unknown`). The `subagent` variant is not in the stable schema.
     (2) No. The generator does not emit subagent_update, session_message or session_message_chunk. They are in Schema/acp-v2.unstable.json only, and no schema set reads that file. They still need the second card.
   timestamp: 2026-11-03T12:26:30.278967+00:00
-position_column: todo
-position_ordinal: '8180'
+position_column: done
+position_ordinal: bb80
 title: Re-vendor the ACP v2 schema to schema-v2.0.0-alpha.13 and fix what breaks
 ---
 ## What
