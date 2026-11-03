@@ -39,6 +39,18 @@ import Testing
         #expect(LineNumber(rawValue: 1)?.rawValue == 1)
     }
 
+    @Test func aNegativeLineIsRefusedByTheNumberAndDegradesToOmittedInALocation() throws {
+        // `LineNumber` holds a `UInt32`, so a negative value cannot be built.
+        // On the wire, a negative `line` breaks `minimum: 1` as `0` does.
+        #expect(throws: DecodingError.self) {
+            _ = try WireRoundTrip.decode(LineNumber.self, from: "-1")
+        }
+        let location = try WireRoundTrip.decode(ToolCallLocation.self, from: """
+            {"path":"/a.txt","line":-1}
+            """)
+        #expect(location.line == nil)
+    }
+
     @Test func aLineOfZeroDegradesToOmittedRatherThanFailingTheMessage() throws {
         // `line` is also `x-deserialize-default-on-error`: the invalid `0`
         // costs the line number, not the whole tool call.

@@ -390,6 +390,13 @@ struct ObjectScopeUnionModel {
 
     /// Cases in schema order.
     let cases: [ScopeUnionCaseModel]
+
+    /// What makes two scope enums the same code: the enum name and, for each
+    /// case, its name, payload type and probed keys.
+    var scopeSignature: String {
+        ([scopeEnumName] + cases.map { "\($0.swiftName):\($0.payloadType):\($0.requiredKeys.joined(separator: ","))" })
+            .joined(separator: "|")
+    }
 }
 
 /// The emission model for an object definition whose union selects its

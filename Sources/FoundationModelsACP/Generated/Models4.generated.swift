@@ -780,56 +780,8 @@ public struct ElicitationUrlCapabilities: Codable, Hashable, Sendable {
 
 /// URL-based elicitation mode where the client directs the user to a URL.
 public struct ElicitationUrlMode: Codable, Hashable, Sendable {
-    /// The scope variant, selected by which of its required members the
-    /// wire object carries.
-    public enum Scope: Codable, Hashable, Sendable {
-        /// Tied to a session, optionally to a specific tool call within that session.
-        case session(ElicitationSessionScope)
-        /// Tied to a specific JSON-RPC request outside of a session
-        /// (e.g., during auth/configuration phases before any session is started).
-        case request(ElicitationRequestScope)
-
-        private enum CodingKeys: String, CodingKey {
-            case sessionId
-            case requestId
-        }
-
-        /// Decodes the scope by probing each variant's required members in
-        /// schema order.
-        ///
-        /// - Parameter decoder: The decoder positioned at the object.
-        /// - Throws: `DecodingError` when no variant's required member is
-        ///   present, or the selected payload is malformed.
-        public init(from decoder: any Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            if container.contains(.sessionId) {
-                self = .session(try ElicitationSessionScope(from: decoder))
-            } else if container.contains(.requestId) {
-                self = .request(try ElicitationRequestScope(from: decoder))
-            } else {
-                throw DecodingError.dataCorrupted(
-                    DecodingError.Context(
-                        codingPath: decoder.codingPath,
-                        debugDescription: "no scope variant's required member is present; expected one of sessionId, requestId"
-                    )
-                )
-            }
-        }
-
-        /// Encodes the selected variant's members flattened into the
-        /// enclosing object, writing no nested key of its own.
-        ///
-        /// - Parameter encoder: The encoder to write the object into.
-        /// - Throws: Rethrows any error from the underlying encoder.
-        public func encode(to encoder: any Encoder) throws {
-            switch self {
-            case .session(let payload):
-                try payload.encode(to: encoder)
-            case .request(let payload):
-                try payload.encode(to: encoder)
-            }
-        }
-    }
+    /// The same scope variants as ``ElicitationFormMode/Scope``.
+    public typealias Scope = ElicitationFormMode.Scope
 
     /// The unique identifier for this elicitation.
     public var elicitationId: ElicitationId
@@ -936,6 +888,74 @@ public struct EmbeddedResource: Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(resource, forKey: .resource)
         try container.encodeIfPresent(annotations, forKey: .annotations)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
+/// A titled enum option with a const value, human-readable title, and optional description.
+public struct EnumOption: Codable, Hashable, Sendable {
+    /// The constant value for this option.
+    public var const: String
+
+    /// Human-readable title for this option.
+    public var title: String
+
+    /// Human-readable description.
+    ///
+    /// Optional. Omitted and `null` are equivalent and mean no description is provided.
+    public var description: String?
+
+    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
+    ///
+    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+    public var meta: JSONValue?
+
+    /// Creates a `EnumOption`.
+    public init(
+        const: String,
+        title: String,
+        description: String? = nil,
+        meta: JSONValue? = nil
+    ) {
+        self.const = const
+        self.title = title
+        self.description = description
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case const
+        case title
+        case description
+        case meta = "_meta"
+    }
+
+    /// Decodes a `EnumOption`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
+    ///   or violates a wire invariant.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.const = try container.decode(String.self, forKey: .const)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.description = container.forgivingDecodeIfPresent(String.self, forKey: .description)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `EnumOption`, omitting nil optional fields — never
+    /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(const, forKey: .const)
+        try container.encode(title, forKey: .title)
+        try container.encodeIfPresent(description, forKey: .description)
         try container.encodeIfPresent(meta, forKey: .meta)
     }
 }

@@ -106,6 +106,7 @@ public struct SchemaGenerator: Sendable {
         var modelDeclarations: [String] = []
         var unions: [NamedDeclaration] = []
         var placeholders: [String] = []
+        var scopeEnumOwners: [String: String] = [:]
 
         for (name, fragment) in Self.orderedEntries(of: definitions) where emittedDefinitions.contains(name) {
             let documentation = description(of: fragment)
@@ -142,7 +143,15 @@ public struct SchemaGenerator: Sendable {
             case .objectScopeUnion:
                 let model = try objectScopeUnionModel(name: name, fragment: fragment, definitions: definitions)
                 structModels.append(model.base)
-                modelDeclarations.append(Emitter.objectScopeUnionDeclaration(model: model))
+                // Two objects with the same scope variants share one nested
+                // enum: the later one aliases the earlier one's.
+                let signature = model.scopeSignature
+                modelDeclarations.append(
+                    Emitter.objectScopeUnionDeclaration(model: model, sharing: scopeEnumOwners[signature])
+                )
+                if scopeEnumOwners[signature] == nil {
+                    scopeEnumOwners[signature] = model.base.name
+                }
             case .objectPropertyEnum:
                 let model = try objectPropertyEnumModel(name: name, fragment: fragment, definitions: definitions)
                 structModels.append(model.base)

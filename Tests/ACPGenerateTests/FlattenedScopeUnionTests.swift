@@ -40,6 +40,17 @@ import Testing
         #expect(!unresolved.contains("typealias Mode"))
     }
 
+    @Test func twoObjectsWithTheSameScopesShareOneNestedEnum() throws {
+        // `Mode` and `OtherMode` have the same scope variants (and, as in ACP
+        // v2, a oneOf in place of anyOf for the second). The second aliases
+        // the first's enum and does not repeat its `Codable` code.
+        let files = try SchemaGenerator(config: GeneratorConfig()).generate(schemaJSON: Self.twoModesSchema)
+        let models = try #require(files.first { $0.name == "Models.generated.swift" }).contents
+        #expect(models.components(separatedBy: "    public enum Scope: Codable").count == 2)
+        #expect(models.contains("public typealias Scope = Mode.Scope"))
+        #expect(models.components(separatedBy: "self = .session(try SessionScope(from: decoder))").count == 2)
+    }
+
     @Test func scopeVariantsWithoutDisjointRequiredKeysFailLoudly() throws {
         // Decode probes the variants' required keys, so a key two variants
         // share would make the probe order — not the wire object — pick the
@@ -85,6 +96,42 @@ import Testing
               "properties": { "prompt": { "type": "string" } },
               "required": ["prompt"],
               "anyOf": [
+                { "title": "Session", "allOf": [{ "$ref": "#/$defs/SessionScope" }] },
+                { "title": "Request", "allOf": [{ "$ref": "#/$defs/RequestScope" }] }
+              ]
+            }
+          }
+        }
+        """.utf8)
+
+    private static let twoModesSchema = Data(
+        """
+        {
+          "$defs": {
+            "SessionScope": {
+              "type": "object",
+              "properties": { "sessionId": { "type": "string" } },
+              "required": ["sessionId"]
+            },
+            "RequestScope": {
+              "type": "object",
+              "properties": { "requestId": { "type": "string" } },
+              "required": ["requestId"]
+            },
+            "Mode": {
+              "type": "object",
+              "properties": { "prompt": { "type": "string" } },
+              "required": ["prompt"],
+              "anyOf": [
+                { "title": "Session", "allOf": [{ "$ref": "#/$defs/SessionScope" }] },
+                { "title": "Request", "allOf": [{ "$ref": "#/$defs/RequestScope" }] }
+              ]
+            },
+            "OtherMode": {
+              "type": "object",
+              "properties": { "url": { "type": "string" } },
+              "required": ["url"],
+              "oneOf": [
                 { "title": "Session", "allOf": [{ "$ref": "#/$defs/SessionScope" }] },
                 { "title": "Request", "allOf": [{ "$ref": "#/$defs/RequestScope" }] }
               ]

@@ -249,7 +249,8 @@ public struct GeneratorConfig: Sendable {
             "TerminalUpdate.exitStatus", "TerminalUpdate._meta",
             "ToolCallUpdate.name", "ToolCallUpdate.title", "ToolCallUpdate.kind", "ToolCallUpdate.status",
             "ToolCallUpdate.content", "ToolCallUpdate.locations", "ToolCallUpdate.rawInput",
-            "ToolCallUpdate.rawOutput", "ToolCallUpdate._meta",
+            "ToolCallUpdate.rawOutput", "ToolCallUpdate._meta", "ToolCallUpdate.capabilities",
+            "TerminalUpdate.capabilities",
         ],
         unstableOverlay: UnstableOverlay(
             // The ACP v2 "Subagent Sessions" and "Background Work" RFDs. The

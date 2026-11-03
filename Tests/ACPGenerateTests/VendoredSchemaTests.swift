@@ -373,8 +373,11 @@ import FoundationModelsACP
         #expect(Self.declarationsNesting("    public enum Value: Codable", in: models) == ["SetSessionConfigOptionRequest"])
         // The elicitation modes nest the flattened scope union instead: no
         // discriminator and no fallback, because decode selects the variant
-        // by which scope's required member the wire object carries.
-        #expect(Self.declarationsNesting("    public enum Scope: Codable", in: models) == ["ElicitationFormMode", "ElicitationUrlMode"])
+        // by which scope's required member the wire object carries. Both modes
+        // have the same scopes, so one nested enum serves them: the other
+        // mode aliases it, and its `Codable` code is not repeated.
+        #expect(Self.declarationsNesting("    public enum Scope: Codable", in: models) == ["ElicitationFormMode"])
+        #expect(models.contains("public typealias Scope = ElicitationFormMode.Scope"))
     }
 
     @Test func onlyTheDeliberatelyFreeFormDefinitionsStayUntyped() throws {
@@ -581,12 +584,12 @@ import FoundationModelsACP
                 "Identifiers.generated.swift": 14,
                 "MethodTable.generated.swift": 2,
                 "Models.generated.swift": 14,
-                "Models10.generated.swift": 11,
+                "Models10.generated.swift": 12,
                 "Models11.generated.swift": 12,
-                "Models12.generated.swift": 3,
+                "Models12.generated.swift": 1,
                 "Models2.generated.swift": 16,
                 "Models3.generated.swift": 12,
-                "Models4.generated.swift": 14,
+                "Models4.generated.swift": 15,
                 "Models5.generated.swift": 13,
                 "Models6.generated.swift": 14,
                 "Models7.generated.swift": 14,

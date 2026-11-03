@@ -999,16 +999,29 @@ enum Emitter {
     /// Renders an object definition that carries a flattened untagged scope
     /// union.
     ///
-    /// - Parameter model: The object-scope-union emission model.
+    /// - Parameters:
+    ///   - model: The object-scope-union emission model.
+    ///   - sharing: The name of an earlier struct whose nested scope enum has
+    ///     the same cases. The struct then aliases that enum instead of
+    ///     repeating its `Codable` code.
     /// - Returns: The rendered struct declaration.
-    static func objectScopeUnionDeclaration(model: ObjectScopeUnionModel) -> String {
-        objectCarryingAUnion(
+    static func objectScopeUnionDeclaration(model: ObjectScopeUnionModel, sharing earlier: String? = nil) -> String {
+        let declaration: [String]
+        if let earlier {
+            declaration = [
+                indentUnit + "/// The same scope variants as ``\(earlier)/\(model.scopeEnumName)``.",
+                indentUnit + "public typealias \(model.scopeEnumName) = \(earlier).\(model.scopeEnumName)",
+            ]
+        } else {
+            declaration = scopeUnionEnum(model: model)
+        }
+        return objectCarryingAUnion(
             base: model.base,
             union: FlattenedUnion(
                 wireName: model.scopePropertyName,
                 typeName: model.scopeEnumName,
                 documentation: "The scope, whose members sit flattened beside this object's; the wire object carries no `\(model.scopePropertyName)` key.",
-                declaration: scopeUnionEnum(model: model)
+                declaration: declaration
             )
         )
     }

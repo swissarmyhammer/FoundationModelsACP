@@ -18,6 +18,15 @@ public struct AccumulatedTerminal: Hashable, Sendable {
     /// Exit information. A concrete value marks the terminal as exited.
     public var exitStatus: PatchField<TerminalExitStatus> = .unchanged
 
+    /// The size in character cells that the command runs with. An update
+    /// without a size leaves it as it is.
+    public var size: TerminalSize?
+
+    /// The client-initiated controls that the terminal supports, such as
+    /// cancellation. Omitted leaves them, `null` clears them, and an object
+    /// replaces them.
+    public var capabilities: PatchField<TerminalCapabilities> = .unchanged
+
     /// The `_meta` extension field.
     public var meta: PatchField<JSONValue> = .unchanged
 
@@ -43,6 +52,8 @@ extension AccumulatedTerminal {
         command = update.command.folded(onto: command)
         cwd = update.cwd.folded(onto: cwd)
         exitStatus = update.exitStatus.folded(onto: exitStatus)
+        size = update.size ?? size
+        capabilities = update.capabilities.folded(onto: capabilities)
         meta = update.meta.foldedAsMeta(onto: meta)
         switch update.output {
         case .unchanged:
@@ -81,10 +92,12 @@ extension AccumulatedTerminal {
     internal func replayUpdate(terminalId: TerminalId) -> TerminalUpdate {
         TerminalUpdate(
             terminalId: terminalId,
+            capabilities: capabilities,
             command: command,
             cwd: cwd,
             exitStatus: exitStatus,
             output: output.isEmpty ? .unchanged : .value(TerminalOutput(data: output.base64EncodedString())),
+            size: size,
             meta: meta
         )
     }

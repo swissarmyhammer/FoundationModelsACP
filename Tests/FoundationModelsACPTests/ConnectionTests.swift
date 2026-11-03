@@ -684,8 +684,10 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     }
     #expect(fields["id"] == .null)
     #expect(error["code"] == .number(-32600))
+    // No item of the array ran: the handler has not run yet.
+    #expect(!handled.withLock { $0 })
 
-    // The read loop survived, and no item of the array ran.
+    // The read loop survived: the next request runs.
     try await send(
         .object(["jsonrpc": .string("2.0"), "id": .number(3), "method": .string("c")]),
         over: clientEnd

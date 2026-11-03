@@ -797,3 +797,49 @@ enum SessionMergeEngineFixtures {
         #expect(engine == SessionMergeEngine())
     }
 }
+
+// MARK: - Capabilities of a tool call and a terminal
+
+/// `capabilities` has patch semantics on `tool_call_update` and
+/// `terminal_update`: omission leaves it, `null` clears it, and an object
+/// replaces the whole previous value.
+@Suite struct CapabilitiesPatchTests {
+    private static let cancellable = ToolCallCapabilities(cancel: ToolCallCancelCapabilities())
+
+    @Test func decodingKeepsOmittedNullAndObjectApart() throws {
+        let omitted = try WireRoundTrip.expectLossless(ToolCallUpdate.self, #"{"toolCallId":"c"}"#)
+        let cleared = try WireRoundTrip.expectLossless(ToolCallUpdate.self, #"{"toolCallId":"c","capabilities":null}"#)
+        let value = try WireRoundTrip.expectLossless(ToolCallUpdate.self, #"{"toolCallId":"c","capabilities":{"cancel":{}}}"#)
+        #expect(omitted.capabilities == .unchanged)
+        #expect(cleared.capabilities == .cleared)
+        #expect(value.capabilities == .value(Self.cancellable))
+    }
+
+    @Test func aLaterToolCallUpdateWithoutCapabilitiesKeepsThem() throws {
+        var engine = SessionMergeEngine()
+        let id = ToolCallId(rawValue: "c")
+        engine.apply(.toolCallUpdate(ToolCallUpdate(toolCallId: id, capabilities: .value(Self.cancellable))))
+        engine.apply(.toolCallUpdate(ToolCallUpdate(toolCallId: id, status: .value(.inProgress))))
+        #expect(engine.entry(withID: .toolCall(id))?.kind.toolCall?.capabilities == .value(Self.cancellable))
+        engine.apply(.toolCallUpdate(ToolCallUpdate(toolCallId: id, capabilities: .cleared)))
+        #expect(engine.entry(withID: .toolCall(id))?.kind.toolCall?.capabilities == .cleared)
+    }
+
+    @Test func aTerminalKeepsItsCapabilitiesAndSizeThroughLaterUpdatesAndReplay() throws {
+        let id = TerminalId(rawValue: "t")
+        let capabilities = TerminalCapabilities(cancel: TerminalCancelCapabilities())
+        let size = TerminalSize(cols: 80, rows: 24)
+        var engine = SessionMergeEngine()
+        engine.apply(.terminalUpdate(TerminalUpdate(terminalId: id, capabilities: .value(capabilities), size: size)))
+        engine.apply(.terminalUpdate(TerminalUpdate(terminalId: id, command: .value("ls"))))
+        let terminal = try #require(engine.entry(withID: .terminal(id))?.kind.terminal)
+        #expect(terminal.capabilities == .value(capabilities))
+        #expect(terminal.size == size)
+
+        var replayed = SessionMergeEngine()
+        for update in engine.transcriptUpdates {
+            replayed.apply(update)
+        }
+        #expect(replayed.entries == engine.entries)
+    }
+}
