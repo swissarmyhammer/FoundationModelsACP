@@ -475,3 +475,71 @@ extension SAH {
         }
     }
 }
+
+// MARK: - Restore failure
+
+extension SAH {
+    /// The reason that a child session did not restore, in
+    /// `_meta.sah.restoreFailure`.
+    ///
+    /// An agent sends it on a `subagent_update` of a child that failed to
+    /// restore (the state is `unknown`). It also sends it on the
+    /// `subagent_update` of each descendant of such a child. The reason of a
+    /// descendant says that an ancestor was not restored.
+    ///
+    /// ```json
+    /// {"sessionUpdate": "subagent_update", "sessionId": "child-1",
+    ///  "state": {"state": "unknown"},
+    ///  "_meta": {"sah": {"restoreFailure": {"reason": "the session file is missing"}}}}
+    /// ```
+    ///
+    /// Rules:
+    ///
+    /// - **Patch.** ACP patches `_meta` by top-level key. A new `sah` object
+    ///   replaces the whole earlier `sah` object. An update that sends
+    ///   `restoreFailure` must send in the same `sah` object each other
+    ///   member that must stay, such as ``AgentRun``.
+    /// - **Clearing.** A later current `subagent_update` with a state clears
+    ///   the failure on the client. This is a client rule. It is not a wire
+    ///   message.
+    ///
+    /// ``SAH/version`` does not change: an old peer ignores the new member.
+    public struct RestoreFailure: Codable, Hashable, Sendable {
+        /// The `_meta.sah` member name of the object.
+        public static let metaKey = "restoreFailure"
+
+        /// A short text that says why the child did not restore.
+        public var reason: String
+
+        /// Makes the object.
+        ///
+        /// - Parameter reason: A short text that says why the child did not
+        ///   restore.
+        public init(reason: String) {
+            self.reason = reason
+        }
+
+        /// Reads the object from `_meta.sah.restoreFailure`.
+        ///
+        /// - Parameter meta: The `_meta` value, or `nil`.
+        /// - Returns: The object, or `nil` when it is absent or is not valid.
+        public static func extract(from meta: JSONValue?) -> RestoreFailure? {
+            SAH.payload(RestoreFailure.self, inSAHObjectOf: meta, member: metaKey)
+        }
+
+        /// Writes this object into `_meta.sah.restoreFailure` of a `_meta`
+        /// value.
+        ///
+        /// The function keeps every other member of `_meta` and of
+        /// `_meta.sah`, and replaces an earlier `restoreFailure`. When `meta`
+        /// or `_meta.sah` is a value that is not an object, the function
+        /// returns `meta` unchanged.
+        ///
+        /// - Parameter meta: The `_meta` value to write into, or `nil`.
+        /// - Returns: The `_meta` value to send.
+        /// - Throws: `EncodingError` when the object cannot be encoded.
+        public func inject(into meta: JSONValue?) throws -> JSONValue {
+            try SAH.inject(self, intoSAHObjectOf: meta, member: Self.metaKey)
+        }
+    }
+}
