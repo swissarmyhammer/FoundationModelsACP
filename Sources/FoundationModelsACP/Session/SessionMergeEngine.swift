@@ -106,6 +106,10 @@ public struct SessionMergeEngine: Hashable, Sendable {
     /// (Unstable: ACP v2 "Subagent Sessions".)
     public private(set) var subagents: [SubagentUpdate] = []
 
+    /// The children whose folded value is history. A replay gave the value
+    /// before the boundary, so no current update has confirmed it.
+    private var historicalSubagents: Set<SessionId> = []
+
     /// The index in ``entries`` of each entry identifier.
     private var indexByID: [SessionEntry.ID: Int] = [:]
 
@@ -208,6 +212,20 @@ public struct SessionMergeEngine: Hashable, Sendable {
     /// the messages that the engine has already.
     public mutating func reset() {
         self = SessionMergeEngine()
+    }
+
+    /// Marks every child session now known as history.
+    ///
+    /// A client that resumes a session with a replay calls this when the
+    /// `session/resume` response arrives. The `subagent_update` snapshots
+    /// before the response are history and confirm nothing. The snapshots
+    /// after the response are current. The first current update for a child
+    /// replaces its history value: a field that the update omits stays
+    /// `.unchanged`, and it does not keep the history value. The later
+    /// updates fold as usual. A child with no current update keeps its
+    /// history value.
+    public mutating func markReplayBoundary() {
+        historicalSubagents = Set(subagents.map(\.sessionId))
     }
 
     // MARK: - Cancelling
@@ -338,7 +356,10 @@ public struct SessionMergeEngine: Hashable, Sendable {
     private mutating func foldSubagent(_ update: SubagentUpdate) -> Change {
         let folded: SubagentUpdate
         if let index = subagents.firstIndex(where: { $0.sessionId == update.sessionId }) {
-            folded = update.folded(onto: subagents[index])
+            // A history value is not a base for a current update.
+            let base = historicalSubagents.remove(update.sessionId) == nil
+                ? subagents[index] : SubagentUpdate(sessionId: update.sessionId)
+            folded = update.folded(onto: base)
             subagents[index] = folded
         } else {
             folded = update.folded(onto: SubagentUpdate(sessionId: update.sessionId))

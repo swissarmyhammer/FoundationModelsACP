@@ -25,6 +25,40 @@ import Testing
         #expect(engine.subagents[0].description == .value("Reads papers"))
     }
 
+    @Test func aCurrentUpdateAfterTheBoundaryDoesNotInheritTheHistoryState() {
+        var engine = SessionMergeEngine()
+        engine.apply(.subagentUpdate(SubagentUpdate(sessionId: Self.child, state: .value(.running(RunningStateUpdate())))))
+        engine.markReplayBoundary()
+        let change = engine.apply(.subagentUpdate(SubagentUpdate(sessionId: Self.child, title: .value("T"))))
+        #expect(change == .subagentChanged(SubagentUpdate(sessionId: Self.child, title: .value("T"))))
+        #expect(engine.subagents[0].state == .unchanged)
+    }
+
+    @Test func aCurrentUpdateAfterTheBoundaryDoesNotInheritTheHistoryCapabilities() {
+        var engine = SessionMergeEngine()
+        engine.apply(.subagentUpdate(SubagentUpdate(
+            sessionId: Self.child, capabilities: .value(SubagentSessionCapabilities(cancel: SessionCancelCapabilities())))))
+        engine.markReplayBoundary()
+        engine.apply(.subagentUpdate(SubagentUpdate(sessionId: Self.child, title: .value("T"))))
+        #expect(engine.subagents[0].capabilities == .unchanged)
+    }
+
+    @Test func updatesAfterTheFirstCurrentUpdateFoldAsBefore() {
+        var engine = SessionMergeEngine()
+        engine.apply(.subagentUpdate(SubagentUpdate(sessionId: Self.child, title: .value("Old"))))
+        engine.markReplayBoundary()
+        engine.apply(.subagentUpdate(SubagentUpdate(sessionId: Self.child, state: .value(.running(RunningStateUpdate())))))
+        engine.apply(.subagentUpdate(SubagentUpdate(sessionId: Self.child, title: .value("New"))))
+        #expect(engine.subagents[0].state == .value(.running(RunningStateUpdate())))
+    }
+
+    @Test func aChildWithoutACurrentUpdateKeepsItsHistoryValue() {
+        var engine = SessionMergeEngine()
+        engine.apply(.subagentUpdate(SubagentUpdate(sessionId: Self.child, title: .value("Old"))))
+        engine.markReplayBoundary()
+        #expect(engine.subagents[0].title == .value("Old"))
+    }
+
     @Test func childrenKeepTheOrderOfTheirFirstAnnouncement() {
         var engine = SessionMergeEngine()
         let other = SessionId(rawValue: "child-2")
