@@ -10,18 +10,24 @@ import FoundationModelsACP
 /// - `child-2` failed to restore. It has the grandchild `grandchild-2`, which
 ///   fails because its ancestor was not restored.
 ///
-/// The agent plays the script when the client resumes the root session:
+/// The agent plays the script when the client resumes the root session. The
+/// order follows the "Ordering" rule of ACP v2 "Session Setup":
 ///
-/// 1. **History**, before the `session/resume` response. Each update is
-///    history. It confirms nothing about the state now.
-/// 2. **The response.**
-/// 3. **Current snapshots**, after the response. A `subagent_update` here
+/// 1. **History** (the replay). Each update is history. It confirms nothing
+///    about the state now.
+/// 2. **A `subagent_update` for each child that the root lists in
+///    `background`.** It comes before the snapshot that lists the child. The
+///    client treats it as unconfirmed, because a child snapshot before the
+///    response is historical.
+/// 3. **The current `state_update` of the root**, with the background list.
+/// 4. **A `session_info_update`.**
+/// 5. **The `session/resume` response.**
+/// 6. **Current snapshots**, after the response. A `subagent_update` here
 ///    replaces the state of its child. An omitted `state` means the state is
 ///    unknown. A child that failed to restore has no state and carries
-///    `SAH.RestoreFailure`.
-/// 4. A `state_update` of the root with the background list.
-/// 5. **A child elicitation** for `child-1`. The agent waits for the answer.
-/// 6. **The finish.** `grandchild-1`, then `child-1`, report `idle`. The last
+///    `SAH.RestoreFailure`, as does each descendant of that child.
+/// 7. **A child elicitation** for `child-1`. The agent waits for the answer.
+/// 8. **The finish.** `grandchild-1`, then `child-1`, report `idle`. The last
 ///    update is the final `tool_call_update` of the `agents` call that started
 ///    `child-1`. It comes after the last update of the child. A client removes
 ///    the child at that update.
@@ -84,7 +90,8 @@ enum NestedSubagentScenario {
     }
 
     /// The current snapshots, in wire order. The agent sends them after the
-    /// response. They replace the history state of each child.
+    /// response. They replace the state of each child that the replay and the
+    /// updates before the response gave.
     static var currentSnapshots: [UpdateSessionNotification] {
         get throws {
             [
@@ -100,10 +107,25 @@ enum NestedSubagentScenario {
                 note(failedChild, try announcement(
                     failedGrandchild, parentCall: failedGrandchildCall, title: "Indexer", state: nil,
                     failure: ancestorReason)),
+            ]
+        }
+    }
+
+    /// The updates between the history and the response, in wire order: a
+    /// `subagent_update` for each listed child, the current `state_update` of
+    /// the root with the background list, and a `session_info_update`.
+    static var beforeResponse: [UpdateSessionNotification] {
+        get throws {
+            [
+                note(root, try announcement(
+                    child, parentCall: childCall, title: "Researcher", state: .running(RunningStateUpdate()))),
+                note(root, try announcement(
+                    failedChild, parentCall: failedChildCall, title: "Archivist", state: .running(RunningStateUpdate()))),
                 note(root, .stateUpdate(.running(RunningStateUpdate(background: [
                     .subagent(BackgroundSubagent(sessionId: child)),
                     .subagent(BackgroundSubagent(sessionId: failedChild)),
                 ])))),
+                note(root, .sessionInfoUpdate(SessionInfoUpdate(title: .value("Research the topic")))),
             ]
         }
     }
@@ -190,13 +212,14 @@ enum NestedSubagentScenario {
 
     // MARK: - Playing the script
 
-    /// Plays the history on a resume of the root session. The agent calls this
-    /// in the handler of `session/resume`, so the history is before the
-    /// response. The rest of the script runs after the response.
+    /// Plays the history and the updates before the response on a resume of the
+    /// root session. The agent calls this in the handler of `session/resume`,
+    /// so these updates are before the response. The rest of the script runs
+    /// after the response.
     ///
     /// - Parameter connection: The connection to the client.
     static func resume(on connection: AgentSideConnection) async throws -> ResumeSessionResponse {
-        for notification in try history {
+        for notification in try history + beforeResponse {
             try await connection.sessionUpdate(notification)
         }
         connection.afterRespondingToCurrentRequest {

@@ -77,11 +77,51 @@ import Testing
         let history = events[..<markerIndex]
         let current = events[(markerIndex + 1)...]
 
-        #expect(Self.sessions(history) == [
+        #expect(Self.sessions(history.prefix(11)) == [
             Self.root, Self.root, Self.root, Self.child, Self.child, Self.child, Self.grandchild,
             Self.root, Self.root, Self.failedChild, Self.failedChild,
         ])
-        #expect(Self.sessions(current.prefix(5)) == [Self.root, Self.child, Self.root, Self.failedChild, Self.root])
+        #expect(Self.sessions(current.prefix(4)) == [Self.root, Self.child, Self.root, Self.failedChild])
+    }
+
+    @Test func theCurrentRootStateWithTheBackgroundListComesBeforeTheResponse() async throws {
+        let (events, _) = try await play()
+        let markerIndex = try #require(events.firstIndex {
+            if case .requestFinished = $0.event { return true } else { return false }
+        })
+        let beforeResponse = events[11..<markerIndex]
+        let states = beforeResponse.compactMap { event -> StateUpdate? in
+            guard event.sessionId == Self.root, case .update(.stateUpdate(let state)) = event.event else { return nil }
+            return state
+        }
+        let state = try #require(states.first)
+        guard case .running(let running) = state else {
+            Issue.record("expected a running state, got \(state)")
+            return
+        }
+        #expect(running.background == [
+            .subagent(BackgroundSubagent(sessionId: Self.child)),
+            .subagent(BackgroundSubagent(sessionId: Self.failedChild)),
+        ])
+        // A listed child is announced before the snapshot that lists it.
+        let announcedIndex = try #require(beforeResponse.firstIndex {
+            if case .update(.subagentUpdate(let update)) = $0.event { return update.sessionId == Self.child }
+            return false
+        })
+        let listingIndex = try #require(beforeResponse.firstIndex {
+            if case .update(.stateUpdate) = $0.event { return true } else { return false }
+        })
+        #expect(announcedIndex < listingIndex)
+        // The session info update is the last update before the response.
+        guard case .update(.sessionInfoUpdate) = try #require(beforeResponse.last).event else {
+            Issue.record("expected the session_info_update before the response")
+            return
+        }
+        // No root state_update comes after the response.
+        let afterResponse = events[(markerIndex + 1)...]
+        #expect(!afterResponse.contains {
+            if $0.sessionId == Self.root, case .update(.stateUpdate) = $0.event { return true } else { return false }
+        })
     }
 
     @Test func aChildFailedToRestoreHasNoStateAndCarriesTheRestoreFailure() async throws {
@@ -113,8 +153,8 @@ import Testing
             if case .requestFinished = $0.event { return true } else { return false }
         })
         let elicitationArrival = try #require(arrival)
-        let lastSnapshot = events[markerIndex + 5]
-        let finishStart = events[markerIndex + 6]
+        let lastSnapshot = events[markerIndex + 4]
+        let finishStart = events[markerIndex + 5]
 
         #expect(elicitationArrival > lastSnapshot.sequence)
         #expect(elicitationArrival < finishStart.sequence)
