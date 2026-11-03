@@ -175,13 +175,9 @@ extension SubagentWireTraceValidator {
         var parent: [SessionId: SessionId] = [:]
 
         var sahMembers: [String: Set<String>] = [:]
-        /// A tool call id is scoped to its session: the root and a child can have
-        /// calls with the same id.
-        struct CallKey: Hashable {
-            let session: SessionId
-            let call: ToolCallId
-        }
-        var childOfCall: [CallKey: SessionId] = [:]
+        /// The child that each tool call starts. A tool call id is scoped to its
+        /// session: the root and a child can have calls with the same id.
+        var childOfCall: [SessionId: [ToolCallId: SessionId]] = [:]
         var lastStateIsIdle: [SessionId: Bool] = [:]
         var finished: Set<SessionId> = []
         var reportedBackground: [SessionId: [SessionId]] = [:]
@@ -355,10 +351,10 @@ extension SubagentWireTraceValidator {
             if case .value(let meta) = call.meta, let run = SAH.AgentRun.extract(from: meta), let child = run.sessionId {
                 // The tool call starts the child, so it can come before the
                 // announcement. It links to the child. It does not address it.
-                childOfCall[CallKey(session: stream, call: call.toolCallId)] = child
+                childOfCall[stream, default: [:]][call.toolCallId] = child
             }
             guard case .value(let status) = call.status,
-                let child = childOfCall[CallKey(session: stream, call: call.toolCallId)]
+                let child = childOfCall[stream]?[call.toolCallId]
             else { return }
             switch status {
             case .completed, .failed, .cancelled:

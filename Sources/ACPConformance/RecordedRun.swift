@@ -90,9 +90,14 @@ extension RecordedRun {
     }
 
     private static func describe(_ update: SessionUpdate) -> String {
-        let kind = (try? JSONEncoder().encode(update))
-            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-            .flatMap { $0["sessionUpdate"] as? String } ?? "update"
+        guard
+            let data = try? JSONEncoder().encode(update),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let kind = object["sessionUpdate"] as? String
+        else {
+            assertionFailure("cannot name the kind of a session update")
+            return "update"
+        }
         guard case .stateUpdate(let state) = update else { return kind }
         switch state {
         case .running: return "\(kind) running"
