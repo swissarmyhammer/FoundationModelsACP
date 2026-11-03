@@ -19,6 +19,12 @@ let package = Package(
             name: "acp-test-agent",
             targets: ["acp-test-agent"]
         ),
+        // The conformance runner. Other packages build it through this
+        // product and run any ACP agent binary through it in their CI.
+        .executable(
+            name: "acp-conformance",
+            targets: ["acp-conformance"]
+        ),
     ],
     dependencies: [
         // Plugin-only dependency: powers `swift package generate-documentation`
@@ -49,6 +55,17 @@ let package = Package(
             path: "Sources/acp-test-agent",
             resources: [.copy("Documentation.docc")]
         ),
+        .target(
+            name: "ACPConformance",
+            dependencies: ["FoundationModelsACP"],
+            path: "Sources/ACPConformance"
+        ),
+        .executableTarget(
+            name: "acp-conformance",
+            dependencies: ["ACPConformance"],
+            path: "Sources/acp-conformance",
+            resources: [.copy("Documentation.docc")]
+        ),
         .plugin(
             name: "GenerateACP",
             capability: .command(
@@ -70,6 +87,11 @@ let package = Package(
             dependencies: ["FoundationModelsACP", "acp-test-agent"],
             path: "Tests/FoundationModelsACPTests",
             exclude: ["Fixtures"]
+        ),
+        .testTarget(
+            name: "ACPConformanceTests",
+            dependencies: ["ACPConformance", "FoundationModelsACP", "acp-test-agent"],
+            path: "Tests/ACPConformanceTests"
         ),
         .testTarget(
             name: "ACPGenerateTests",

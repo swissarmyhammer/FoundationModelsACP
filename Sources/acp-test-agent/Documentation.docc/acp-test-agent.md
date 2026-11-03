@@ -58,3 +58,14 @@ updates (a `SequencedSessionEvent` of `subscribeToAllSessions()` converts with
 `validate(_:)`. The result is a list of violations. Each one has the rule (1 to
 10) and the position in the trace. The trace of this scenario has no
 violations, and the tests break it once for each rule.
+
+## The conformant scenario
+
+`--scenario conformant` makes the agent follow the rules that `acp-conformance`
+checks. A turn sends `running`, a message, and a final `idle`. A prompt that
+contains "until cancelled" holds the turn, and `session/cancel` ends it with
+`idle` and the stop reason `cancelled`. A resume sends the history when the
+request has `replayFrom`, then one current `state_update`, then a
+`session_info_update`, and then the response. The flag can repeat, so
+`--scenario conformant --scenario nested-subagents` passes all checks of the
+runner, with a script for the nested resume.
