@@ -202,6 +202,23 @@ public final class ClientSideConnection: Sendable {
         router.subscribeToAllSessions()
     }
 
+    /// The highest ``SequencedSessionEvent/sequence`` that the connection gave
+    /// to the stream of ``subscribeToAllSessions()`` so far, or `nil` when it
+    /// gave none.
+    ///
+    /// The frames of the connection share one counter, so the last event
+    /// before a request can have a number below the arrival number of the
+    /// request, and no later event may come. A handler reads this value as
+    /// its first statement, together with ``currentRequestArrival``, and then
+    /// waits until the reader of the stream applied that sequence. When the
+    /// value is `nil`, no wait is needed. The value can be above the arrival
+    /// number when the read loop delivered later events before the handler
+    /// started. The wait then covers some later events too, and it cannot
+    /// hang, because the connection already gave those events to the stream.
+    public var latestEventSequence: UInt64? {
+        router.latestEventSequence
+    }
+
     // MARK: - Outgoing requests
 
     /// Subscribes to the start and the finish of each request that this

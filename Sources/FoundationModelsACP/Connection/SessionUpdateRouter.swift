@@ -107,6 +107,12 @@ final class SessionUpdateRouter: Sendable {
         )
     }
 
+    /// The highest sequence number that the stream of all sessions gave so
+    /// far, or `nil` when it gave none.
+    var latestEventSequence: UInt64? {
+        allSessions.withState { $0.context.lastSequence }
+    }
+
     /// Delivers one notification to every subscriber of its session.
     ///
     /// A notification for a session with no active subscriber is kept for the
@@ -353,7 +359,7 @@ struct PendingSequencedEvents {
     private var missedSessions: Set<SessionId> = []
 
     /// The highest sequence number given so far, or `nil` when none.
-    private var lastSequence: UInt64?
+    private(set) var lastSequence: UInt64?
 
     /// Creates an empty store.
     ///

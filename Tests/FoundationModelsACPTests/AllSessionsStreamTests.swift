@@ -13,14 +13,21 @@ import Testing
     private static let resumeMethod = RoleRouting.wireMethod(for: "resumeSession", on: .agent)
     private static let permissionMethod = RoleRouting.wireMethod(for: "requestPermission", on: .client)
 
+    /// What a permission handler reads as its first statements.
+    private struct Arrival: Sendable {
+        let number: UInt64?
+        let latestEventSequence: UInt64?
+    }
+
     /// A client that reports the arrival number of each permission request.
     private struct RecordingClient: Client {
-        let arrivals: AsyncStream<UInt64?>.Continuation
+        let arrivals: AsyncStream<Arrival>.Continuation
+        let latest: @Sendable () -> UInt64?
 
         func sessionUpdate(_ notification: UpdateSessionNotification) async {}
 
         func requestPermission(_ params: RequestPermissionRequest) async throws -> RequestPermissionResponse {
-            arrivals.yield(ClientSideConnection.currentRequestArrival)
+            arrivals.yield(Arrival(number: ClientSideConnection.currentRequestArrival, latestEventSequence: latest()))
             return RequestPermissionResponse(outcome: .cancelled(CancelledPermissionOutcome()))
         }
 
@@ -44,11 +51,13 @@ import Testing
     }
 
     private static func connect() async -> (
-        client: ClientSideConnection, agentEnd: InMemoryTransport, arrivals: AsyncStream<UInt64?>
+        client: ClientSideConnection, agentEnd: InMemoryTransport, arrivals: AsyncStream<Arrival>
     ) {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
-        let (arrivals, continuation) = AsyncStream.makeStream(of: UInt64?.self)
-        let client = await ClientSideConnection(stream: clientEnd) { _ in RecordingClient(arrivals: continuation) }
+        let (arrivals, continuation) = AsyncStream.makeStream(of: Arrival.self)
+        let client = await ClientSideConnection(stream: clientEnd) { connection in
+            RecordingClient(arrivals: continuation, latest: { connection.latestEventSequence })
+        }
         return (client, agentEnd, arrivals)
     }
 
@@ -74,13 +83,27 @@ import Testing
         let second = try #require(await events.next())
         let marker = try #require(await events.next())
         var arrivalIterator = arrivals.makeAsyncIterator()
-        let arrivalOrNil = try #require(await arrivalIterator.next())
-        let arrival = try #require(arrivalOrNil)
+        let received = try #require(await arrivalIterator.next())
+        let arrival = try #require(received.number)
 
         #expect([first.sessionId, second.sessionId, marker.sessionId] == [Self.root, Self.child, Self.root])
         #expect(first.sequence < second.sequence)
         #expect(second.sequence < marker.sequence)
         #expect(marker.sequence < arrival)
+        #expect(received.latestEventSequence == marker.sequence)
+    }
+
+    @Test func aRequestWithNoEarlierEventReadsNoLatestSequence() async throws {
+        let (client, agentEnd, arrivals) = await Self.connect()
+        defer {
+            await client.close()
+            agentEnd.close()
+        }
+        try await send(Self.permissionRequest(id: "perm-1", session: Self.grandchild), over: agentEnd)
+        var arrivalIterator = arrivals.makeAsyncIterator()
+        let received = try #require(await arrivalIterator.next())
+        #expect(received.number != nil)
+        #expect(received.latestEventSequence == nil)
     }
 
     @Test func theResumeMarkerIsInTheSingleStreamAtTheWirePositionOfTheResponse() async throws {
@@ -132,10 +155,10 @@ import Testing
 
     @Test func anOverflowBeforeTheFirstSubscriberMarksTheSessions() async throws {
         let (clientEnd, agentEnd) = InMemoryTransport.pair()
-        let (_, continuation) = AsyncStream.makeStream(of: UInt64?.self)
+        let (_, continuation) = AsyncStream.makeStream(of: Arrival.self)
         let limits = SessionUpdateBufferLimits(maximumUpdatesPerSession: 1, maximumSessions: 1)
-        let client = await ClientSideConnection(stream: clientEnd, bufferLimits: limits) { _ in
-            RecordingClient(arrivals: continuation)
+        let client = await ClientSideConnection(stream: clientEnd, bufferLimits: limits) { connection in
+            RecordingClient(arrivals: continuation, latest: { connection.latestEventSequence })
         }
         defer {
             await client.close()
