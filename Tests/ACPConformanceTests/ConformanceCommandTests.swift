@@ -40,4 +40,17 @@ import Testing
         let options = try ConformanceCommand.parse(["--", "true"])
         #expect(options.configuration.executable.path.hasSuffix("/true"))
     }
+
+    @Test func withoutCwdTheRunnerUsesAnExistingEmptyTemporaryFolder() throws {
+        let cwd = try ConformanceCommand.parse(["--", "/bin/agent"]).configuration.cwd
+        var isDirectory: ObjCBool = false
+        #expect(FileManager.default.fileExists(atPath: cwd, isDirectory: &isDirectory) && isDirectory.boolValue)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: cwd).isEmpty)
+        #expect(cwd != "/")
+        try? FileManager.default.removeItem(atPath: cwd)
+    }
+
+    @Test func theCwdFlagIsKept() throws {
+        #expect(try ConformanceCommand.parse(["--cwd", "/work", "--", "/bin/agent"]).configuration.cwd == "/work")
+    }
 }

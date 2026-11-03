@@ -54,6 +54,14 @@ struct ConformanceReport: Sendable {
 
     let results: [ConformanceResult]
 
+    /// The recorded runs, for `--trace`.
+    var runs: [RecordedRun] = []
+
+    /// The trace of every run, one line for each event.
+    var traceText: String {
+        runs.map { run in (["# \(run.name)"] + run.traceLines).joined(separator: "\n") }.joined(separator: "\n")
+    }
+
     /// Whether no check failed. A skipped check does not fail the run.
     var passed: Bool { !results.contains { $0.outcome == .fail } }
 

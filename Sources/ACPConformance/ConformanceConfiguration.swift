@@ -23,6 +23,7 @@ struct ConformanceConfiguration: Sendable {
     var script: ConformanceScript?
 
     /// The working directory that the runner sends in `session/new` and `session/resume`.
+    /// The command line makes a new empty folder when `--cwd` is absent.
     var cwd = "/"
 
     /// The longest wait for one step.

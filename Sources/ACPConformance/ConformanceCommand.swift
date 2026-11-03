@@ -2,7 +2,7 @@ import Foundation
 
 /// The command line of `acp-conformance`.
 ///
-///     acp-conformance [--json] [--script FILE] [--env KEY=VALUE]... [--cwd PATH]
+///     acp-conformance [--json] [--trace] [--script FILE] [--env KEY=VALUE]... [--cwd PATH]
 ///                     [--quiet SECONDS] [--timeout SECONDS] -- AGENT [ARGUMENT]...
 ///
 /// The exit code is 0 when no check failed, 1 when a check failed, and 2 for a usage error.
@@ -17,15 +17,17 @@ public enum ConformanceCommand {
     struct Options {
         var configuration: ConformanceConfiguration
         var json: Bool
+        var trace = false
     }
 
     static let usage = """
-        usage: acp-conformance [--json] [--script FILE] [--env KEY=VALUE]... [--cwd PATH] \
+        usage: acp-conformance [--json] [--trace] [--script FILE] [--env KEY=VALUE]... [--cwd PATH] \
         [--quiet SECONDS] [--timeout SECONDS] -- AGENT [ARGUMENT]...
         """
 
     static func parse(_ arguments: [String]) throws -> Options {
         var json = false
+        var trace = false
         var scriptPath: String?
         var overrides: [String: String] = [:]
         var cwd: String?
@@ -51,6 +53,7 @@ public enum ConformanceCommand {
                 index = arguments.count
                 continue
             case "--json": json = true
+            case "--trace": trace = true
             case "--script": scriptPath = try value(after: "--script")
             case "--cwd": cwd = try value(after: "--cwd")
             case "--quiet": quiet = try seconds("--quiet")
@@ -70,7 +73,7 @@ public enum ConformanceCommand {
         var configuration = ConformanceConfiguration(
             executable: try resolve(program), arguments: Array(command.dropFirst()))
         if !overrides.isEmpty { configuration.environment = ProcessInfo.processInfo.environment.merging(overrides) { $1 } }
-        if let cwd { configuration.cwd = cwd }
+        configuration.cwd = try cwd ?? makeEmptyFolder()
         if let quiet { configuration.quiet = .seconds(quiet) }
         if let timeout { configuration.timeout = .seconds(timeout) }
         if let scriptPath {
@@ -81,7 +84,19 @@ public enum ConformanceCommand {
                 throw UsageError(description: "cannot read the script \(scriptPath): \(error)")
             }
         }
-        return Options(configuration: configuration, json: json)
+        return Options(configuration: configuration, json: json, trace: trace)
+    }
+
+    /// A new empty folder for the working directory of the sessions. A cwd such as
+    /// `/` makes some agents index the whole disk.
+    private static func makeEmptyFolder() throws -> String {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("acp-conformance-\(UUID().uuidString)")
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        } catch {
+            throw UsageError(description: "cannot make a working folder: \(error)")
+        }
+        return folder.path
     }
 
     /// A name with a slash is a path. A bare name is searched in `PATH`.
@@ -107,6 +122,7 @@ public enum ConformanceCommand {
             return usageExitCode
         }
         let report = await ConformanceRunner.run(options.configuration)
+        if options.trace { FileHandle.standardError.write(Data((report.traceText + "\n").utf8)) }
         do {
             let output = options.json ? try report.json() : report.text
             FileHandle.standardOutput.write(Data((output + "\n").utf8))

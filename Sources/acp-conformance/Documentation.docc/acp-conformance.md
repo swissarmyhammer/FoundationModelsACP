@@ -15,6 +15,10 @@ line for each check, with the position of the first event that breaks it.
     acp-conformance [--json] [--script FILE] [--env KEY=VALUE]... [--cwd PATH] \
                     [--quiet SECONDS] [--timeout SECONDS] -- AGENT [ARGUMENT]...
 
+`--cwd` sets the working directory of the sessions. The default is a new empty folder,
+because a cwd such as `/` makes some agents index the whole disk. `--trace` prints the
+numbered wire trace of each scenario to stderr; the positions in the report are these numbers.
+
 The exit code is 0 when no check failed, 1 when a check failed, and 2 for a usage error.
 A skipped check does not fail the run. `--json` prints an object with `passed` and
 `results`.

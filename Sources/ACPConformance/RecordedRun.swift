@@ -1,3 +1,4 @@
+import Foundation
 import FoundationModelsACP
 
 /// What one connection to the agent under test showed, in wire order.
@@ -71,4 +72,33 @@ struct RecordedRun: Sendable {
 enum WireMethod {
     static let prompt = "session/prompt"
     static let resume = "session/resume"
+}
+
+extension RecordedRun {
+    /// One line for each event of ``wireTrace``, numbered with the position that the
+    /// checks report. The line of an update names its session, its kind, and for a
+    /// state update the state.
+    var traceLines: [String] {
+        wireTrace.enumerated().map { position, event in
+            switch event {
+            case .resumeRequest(_, let session): "\(position) -> session/resume \(session.rawValue)"
+            case .resumeResponse: "\(position) <- session/resume response"
+            case .agentRequest(_, let method, let session): "\(position) <- request \(method) \(session.rawValue)"
+            case .update(let session, let update): "\(position) <- \(session.rawValue) \(Self.describe(update))"
+            }
+        }
+    }
+
+    private static func describe(_ update: SessionUpdate) -> String {
+        let kind = (try? JSONEncoder().encode(update))
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            .flatMap { $0["sessionUpdate"] as? String } ?? "update"
+        guard case .stateUpdate(let state) = update else { return kind }
+        switch state {
+        case .running: return "\(kind) running"
+        case .idle: return "\(kind) idle"
+        case .requiresAction: return "\(kind) requires_action"
+        case .unknown(let name, _): return "\(kind) \(name)"
+        }
+    }
 }

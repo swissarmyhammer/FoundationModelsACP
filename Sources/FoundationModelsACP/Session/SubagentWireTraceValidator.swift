@@ -95,7 +95,8 @@ public struct SubagentWireTraceValidator: Sendable {
 
         /// Rule 8. The final `tool_call_update` of an `agents` call comes
         /// after the last update of its child and after the final `idle`
-        /// state of the child.
+        /// state of the child. A tool call id is scoped to its session: the root and
+        /// a child can have calls with the same id.
         case finalToolCallLast
 
         /// Rule 9. `background` is present on every `state_update` of a
@@ -174,7 +175,13 @@ extension SubagentWireTraceValidator {
         var parent: [SessionId: SessionId] = [:]
 
         var sahMembers: [String: Set<String>] = [:]
-        var childOfCall: [ToolCallId: SessionId] = [:]
+        /// A tool call id is scoped to its session: the root and a child can have
+        /// calls with the same id.
+        struct CallKey: Hashable {
+            let session: SessionId
+            let call: ToolCallId
+        }
+        var childOfCall: [CallKey: SessionId] = [:]
         var lastStateIsIdle: [SessionId: Bool] = [:]
         var finished: Set<SessionId> = []
         var reportedBackground: [SessionId: [SessionId]] = [:]
@@ -348,9 +355,11 @@ extension SubagentWireTraceValidator {
             if case .value(let meta) = call.meta, let run = SAH.AgentRun.extract(from: meta), let child = run.sessionId {
                 // The tool call starts the child, so it can come before the
                 // announcement. It links to the child. It does not address it.
-                childOfCall[call.toolCallId] = child
+                childOfCall[CallKey(session: stream, call: call.toolCallId)] = child
             }
-            guard case .value(let status) = call.status, let child = childOfCall[call.toolCallId] else { return }
+            guard case .value(let status) = call.status,
+                let child = childOfCall[CallKey(session: stream, call: call.toolCallId)]
+            else { return }
             switch status {
             case .completed, .failed, .cancelled:
                 if lastStateIsIdle[child] != true {

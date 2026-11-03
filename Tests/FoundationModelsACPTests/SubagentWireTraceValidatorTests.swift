@@ -230,4 +230,60 @@ import Testing
         let violation = try #require(violations.first { $0.rule == .noReplayedRequests })
         #expect(violation.position == response)
     }
+
+    // MARK: tool call ids are scoped to their session
+
+    /// A live trace in which the root and its child both have a tool call
+    /// with the id `call-1`. The root call starts the child. The child call
+    /// starts the grandchild. The root call is seen after the child call. The
+    /// final update of a call has no `_meta`.
+    private func sharedCallIdTrace(rootCallFinishesBeforeChildIdle: Bool = false) throws -> [WireTraceEvent] {
+        let call = ToolCallId(rawValue: "call-1")
+        let child = SessionId(rawValue: "child-1")
+        let grandchild = SessionId(rawValue: "grandchild-1")
+        func toolCall(_ session: SessionId, started: SessionId, status: ToolCallStatus) throws -> WireTraceEvent {
+            .update(
+                sessionId: session,
+                update: .toolCallUpdate(ToolCallUpdate(
+                    toolCallId: call, name: .value("agents"), status: .value(status),
+                    // Only the first update of a call carries the link. A later
+                    // update leaves `_meta` as it is.
+                    meta: status == .inProgress
+                        ? .value(try SAH.AgentRun(sessionId: started).inject(into: nil)) : .unchanged)))
+        }
+        func announce(_ session: SessionId, in parent: SessionId, _ state: StateUpdate) -> WireTraceEvent {
+            .update(
+                sessionId: parent,
+                update: .subagentUpdate(SubagentUpdate(sessionId: session, state: .value(state))))
+        }
+        let running = StateUpdate.running(RunningStateUpdate())
+        let idle = StateUpdate.idle(IdleStateUpdate(stopReason: .endTurn))
+        var trace: [WireTraceEvent] = [
+            announce(child, in: Self.root, running),
+            try toolCall(child, started: grandchild, status: .inProgress),
+            announce(grandchild, in: child, running),
+            try toolCall(Self.root, started: child, status: .inProgress),
+            announce(grandchild, in: child, idle),
+            try toolCall(child, started: grandchild, status: .completed),
+        ]
+        let rootFinal = try toolCall(Self.root, started: child, status: .completed)
+        if rootCallFinishesBeforeChildIdle {
+            trace += [rootFinal, announce(child, in: Self.root, idle)]
+        } else {
+            trace += [announce(child, in: Self.root, idle), rootFinal]
+        }
+        return trace
+    }
+
+    @Test func theSameToolCallIdInTheRootAndAChildIsTwoCalls() throws {
+        let trace = try sharedCallIdTrace()
+        let violations = SubagentWireTraceValidator().validate(trace)
+        #expect(violations == [], "\(violations)")
+    }
+
+    @Test func rule8_theFinalRootCallBeforeTheLastChildUpdateFailsWithTheSameIdInTheChild() throws {
+        let violations = SubagentWireTraceValidator().validate(
+            try sharedCallIdTrace(rootCallFinishesBeforeChildIdle: true))
+        #expect(violations.map(\.rule).contains(.finalToolCallLast), "\(violations)")
+    }
 }

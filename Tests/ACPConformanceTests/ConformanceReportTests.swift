@@ -33,3 +33,23 @@ import Testing
         #expect(results.first?["id"] as? String == "turn.states")
     }
 }
+
+@Suite struct ConformanceTraceTextTests {
+    private typealias F = ConformanceFixtures
+
+    @Test func aResumeTraceNumbersTheResumeRequestZero() {
+        let lines = F.resume().traceLines
+        #expect(lines.first?.hasPrefix("0 ") == true)
+        #expect(lines.first?.contains("session/resume") == true)
+    }
+
+    @Test func theTraceNamesTheKindOfEachUpdateAtItsPosition() {
+        let lines = F.resume().traceLines
+        #expect(lines[1].hasPrefix("1 ") && lines[1].contains("state_update idle"))
+        #expect(lines[2].contains("session_info_update"))
+    }
+
+    @Test func aTurnTraceStartsAtZero() {
+        #expect(F.turn().traceLines.first?.hasPrefix("0 ") == true)
+    }
+}

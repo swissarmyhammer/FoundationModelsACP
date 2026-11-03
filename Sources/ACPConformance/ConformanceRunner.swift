@@ -33,7 +33,7 @@ enum ConformanceRunner {
             runs.append(run)
         }
         results += ConformanceEvaluator.rules(runs)
-        return ConformanceReport(results: ordered(merge(results)))
+        return ConformanceReport(results: ordered(merge(results)), runs: runs)
     }
 
     // MARK: scenarios
