@@ -169,14 +169,7 @@ enum ConformanceRunner {
 
     /// Whether the session reported `idle` (or, when `idle` is false, `running`).
     private static func stateSeen(_ entries: [RecordedRun.Entry], _ session: SessionId, idle: Bool) -> Bool {
-        entries.contains { entry in
-            guard case .update(session, .stateUpdate(let state)) = entry else { return false }
-            switch state {
-            case .idle: return idle
-            case .running: return !idle
-            default: return false
-            }
-        }
+        ConformanceEvaluator.states(in: entries, session: session).contains { $0.kind == (idle ? .idle : .running) }
     }
 
     private static func finalToolCall(_ entries: [RecordedRun.Entry], _ id: String) -> Bool {

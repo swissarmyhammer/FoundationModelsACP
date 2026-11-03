@@ -4,7 +4,8 @@ import FoundationModelsACP
 /// One running agent process with a connection and a recorder.
 final class AgentProcess: Sendable {
     /// How often `wait` looks at the recorder.
-    private static let pollInterval = Duration.milliseconds(20)
+    private static let pollMilliseconds = 20
+    private static let pollInterval = Duration.milliseconds(pollMilliseconds)
 
     let client: ClientSideConnection
     let recorder: WireRecorder
@@ -55,7 +56,7 @@ final class AgentProcess: Sendable {
         let deadline = clock.now + configuration.timeout
         var lastCount = await recorder.count
         var lastChange = clock.now
-        while clock.now < deadline {
+        while clock.now < deadline, !Task.isCancelled {
             if condition(await recorder.entries) { return true }
             let count = await recorder.count
             if count != lastCount {

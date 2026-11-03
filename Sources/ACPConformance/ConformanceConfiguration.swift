@@ -3,10 +3,12 @@ import Foundation
 /// The agent under test and the limits of a run.
 struct ConformanceConfiguration: Sendable {
     /// The default longest wait for one step.
-    static let defaultTimeout = Duration.seconds(60)
+    static let defaultTimeoutSeconds = 60
+    static let defaultTimeout = Duration.seconds(defaultTimeoutSeconds)
 
     /// The default quiet time.
-    static let defaultQuiet = Duration.seconds(2)
+    static let defaultQuietSeconds = 2
+    static let defaultQuiet = Duration.seconds(defaultQuietSeconds)
 
     /// The agent executable. The runner starts it once for each scenario.
     var executable: URL

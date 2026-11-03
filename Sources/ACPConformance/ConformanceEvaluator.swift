@@ -13,10 +13,11 @@ enum ConformanceEvaluator {
         }.first
     }
 
-    private enum StateKind { case running, idle, requiresAction, unknown }
+    enum StateKind { case running, idle, requiresAction, unknown }
 
-    private static func states(of run: RecordedRun, session: SessionId) -> [(position: Int, kind: StateKind)] {
-        run.entries.enumerated().compactMap { position, entry in
+    /// The `state_update` kinds of one session in the entries, with their positions.
+    static func states(in entries: [RecordedRun.Entry], session: SessionId) -> [(position: Int, kind: StateKind)] {
+        entries.enumerated().compactMap { position, entry in
             guard case .update(let id, .stateUpdate(let state)) = entry, id == session else { return nil }
             switch state {
             case .running: return (position, .running)
@@ -50,7 +51,7 @@ enum ConformanceEvaluator {
         func fail(_ position: Int?, _ message: String) -> ConformanceResult {
             ConformanceResult(check: .turnStates, outcome: .fail, scenario: run.name, position: position, message: message)
         }
-        let states = states(of: run, session: session)
+        let states = states(in: run.entries, session: session)
         guard let first = states.first else { return fail(nil, "no state_update in the turn") }
         guard first.kind == .running else { return fail(first.position, "the first state_update is not running") }
         guard let firstIdle = states.firstIndex(where: { $0.kind == .idle }) else {
@@ -66,7 +67,7 @@ enum ConformanceEvaluator {
 
     /// `cancel.ends-turn` for a run in which the runner cancelled a turn of `session`.
     static func cancel(_ run: RecordedRun, session: SessionId) -> ConformanceResult {
-        let states = states(of: run, session: session)
+        let states = states(in: run.entries, session: session)
         guard let last = states.last else {
             return ConformanceResult(
                 check: .cancelEndsTurn, outcome: .fail, scenario: run.name, message: run.failureText("no state_update after the prompt"))
