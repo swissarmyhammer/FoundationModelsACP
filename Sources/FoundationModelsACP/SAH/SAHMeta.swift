@@ -391,3 +391,87 @@ extension SAH {
         }
     }
 }
+
+// MARK: - Agent run
+
+extension SAH {
+    /// The link between an agent run's tool call and its child session, in
+    /// `_meta.sah.agentRun`.
+    ///
+    /// An agent run has two faces on the wire. In the parent session it is a
+    /// `tool_call` (the `agents` call). It is also a child session that a
+    /// `subagent_update` announces. ACP does not link the two: a
+    /// `SubagentUpdate` has no tool call id. This object links them, and it has
+    /// two optional members:
+    ///
+    /// - `toolCallId`, in the `_meta` of a `subagent_update`: the id of the
+    ///   tool call that started the child.
+    /// - `sessionId`, in the `_meta` of a `tool_call` or a `tool_call_update`:
+    ///   the id of the child session.
+    ///
+    /// ```json
+    /// {"sessionUpdate": "subagent_update", "sessionId": "child-1",
+    ///  "_meta": {"sah": {"agentRun": {"toolCallId": "call-7"}}}}
+    /// ```
+    ///
+    /// Rules:
+    ///
+    /// - **Order.** The agent sends the final `tool_call_update` of the tool
+    ///   call after the last update of the child session.
+    /// - **Removal.** ACP has no message that removes a child. A client removes
+    ///   a child when its linked tool call has a final status. A finished agent
+    ///   session is ended and removed.
+    /// - **Other peers.** A peer that ignores `_meta.sah` sees a normal ACP
+    ///   child session and a normal tool call.
+    ///
+    /// This is not ``SAH/SessionMessage`` (`_meta.sah.message`), which names the
+    /// sender of a message from another session, and it is not the ACP
+    /// `session_message` update.
+    ///
+    /// ``SAH/version`` does not change: an old peer ignores the new member.
+    public struct AgentRun: Codable, Hashable, Sendable {
+        /// The `_meta.sah` member name of the object.
+        public static let metaKey = "agentRun"
+
+        /// The id of the tool call that started the child, in a
+        /// `subagent_update`, or `nil`.
+        public var toolCallId: ToolCallId?
+
+        /// The id of the child session, in a `tool_call` or a
+        /// `tool_call_update`, or `nil`.
+        public var sessionId: SessionId?
+
+        /// Makes the object.
+        ///
+        /// - Parameters:
+        ///   - toolCallId: The id of the tool call that started the child, or
+        ///     `nil`.
+        ///   - sessionId: The id of the child session, or `nil`.
+        public init(toolCallId: ToolCallId? = nil, sessionId: SessionId? = nil) {
+            self.toolCallId = toolCallId
+            self.sessionId = sessionId
+        }
+
+        /// Reads the object from `_meta.sah.agentRun`.
+        ///
+        /// - Parameter meta: The `_meta` value, or `nil`.
+        /// - Returns: The object, or `nil` when it is absent or is not valid.
+        public static func extract(from meta: JSONValue?) -> AgentRun? {
+            SAH.payload(AgentRun.self, inSAHObjectOf: meta, member: metaKey)
+        }
+
+        /// Writes this object into `_meta.sah.agentRun` of a `_meta` value.
+        ///
+        /// The function keeps every other member of `_meta` and of
+        /// `_meta.sah`, and replaces an earlier `agentRun`. When `meta` or
+        /// `_meta.sah` is a value that is not an object, the function returns
+        /// `meta` unchanged.
+        ///
+        /// - Parameter meta: The `_meta` value to write into, or `nil`.
+        /// - Returns: The `_meta` value to send.
+        /// - Throws: `EncodingError` when the object cannot be encoded.
+        public func inject(into meta: JSONValue?) throws -> JSONValue {
+            try SAH.inject(self, intoSAHObjectOf: meta, member: Self.metaKey)
+        }
+    }
+}

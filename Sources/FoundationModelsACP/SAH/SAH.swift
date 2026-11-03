@@ -11,7 +11,8 @@ import Foundation
 ///   the endpoint list.
 /// - The `_meta` payloads: ``SAH/InitializeMeta`` under `_meta.sah` of the
 ///   `initialize` response, ``SAH/SessionMessage`` under `_meta.sah.message`,
-///   and ``SAH/RuleDenial`` under `_meta["sah/ruleDenial"]`.
+///   ``SAH/AgentRun`` under `_meta.sah.agentRun`, and ``SAH/RuleDenial`` under
+///   `_meta["sah/ruleDenial"]`.
 ///
 /// The types only carry data. They do not send or receive a message, and they
 /// do not parse GraphQL: a GraphQL document, its variables and its result stay
