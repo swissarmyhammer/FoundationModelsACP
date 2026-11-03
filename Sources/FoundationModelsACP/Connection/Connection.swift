@@ -326,10 +326,9 @@ public enum ConnectionError: Error, Hashable, Sendable {
 /// - **`$/cancel_request`** → protocol-level, handled here rather than routed
 ///   to either role: cancels the named request's in-flight inbound `Task`, if
 ///   still running.
-/// - **batch** (a JSON array of the above) → every item dispatches exactly as
-///   it would at the top level, except responses owed to items in the batch
-///   are collected and written back as a single batch-response array, once
-///   every owed response has resolved.
+/// - **array** (a JSON-RPC batch) → ACP v2 has no batching. The connection
+///   answers with an invalid-request error, `id: null`; the read loop keeps
+///   going.
 /// - **malformed line** (valid framing, invalid JSON) → answered with a
 ///   `-32700` parse-error response, `id: null`; the read loop keeps going.
 ///
@@ -484,15 +483,6 @@ public actor Connection {
         let cancellation: InboundCancellation
     }
 
-    /// One in-flight batch call's response collector: how many owed responses
-    /// remain, and the responses collected so far, in completion order (batch
-    /// responses need not preserve request order — see spec §5, upsert
-    /// correlation is always by id, never by arrival or send order).
-    private struct BatchState {
-        var remaining: Int
-        var results: [JSONValue] = []
-    }
-
     /// Invoked once when the connection shuts down, after every pending
     /// request is rejected. Upper layers use this disconnect signal to finish
     /// streams they derive from the connection (e.g. per-session update
@@ -536,11 +526,6 @@ public actor Connection {
     private var liveInboundTasks: [Int: Task<Void, Never>] = [:]
     /// Monotonic key for `liveInboundTasks` entries.
     private var nextInboundToken = 0
-    /// In-flight batch calls awaiting their owed responses, keyed by a
-    /// monotonic token local to this connection.
-    private var batches: [Int: BatchState] = [:]
-    /// Monotonic key for `batches` entries.
-    private var nextBatchToken = 0
     /// Why the connection closed, or `nil` while it is open. Set exactly
     /// once, by `shutDown(reason:)`, before pending requests are rejected.
     private var closeReason: ConnectionCloseReason?
@@ -878,54 +863,23 @@ public actor Connection {
         }
     }
 
-    /// Routes one decoded line: a single envelope, or a batch array of them.
+    /// Routes one decoded line: a single envelope.
+    ///
+    /// ACP v2 removed JSON-RPC batching (`schema-v2.0.0-alpha.11`). An array
+    /// frame gets an invalid-request error with a `null` id, because it has no
+    /// single request id to echo, and the read loop goes on.
     ///
     /// - Parameter message: The decoded top-level JSON value.
     private func dispatch(_ message: JSONValue) async {
         switch message {
-        case .array(let items):
-            await dispatchBatch(items)
+        case .array:
+            log("refusing a batch array: ACP v2 has no JSON-RPC batching")
+            await respond(id: .null, outcome: .failure(.invalidRequest))
         case .object:
-            await dispatchSingle(message, batchToken: nil)
+            await dispatchSingle(message)
         default:
-            log("dropping message that is neither an object nor a batch array")
+            log("dropping message that is neither an object nor an array")
         }
-    }
-
-    /// Dispatches every item of a batch call, collecting the responses owed
-    /// to id-bearing items into one aggregate reply.
-    ///
-    /// Per JSON-RPC 2.0, an item owes a response iff it carries an `id` and is
-    /// not itself a response (a request, or a malformed stand-in for one); a
-    /// batch containing none — all notifications — gets no reply at all.
-    ///
-    /// - Parameter items: The batch's elements, in wire order.
-    private func dispatchBatch(_ items: [JSONValue]) async {
-        guard !items.isEmpty else {
-            log("dropping empty batch")
-            return
-        }
-        let owedCount = items.count { owesResponse($0) }
-        guard owedCount > 0 else {
-            for item in items { await dispatchSingle(item, batchToken: nil) }
-            return
-        }
-        let token = nextBatchToken
-        nextBatchToken += 1
-        batches[token] = BatchState(remaining: owedCount)
-        for item in items {
-            await dispatchSingle(item, batchToken: token)
-        }
-    }
-
-    /// Whether a batch item owes a response: it carries a non-response `id`.
-    ///
-    /// - Parameter item: One batch element.
-    /// - Returns: `true` when the item has an `id` and is not itself a
-    ///   response (no `result` or `error` member).
-    private func owesResponse(_ item: JSONValue) -> Bool {
-        guard case .object(let fields) = item else { return false }
-        return fields[Self.idKey] != nil && fields[Self.resultKey] == nil && fields[Self.errorKey] == nil
     }
 
     /// One already-version-checked envelope's wire shape, so `dispatchSingle`
@@ -996,9 +950,7 @@ public actor Connection {
     ///
     /// - Parameters:
     ///   - message: The decoded envelope.
-    ///   - batchToken: The enclosing batch's collector, or `nil` when this
-    ///     envelope arrived on its own.
-    private func dispatchSingle(_ message: JSONValue, batchToken: Int?) async {
+    private func dispatchSingle(_ message: JSONValue) async {
         guard case .object(let fields) = message else {
             log("dropping non-object message")
             return
@@ -1006,12 +958,12 @@ public actor Connection {
         // The version check mirrors the write side, which stamps every
         // outgoing envelope with the version constant.
         guard fields[Self.jsonrpcKey, default: .null] == Self.jsonrpcVersion else {
-            await rejectWrongVersion(fields: fields, batchToken: batchToken)
+            await rejectWrongVersion(fields: fields)
             return
         }
         switch Self.classify(fields: fields) {
         case .request(let id, let method, let params):
-            await dispatchRequest(id: id, method: method, params: params, batchToken: batchToken)
+            await dispatchRequest(id: id, method: method, params: params)
         case .notification(let method, let params):
             await notificationHandler?(method, params)
         case .cancelRequest(let params):
@@ -1019,7 +971,7 @@ public actor Connection {
         case .response(let id, let responseFields):
             resolve(id: id, fields: responseFields)
         case .unclassifiable(let id):
-            await respond(id: id, outcome: .failure(.invalidRequest), batchToken: batchToken)
+            await respond(id: id, outcome: .failure(.invalidRequest))
         case .malformed:
             log("dropping unclassifiable message")
         }
@@ -1035,14 +987,12 @@ public actor Connection {
     ///
     /// - Parameters:
     ///   - fields: The envelope's decoded members.
-    ///   - batchToken: The enclosing batch's collector, or `nil` when this
-    ///     envelope arrived on its own.
-    private func rejectWrongVersion(fields: [String: JSONValue], batchToken: Int?) async {
+    private func rejectWrongVersion(fields: [String: JSONValue]) async {
         log("rejecting message without jsonrpc 2.0 version")
         guard let id = fields[Self.idKey] else { return }
         if fields[Self.resultKey] == nil, fields[Self.errorKey] == nil {
             // Owed a response (request-shaped, or a detectable stand-in).
-            await respond(id: id, outcome: .failure(.invalidRequest), batchToken: batchToken)
+            await respond(id: id, outcome: .failure(.invalidRequest))
         } else {
             // Response-shaped: never answer a response — the id could
             // collide with one of the peer's own calls. Fail the awaiting
@@ -1092,11 +1042,9 @@ public actor Connection {
     ///     and the same key a `$/cancel_request` names to cancel this task.
     ///   - method: The JSON-RPC method name.
     ///   - params: The request parameters, passed through verbatim.
-    ///   - batchToken: The enclosing batch's collector, or `nil` when this
-    ///     request arrived on its own.
-    private func dispatchRequest(id: RequestId, method: String, params: JSONValue?, batchToken: Int?) async {
-        // A batch can still dispatch items after `close()`. A handler that
-        // starts now cannot write a response, and `closed` could give its
+    private func dispatchRequest(id: RequestId, method: String, params: JSONValue?) async {
+        // The read loop can still dispatch a frame after `close()`. A handler
+        // that starts now cannot write a response, and `closed` could give its
         // reason while that handler runs; thus it does not start.
         guard !isClosed else {
             log("dropping request with id \(id): the connection is closed")
@@ -1104,7 +1052,7 @@ public actor Connection {
         }
         if inboundTasks[id] != nil {
             log("rejecting request with id \(id): a request with this id is already in flight")
-            await respond(id: id, outcome: .failure(.invalidRequest), batchToken: batchToken)
+            await respond(id: id, outcome: .failure(.invalidRequest))
             return
         }
         let handler = requestHandler
@@ -1140,7 +1088,7 @@ public actor Connection {
             // With no response, discard the hooks: a task that the handler
             // started keeps `hooks` through the task-local, and must not keep
             // the closures and their captured values too.
-            if await self.completeInbound(id: id, outcome: outcome, batchToken: batchToken) {
+            if await self.completeInbound(id: id, outcome: outcome) {
                 // A `$/cancel_request` cancels this task, and it can come
                 // after the handler accepted the request. The deferred work
                 // (for example, the turn of an accepted prompt) must not see
@@ -1202,33 +1150,26 @@ public actor Connection {
     /// - Parameters:
     ///   - id: The request's wire id.
     ///   - outcome: The handler's result or typed error.
-    ///   - batchToken: The enclosing batch's collector, or `nil` when this
-    ///     request arrived on its own.
     /// - Returns: Whether the response was actually written — `false` when
     ///   the connection had already closed, so the caller knows not to run
     ///   any work deferred until "after the response."
     @discardableResult
     private func completeInbound(
         id: RequestId,
-        outcome: Result<JSONValue, RequestError>,
-        batchToken: Int?
+        outcome: Result<JSONValue, RequestError>
     ) async -> Bool {
         inboundTasks.removeValue(forKey: id)
         guard !isClosed else { return false }
-        await respond(id: id, outcome: outcome, batchToken: batchToken)
+        await respond(id: id, outcome: outcome)
         return true
     }
 
-    /// Writes one response envelope — immediately if it arrived on its own,
-    /// or into its batch's collector, flushing the aggregate array once every
-    /// owed response in that batch has resolved.
+    /// Writes one response envelope.
     ///
     /// - Parameters:
     ///   - id: The request's wire id, echoed back verbatim.
     ///   - outcome: The `result` value or the `error` to report.
-    ///   - batchToken: The enclosing batch's collector, or `nil` to write a
-    ///     standalone frame.
-    private func respond(id: JSONValue, outcome: Result<JSONValue, RequestError>, batchToken: Int?) async {
+    private func respond(id: JSONValue, outcome: Result<JSONValue, RequestError>) async {
         var envelope: [String: JSONValue] = [Self.jsonrpcKey: Self.jsonrpcVersion, Self.idKey: id]
         switch outcome {
         case .success(let result):
@@ -1236,39 +1177,7 @@ public actor Connection {
         case .failure(let error):
             envelope[Self.errorKey] = error.wireValue
         }
-        await deliver(.object(envelope), batchToken: batchToken)
-    }
-
-    /// Writes a response frame, or — inside a batch — appends it to that
-    /// batch's collector and flushes the aggregate array once nothing more is
-    /// owed.
-    ///
-    /// - Parameters:
-    ///   - responseObject: The single response envelope.
-    ///   - batchToken: The enclosing batch's collector, or `nil` to write a
-    ///     standalone frame.
-    private func deliver(_ responseObject: JSONValue, batchToken: Int?) async {
-        guard let batchToken else {
-            await writeEncoded(responseObject, logMessage: "failed to write response")
-            return
-        }
-        guard var state = batches[batchToken] else {
-            // Every batch item calls `deliver` exactly once, so a missing
-            // token here means the owed-response accounting has drifted —
-            // fail loud with a diagnostic rather than silently emitting a
-            // stray standalone frame a peer expecting a batch array would
-            // not know how to correlate.
-            log("dropping a batch response for unknown or already-flushed batch token \(batchToken)")
-            return
-        }
-        state.results.append(responseObject)
-        state.remaining -= 1
-        if state.remaining <= 0 {
-            batches.removeValue(forKey: batchToken)
-            await writeEncoded(.array(state.results), logMessage: "failed to write batch response")
-        } else {
-            batches[batchToken] = state
-        }
+        await writeEncoded(.object(envelope), logMessage: "failed to write response")
     }
 
     /// Answers a malformed line with a `-32700` parse-error response, `id:
@@ -1490,10 +1399,6 @@ public actor Connection {
         for entry in cancelled.values {
             entry.task.cancel()
         }
-        // Incomplete batches can never flush now that inbound handlers are
-        // cancelled and the transport is going away; drop them rather than
-        // leave dead state behind.
-        batches = [:]
         onClose?()
         return reason
     }

@@ -294,7 +294,7 @@ private func slowHandler(
     }
 
     @Test
-    func batchRequestAfterCloseStartsNoHandler() async throws {
+    func requestAfterCloseStartsNoHandler() async throws {
         let peer = ScriptedPeer()
         let box = ConnectionBox()
         let record = AtomicFlag()
@@ -308,12 +308,9 @@ private func slowHandler(
         )
         box.connection = connection
 
-        try peer.send(
-            .array([
-                .object(["jsonrpc": .string("2.0"), "method": .string("stop")]),
-                .object(["jsonrpc": .string("2.0"), "id": .number(1), "method": .string("late")]),
-            ]))
-        // The read loop dispatches the batch before it reads the end of the
+        try peer.send(.object(["jsonrpc": .string("2.0"), "method": .string("stop")]))
+        try peer.send(.object(["jsonrpc": .string("2.0"), "id": .number(1), "method": .string("late")]))
+        // The read loop dispatches the frames before it reads the end of the
         // input, so the notification closes the connection first. When the
         // notification does not close it, the end of the input closes it,
         // and the wait below ends. Then the reason check fails.

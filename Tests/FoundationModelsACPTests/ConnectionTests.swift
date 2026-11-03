@@ -657,109 +657,42 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     #expect(firstResponse == .object(["jsonrpc": .string("2.0"), "id": .number(1), "result": .string("first done")]))
 }
 
-// MARK: - Batch JSON-RPC
+// MARK: - Batch arrays (ACP v2 has no JSON-RPC batching)
 
-@Test func batchOfRequestsIsAnsweredWithOneAggregateBatchResponse() async throws {
+@Test func anArrayFrameIsRefusedWithANullIdAndNoItemRuns() async throws {
     let (clientEnd, agentEnd) = InMemoryTransport.pair()
-    let agent = await Connection(
-        transport: agentEnd,
-        requestHandler: { method, _ in .object(["echo": .string(method)]) }
-    )
+    let handled = Mutex(false)
+    let agent = await Connection(transport: agentEnd, requestHandler: { _, _ in
+        handled.withLock { $0 = true }
+        return .bool(true)
+    })
     defer { await agent.close() }
     defer { clientEnd.close() }
-
-    try await clientEnd.write(
-        NDJSONCodec.encode(
-            JSONValue.array([
-                .object(["jsonrpc": .string("2.0"), "id": .number(1), "method": .string("a")]),
-                .object(["jsonrpc": .string("2.0"), "id": .number(2), "method": .string("b")]),
-            ])
-        )
-    )
-
-    var iterator = NDJSONCodec.frames(from: clientEnd.bytes, logger: .disabled).makeAsyncIterator()
-    let frame = try await iterator.next()
-    guard case .message(.array(let responses)) = frame else {
-        Issue.record("expected a batch-response array, got \(String(describing: frame))")
-        return
-    }
-    #expect(responses.count == 2)
-    let byId = Dictionary(
-        uniqueKeysWithValues: responses.compactMap { response -> (JSONValue, JSONValue)? in
-            guard case .object(let fields) = response, let id = fields["id"] else { return nil }
-            return (id, fields["result"] ?? .null)
-        }
-    )
-    #expect(byId[.number(1)] == .object(["echo": .string("a")]))
-    #expect(byId[.number(2)] == .object(["echo": .string("b")]))
-}
-
-@Test func batchOfOnlyNotificationsProducesNoReply() async throws {
-    let (clientEnd, agentEnd) = InMemoryTransport.pair()
-    let notes = AsyncStream<String>.makeStream()
-    let agent = await Connection(
-        transport: agentEnd,
-        notificationHandler: { method, _ in notes.continuation.yield(method) },
-        // The close ends each wait of the test for a notification.
-        onClose: { notes.continuation.finish() }
-    )
-    defer { await agent.close() }
-    defer { clientEnd.close() }
-
-    try await clientEnd.write(
-        NDJSONCodec.encode(
-            JSONValue.array([
-                .object(["jsonrpc": .string("2.0"), "method": .string("note/a")]),
-                .object(["jsonrpc": .string("2.0"), "method": .string("note/b")]),
-            ])
-        )
-    )
-
-    var iterator = notes.stream.makeAsyncIterator()
-    #expect(await iterator.next() == "note/a")
-    #expect(await iterator.next() == "note/b")
-
-    // Prove no reply arrived for the batch: the next thing on the wire must
-    // be something written afterward, not a spurious batch acknowledgement.
-    try await send(.object(["jsonrpc": .string("2.0"), "method": .string("sentinel")]), over: agentEnd)
     let reader = WireReader(clientEnd)
-    let received = try await reader.next()
-    #expect(received == .object(["jsonrpc": .string("2.0"), "method": .string("sentinel")]))
-}
 
-@Test func batchMixingRequestsAndNotificationsOwesOnlyTheRequests() async throws {
-    let (clientEnd, agentEnd) = InMemoryTransport.pair()
-    let notes = AsyncStream<String>.makeStream()
-    let agent = await Connection(
-        transport: agentEnd,
-        requestHandler: { _, _ in .bool(true) },
-        notificationHandler: { method, _ in notes.continuation.yield(method) },
-        // The close ends the wait of the test for the notification.
-        onClose: { notes.continuation.finish() }
+    try await send(
+        .array([
+            .object(["jsonrpc": .string("2.0"), "id": .number(1), "method": .string("a")]),
+            .object(["jsonrpc": .string("2.0"), "id": .number(2), "method": .string("b")]),
+        ]),
+        over: clientEnd
     )
-    defer { await agent.close() }
-    defer { clientEnd.close() }
-
-    try await clientEnd.write(
-        NDJSONCodec.encode(
-            JSONValue.array([
-                .object(["jsonrpc": .string("2.0"), "method": .string("note/only")]),
-                .object(["jsonrpc": .string("2.0"), "id": .number(1), "method": .string("call")]),
-            ])
-        )
-    )
-
-    var notesIterator = notes.stream.makeAsyncIterator()
-    #expect(await notesIterator.next() == "note/only")
-
-    var iterator = NDJSONCodec.frames(from: clientEnd.bytes, logger: .disabled).makeAsyncIterator()
-    let frame = try await iterator.next()
-    guard case .message(.array(let responses)) = frame else {
-        Issue.record("expected a batch-response array, got \(String(describing: frame))")
+    let refusal = try #require(try await reader.next())
+    guard case .object(let fields) = refusal, case .object(let error) = fields["error"] ?? .null else {
+        Issue.record("expected an invalid-request error envelope, got \(refusal)")
         return
     }
-    #expect(responses.count == 1)
-    #expect(requestID(of: responses.first) == .number(1))
+    #expect(fields["id"] == .null)
+    #expect(error["code"] == .number(-32600))
+
+    // The read loop survived, and no item of the array ran.
+    try await send(
+        .object(["jsonrpc": .string("2.0"), "id": .number(3), "method": .string("c")]),
+        over: clientEnd
+    )
+    let response = try #require(try await reader.next())
+    #expect(response == .object(["jsonrpc": .string("2.0"), "id": .number(3), "result": .bool(true)]))
+    #expect(handled.withLock { $0 })
 }
 
 // MARK: - Malformed frame (clean protocol error, not a crashed read loop)
