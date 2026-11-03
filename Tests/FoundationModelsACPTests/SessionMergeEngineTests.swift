@@ -12,7 +12,7 @@ enum SessionMergeEngineFixtures {
     static let planId = PlanId(rawValue: "plan-1")
     static let traceMeta = JSONValue.object(["trace": .string("abc")])
     static let otherMeta = JSONValue.object(["trace": .string("def")])
-    static let listCommand = AvailableCommand(description: "List files", name: "ls")
+    static let listCommand = AvailableCommand.command(Command(description: "List files", name: "ls"))
     static let configOption = SessionConfigOption(
         configId: SessionConfigId(rawValue: "fast"),
         name: "Fast mode",
@@ -303,12 +303,12 @@ enum SessionMergeEngineFixtures {
         // The first update sets every field. When the fold misses a field,
         // that field changes to `.unchanged` and the two values are not
         // equal.
-        let lineNumber = 7
+        let lineNumber: UInt32 = 7
         let first = ToolCallUpdate(
             toolCallId: Fixtures.toolCallId,
             content: .value([.content(Content(content: Fixtures.text("out")))]),
             kind: .value(.edit),
-            locations: .value([ToolCallLocation(path: AbsolutePath(rawValue: "/a"), line: lineNumber)]),
+            locations: .value([ToolCallLocation(path: AbsolutePath(rawValue: "/a"), line: LineNumber(rawValue: lineNumber))]),
             name: .value("edit_file"),
             rawInput: .value(.object(["path": .string("/a")])),
             rawOutput: .value(.string("ok")),
@@ -616,6 +616,31 @@ enum SessionMergeEngineFixtures {
         let change = engine.apply(.usageUpdate(later))
         #expect(engine.usage == later)
         #expect(change == .usageChanged(later))
+    }
+
+    @Test func aUsageUpdateWithoutACostKeepsTheLastCost() {
+        let cost = Cost(amount: 0.5, currency: "credits")
+        var engine = SessionMergeEngine()
+        engine.apply(.usageUpdate(UsageUpdate(size: 1000, used: 10, cost: .value(cost))))
+        let change = engine.apply(.usageUpdate(UsageUpdate(size: 1000, used: 20)))
+        let expected = UsageUpdate(size: 1000, used: 20, cost: .value(cost))
+        #expect(engine.usage == expected)
+        #expect(change == .usageChanged(expected))
+    }
+
+    @Test func aUsageUpdateWithANullCostClearsTheCost() {
+        var engine = SessionMergeEngine()
+        engine.apply(.usageUpdate(UsageUpdate(size: 1000, used: 10, cost: .value(Cost(amount: 1, currency: "USD")))))
+        engine.apply(.usageUpdate(UsageUpdate(size: 1000, used: 20, cost: .cleared)))
+        #expect(engine.usage == UsageUpdate(size: 1000, used: 20, cost: .unchanged))
+    }
+
+    @Test func aUsageUpdateWithACostReplacesTheCost() {
+        var engine = SessionMergeEngine()
+        engine.apply(.usageUpdate(UsageUpdate(size: 1000, used: 10, cost: .value(Cost(amount: 1, currency: "USD")))))
+        let replacement = Cost(amount: 2, currency: "credits")
+        engine.apply(.usageUpdate(UsageUpdate(size: 1000, used: 20, cost: .value(replacement))))
+        #expect(engine.usage?.cost == .value(replacement))
     }
 
     @Test func aStateUpdateReplacesTheAgentStateAndKeepsAnExtensionStopReason() {

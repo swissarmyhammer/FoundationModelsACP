@@ -31,9 +31,27 @@ import Testing
     @Test(arguments: CommandCarrier.allCases)
     func aResponseCarryingAvailableCommandsRoundTrips(_ carrier: CommandCarrier) throws {
         let commands = try carrier.losslessCommands(
-            in: carrier.document(availableCommands: #"[{"name":"create_plan","description":"Make a plan"}]"#)
+            in: carrier.document(availableCommands: #"[{"type":"command","name":"create_plan","description":"Make a plan"}]"#)
         )
         #expect(commands == [Self.createPlan])
+    }
+
+    @Test(arguments: CommandCarrier.allCases)
+    func anAvailableCommandOfAnUnknownTypeRoundTripsVerbatim(_ carrier: CommandCarrier) throws {
+        // `AvailableCommand` is discriminated by `type` since
+        // `schema-v2.0.0-alpha.10`: a type this revision does not list is kept.
+        let commands = try #require(
+            try carrier.losslessCommands(
+                in: carrier.document(availableCommands: #"[{"type":"palette","name":"x"}]"#)
+            )
+        )
+        #expect(commands == [.unknown("palette", .object(["name": .string("x")]))])
+    }
+
+    @Test(arguments: CommandCarrier.allCases)
+    func anAvailableCommandWithoutATypeIsSkipped(_ carrier: CommandCarrier) throws {
+        let document = carrier.document(availableCommands: #"[{"name":"create_plan","description":"Make a plan"}]"#)
+        #expect(try carrier.decodedCommands(in: document) == [])
     }
 
     @Test(arguments: CommandCarrier.allCases)
@@ -51,7 +69,7 @@ import Testing
         // `x-deserialize-skip-invalid-items`: the entry with no `description`
         // drops out, and the valid entry stays.
         let document = carrier.document(
-            availableCommands: #"[{"name":"broken"},{"name":"create_plan","description":"Make a plan"}]"#
+            availableCommands: #"[{"type":"command","name":"broken"},{"type":"command","name":"create_plan","description":"Make a plan"}]"#
         )
         #expect(try carrier.decodedCommands(in: document) == [Self.createPlan])
     }
@@ -67,7 +85,7 @@ import Testing
     // MARK: - Fixtures
 
     /// The one valid command that each list above carries.
-    private static let createPlan = AvailableCommand(description: "Make a plan", name: "create_plan")
+    private static let createPlan = AvailableCommand.command(Command(description: "Make a plan", name: "create_plan"))
 }
 
 /// The two responses that carry `availableCommands`, so that one test body

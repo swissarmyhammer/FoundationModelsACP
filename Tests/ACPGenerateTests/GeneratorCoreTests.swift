@@ -227,14 +227,19 @@ import Testing
         #expect(source.contains("public var line: LineNumber?"))
     }
 
-    @Test func wireInvariantFieldsDecodeStrictlyDespiteForgivingAnnotation() throws {
+    @Test func pathInvariantFieldsDecodeStrictlyDespiteForgivingAnnotation() throws {
         let source = try miniatureOutput(named: "Models.generated.swift")
-        // Invariant-mapped fields must not go through the forgiving helpers:
-        // a value of the wrong JSON type is a decode error, never a silent
-        // default.
+        // Path fields must not go through the forgiving helpers: a value of
+        // the wrong JSON type is a decode error, never a silent default.
         #expect(source.contains("try container.decode(AbsolutePath.self, forKey: .cwd)"))
-        #expect(source.contains("try container.decodeIfPresent(LineNumber.self, forKey: .line)"))
         #expect(source.contains("try container.decodeIfPresent([AbsolutePath].self, forKey: .additionalDirectories)"))
+    }
+
+    @Test func aLineNumberFieldFollowsItsForgivingAnnotation() throws {
+        let source = try miniatureOutput(named: "Models.generated.swift")
+        // The schema marks the line `x-deserialize-default-on-error` and says
+        // that `0` is invalid, so a bad line degrades to omitted.
+        #expect(source.contains("container.forgivingDecodeIfPresent(LineNumber.self, forKey: .line)"))
     }
 
     @Test func forgivingFieldsDecodeThroughForgivingHelpers() throws {

@@ -968,6 +968,12 @@ public actor Connection {
                 return .cancelRequest(params: fields[Self.paramsKey])
             }
             if let id {
+                // A request id MUST NOT be `null` in ACP v2 (RequestId, since
+                // `schema-v2.0.0-alpha.10`): refuse it, answering with a
+                // `null` id as a JSON-RPC error response may.
+                if id == .null {
+                    return .unclassifiable(id: id)
+                }
                 return .request(id: id, method: method, params: fields[Self.paramsKey])
             }
             return .notification(method: method, params: fields[Self.paramsKey])

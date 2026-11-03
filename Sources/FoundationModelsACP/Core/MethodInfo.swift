@@ -10,6 +10,10 @@ public enum MethodSide: String, Hashable, Sendable {
     /// Protocol-level plumbing served by both participants (the `$/…`
     /// methods, e.g. `$/cancel_request`).
     case protocolLevel = "protocol"
+
+    /// Served by a proxy that sits between a client and an agent (e.g.
+    /// `proxy/initialize`).
+    case proxy
 }
 
 /// Whether a method is a request expecting a response or a one-way

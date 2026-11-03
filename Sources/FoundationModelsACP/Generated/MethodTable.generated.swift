@@ -109,6 +109,24 @@ public enum ACPMethodTable {
             deprecationMessage: nil
         ),
         MethodInfo(
+            wireMethod: "terminal/cancel",
+            handlerName: "cancelTerminal",
+            side: .agent,
+            kind: .request,
+            paramsTypeName: "CancelTerminalRequest",
+            resultTypeName: "CancelTerminalResponse",
+            deprecationMessage: nil
+        ),
+        MethodInfo(
+            wireMethod: "tool_call/cancel",
+            handlerName: "cancelToolCall",
+            side: .agent,
+            kind: .request,
+            paramsTypeName: "CancelToolCallRequest",
+            resultTypeName: "CancelToolCallResponse",
+            deprecationMessage: nil
+        ),
+        MethodInfo(
             wireMethod: "elicitation/complete",
             handlerName: "elicitationComplete",
             side: .client,
@@ -171,58 +189,13 @@ public enum Unstable {
         /// by wire method name within each side.
         public static let methods: [UnstableMethodInfo] = [
             UnstableMethodInfo(
-                wireMethod: "document/didChange",
-                handlerName: "documentDidChange",
-                side: .agent
-            ),
-            UnstableMethodInfo(
-                wireMethod: "document/didClose",
-                handlerName: "documentDidClose",
-                side: .agent
-            ),
-            UnstableMethodInfo(
-                wireMethod: "document/didFocus",
-                handlerName: "documentDidFocus",
-                side: .agent
-            ),
-            UnstableMethodInfo(
-                wireMethod: "document/didOpen",
-                handlerName: "documentDidOpen",
-                side: .agent
-            ),
-            UnstableMethodInfo(
-                wireMethod: "document/didSave",
-                handlerName: "documentDidSave",
+                wireMethod: "auth/status",
+                handlerName: "authStatus",
                 side: .agent
             ),
             UnstableMethodInfo(
                 wireMethod: "mcp/message",
                 handlerName: "mcpMessage",
-                side: .agent
-            ),
-            UnstableMethodInfo(
-                wireMethod: "nes/accept",
-                handlerName: "nesAccept",
-                side: .agent
-            ),
-            UnstableMethodInfo(
-                wireMethod: "nes/close",
-                handlerName: "nesClose",
-                side: .agent
-            ),
-            UnstableMethodInfo(
-                wireMethod: "nes/reject",
-                handlerName: "nesReject",
-                side: .agent
-            ),
-            UnstableMethodInfo(
-                wireMethod: "nes/start",
-                handlerName: "nesStart",
-                side: .agent
-            ),
-            UnstableMethodInfo(
-                wireMethod: "nes/suggest",
-                handlerName: "nesSuggest",
                 side: .agent
             ),
             UnstableMethodInfo(
@@ -241,14 +214,49 @@ public enum Unstable {
                 side: .agent
             ),
             UnstableMethodInfo(
+                wireMethod: "session/archive",
+                handlerName: "sessionArchive",
+                side: .agent
+            ),
+            UnstableMethodInfo(
                 wireMethod: "session/fork",
                 handlerName: "sessionFork",
                 side: .agent
             ),
             UnstableMethodInfo(
+                wireMethod: "session/set_title",
+                handlerName: "sessionSetTitle",
+                side: .agent
+            ),
+            UnstableMethodInfo(
+                wireMethod: "session/status",
+                handlerName: "sessionStatus",
+                side: .agent
+            ),
+            UnstableMethodInfo(
+                wireMethod: "session/unarchive",
+                handlerName: "sessionUnarchive",
+                side: .agent
+            ),
+            UnstableMethodInfo(
+                wireMethod: "auth/status_update",
+                handlerName: "authStatusUpdate",
+                side: .client
+            ),
+            UnstableMethodInfo(
                 wireMethod: "mcp/message",
                 handlerName: "mcpMessage",
                 side: .client
+            ),
+            UnstableMethodInfo(
+                wireMethod: "proxy/initialize",
+                handlerName: "proxyInitialize",
+                side: .proxy
+            ),
+            UnstableMethodInfo(
+                wireMethod: "proxy/successor",
+                handlerName: "proxySuccessor",
+                side: .proxy
             ),
         ]
     }

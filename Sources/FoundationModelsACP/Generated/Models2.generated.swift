@@ -19,10 +19,8 @@ public struct BooleanPropertySchema: Codable, Hashable, Sendable {
     public var title: String?
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
-    ///
-    /// Optional. Omitted and `null` are equivalent and mean no metadata.
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
@@ -79,12 +77,13 @@ public struct BooleanPropertySchema: Codable, Hashable, Sendable {
 ///
 /// See protocol docs: [Cancellation](https://agentclientprotocol.com/protocol/v2/cancellation)
 public struct CancelRequestNotification: Codable, Hashable, Sendable {
-    /// The ID of the request to cancel.
+    /// The ID of the request to cancel: a request that the sender of this notification issued.
+    /// Receivers match it only against requests they received from that sender.
     public var requestId: RequestId
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
@@ -127,7 +126,7 @@ public struct CancelRequestNotification: Codable, Hashable, Sendable {
     }
 }
 
-/// Notification to cancel ongoing operations for a session.
+/// Notification to cancel a session's foreground work and its prompts not yet inserted.
 ///
 /// See protocol docs: [Cancellation](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#cancellation)
 public struct CancelSessionNotification: Codable, Hashable, Sendable {
@@ -135,8 +134,8 @@ public struct CancelSessionNotification: Codable, Hashable, Sendable {
     public var sessionId: SessionId
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
@@ -179,6 +178,330 @@ public struct CancelSessionNotification: Codable, Hashable, Sendable {
     }
 }
 
+/// Request parameters for cancelling one terminal.
+///
+/// Clients MUST NOT send it unless the terminal currently advertises `capabilities.cancel`.
+///
+/// The Agent responds once it has accepted the cancellation. The response does not mean
+/// the work has stopped. The Agent confirms it with a `terminal_update` that sets
+/// `exitStatus`. Cancelling stops the process but does not release the terminal, and does
+/// not change the status of a tool call that references it.
+///
+/// The Agent responds with `-32602` if the terminal is unknown, has already exited, or is not
+/// cancellable. Cancelling a terminal does not change the foreground state by itself.
+///
+/// See protocol docs: [Cancelling Terminals](https://agentclientprotocol.com/protocol/v2/tool-calls#cancelling-terminals)
+public struct CancelTerminalRequest: Codable, Hashable, Sendable {
+    /// The ID of the session that owns the terminal.
+    public var sessionId: SessionId
+
+    /// The ID of the terminal to cancel.
+    public var terminalId: TerminalId
+
+    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
+    ///
+    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+    public var meta: JSONValue?
+
+    /// Creates a `CancelTerminalRequest`.
+    public init(
+        sessionId: SessionId,
+        terminalId: TerminalId,
+        meta: JSONValue? = nil
+    ) {
+        self.sessionId = sessionId
+        self.terminalId = terminalId
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionId
+        case terminalId
+        case meta = "_meta"
+    }
+
+    /// Decodes a `CancelTerminalRequest`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
+    ///   or violates a wire invariant.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.sessionId = try container.decode(SessionId.self, forKey: .sessionId)
+        self.terminalId = try container.decode(TerminalId.self, forKey: .terminalId)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `CancelTerminalRequest`, omitting nil optional fields — never
+    /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sessionId, forKey: .sessionId)
+        try container.encode(terminalId, forKey: .terminalId)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
+/// Response from cancelling a terminal.
+public struct CancelTerminalResponse: Codable, Hashable, Sendable {
+    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
+    ///
+    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+    public var meta: JSONValue?
+
+    /// Creates a `CancelTerminalResponse`.
+    public init(
+        meta: JSONValue? = nil
+    ) {
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case meta = "_meta"
+    }
+
+    /// Decodes a `CancelTerminalResponse`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
+    ///   or violates a wire invariant.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `CancelTerminalResponse`, omitting nil optional fields — never
+    /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
+/// Request parameters for cancelling one tool call.
+///
+/// Clients MUST NOT send it unless the tool call currently advertises `capabilities.cancel`.
+///
+/// The Agent responds once it has accepted the cancellation. The response does not mean
+/// the work has stopped. The Agent confirms it with a `tool_call_update` to a final
+/// status: normally `cancelled`, or `completed` or `failed` if the work finished first.
+///
+/// The Agent responds with `-32602` if the tool call is unknown, already final, or not
+/// cancellable. Cancelling a tool call does not change the foreground state by itself.
+///
+/// See protocol docs: [Cancelling Tool Calls](https://agentclientprotocol.com/protocol/v2/tool-calls#cancelling-tool-calls)
+public struct CancelToolCallRequest: Codable, Hashable, Sendable {
+    /// The ID of the session that owns the tool call.
+    public var sessionId: SessionId
+
+    /// The ID of the tool call to cancel.
+    public var toolCallId: ToolCallId
+
+    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
+    ///
+    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+    public var meta: JSONValue?
+
+    /// Creates a `CancelToolCallRequest`.
+    public init(
+        sessionId: SessionId,
+        toolCallId: ToolCallId,
+        meta: JSONValue? = nil
+    ) {
+        self.sessionId = sessionId
+        self.toolCallId = toolCallId
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionId
+        case toolCallId
+        case meta = "_meta"
+    }
+
+    /// Decodes a `CancelToolCallRequest`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
+    ///   or violates a wire invariant.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.sessionId = try container.decode(SessionId.self, forKey: .sessionId)
+        self.toolCallId = try container.decode(ToolCallId.self, forKey: .toolCallId)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `CancelToolCallRequest`, omitting nil optional fields — never
+    /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sessionId, forKey: .sessionId)
+        try container.encode(toolCallId, forKey: .toolCallId)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
+/// Response from cancelling a tool call.
+public struct CancelToolCallResponse: Codable, Hashable, Sendable {
+    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
+    ///
+    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+    public var meta: JSONValue?
+
+    /// Creates a `CancelToolCallResponse`.
+    public init(
+        meta: JSONValue? = nil
+    ) {
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case meta = "_meta"
+    }
+
+    /// Decodes a `CancelToolCallResponse`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
+    ///   or violates a wire invariant.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `CancelToolCallResponse`, omitting nil optional fields — never
+    /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
+/// The request was not approved and no option was selected.
+public struct CancelledPermissionOutcome: Codable, Hashable, Sendable {
+    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
+    ///
+    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+    public var meta: JSONValue?
+
+    /// Creates a `CancelledPermissionOutcome`.
+    public init(
+        meta: JSONValue? = nil
+    ) {
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case meta = "_meta"
+    }
+
+    /// Decodes a `CancelledPermissionOutcome`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
+    ///   or violates a wire invariant.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `CancelledPermissionOutcome`, omitting nil optional fields — never
+    /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
+/// Authentication capabilities supported by the client.
+///
+/// Advertised during initialization to inform the agent which authentication
+/// method types the client can handle. This governs opt-in types that require
+/// additional client-side support.
+public struct ClientAuthCapabilities: Codable, Hashable, Sendable {
+    /// Whether the client supports `terminal` authentication methods.
+    ///
+    /// Optional. Omitted and `null` are equivalent and mean the client does not advertise support.
+    /// The client should supply `{}` only when it can reproduce the configured
+    /// agent invocation in an interactive terminal. Supplying `{}` means the
+    /// agent may include `terminal` entries in its authentication methods.
+    public var terminal: TerminalAuthCapabilities?
+
+    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
+    ///
+    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+    public var meta: JSONValue?
+
+    /// Creates a `ClientAuthCapabilities`.
+    public init(
+        terminal: TerminalAuthCapabilities? = nil,
+        meta: JSONValue? = nil
+    ) {
+        self.terminal = terminal
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case terminal
+        case meta = "_meta"
+    }
+
+    /// Decodes a `ClientAuthCapabilities`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
+    ///   or violates a wire invariant.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.terminal = container.forgivingDecodeIfPresent(TerminalAuthCapabilities.self, forKey: .terminal)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `ClientAuthCapabilities`, omitting nil optional fields — never
+    /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(terminal, forKey: .terminal)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
 /// Capabilities supported by the client.
 ///
 /// Advertised during initialization to inform the agent about
@@ -190,27 +513,27 @@ public struct ClientCapabilities: Codable, Hashable, Sendable {
     /// Determines which authentication method types the agent may include
     /// in its `InitializeResponse`.
     ///
-    /// Optional. Omitted or `null` both mean the client does not advertise any
+    /// Optional. Omitted and `null` are equivalent and mean the client does not advertise any
     /// authentication-method extensions.
-    public var auth: AuthCapabilities?
+    public var auth: ClientAuthCapabilities?
 
     /// Elicitation capabilities supported by the client.
     /// Determines which elicitation modes the agent may use.
     ///
-    /// Optional. Omitted or `null` both mean the client does not advertise
+    /// Optional. Omitted and `null` are equivalent and mean the client does not advertise
     /// elicitation support.
     public var elicitation: ElicitationCapabilities?
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
 
     /// Creates a `ClientCapabilities`.
     public init(
-        auth: AuthCapabilities? = nil,
+        auth: ClientAuthCapabilities? = nil,
         elicitation: ElicitationCapabilities? = nil,
         meta: JSONValue? = nil
     ) {
@@ -233,7 +556,7 @@ public struct ClientCapabilities: Codable, Hashable, Sendable {
     ///   or violates a wire invariant.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.auth = container.forgivingDecodeIfPresent(AuthCapabilities.self, forKey: .auth)
+        self.auth = container.forgivingDecodeIfPresent(ClientAuthCapabilities.self, forKey: .auth)
         self.elicitation = container.forgivingDecodeIfPresent(ElicitationCapabilities.self, forKey: .elicitation)
         self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
     }
@@ -353,16 +676,31 @@ public struct ClientRequest: Codable, Hashable, Sendable {
 
 /// Request parameters for closing an active session.
 ///
-/// The agent **must** cancel any ongoing work related to the session (treat it
-/// as if `session/cancel` was called) and then free up any resources associated
-/// with the session.
+/// The Agent MUST cancel any ongoing work related to the session as if `session/cancel`
+/// was called, then free the resources associated with the session. Unlike `session/cancel`,
+/// closing also stops the session's background work. After the close response, the Agent
+/// sends no other messages for the session on that connection.
+///
+/// Closing a session that does not exist or is not active SHOULD succeed, and Clients SHOULD
+/// treat a `-32002` response as a successful close.
+///
+/// When closing cancels active foreground work, the Agent MUST send the final
+/// updates for that work and the idle `state_update` with `stopReason: "cancelled"`
+/// before responding successfully to `session/close`. Closing an idle session
+/// does not itself require another idle update.
+///
+/// Closing also cancels pending `session/prompt` requests whose messages have not
+/// been inserted, including held prompts. If closing prevents a prompt's user message from being inserted, the
+/// Agent MUST answer that request with `-32800` (Request Cancelled). If the message
+/// has already been inserted, the Agent MUST respond successfully with its
+/// `messageId`. Prompt responses need not precede the close response.
 public struct CloseSessionRequest: Codable, Hashable, Sendable {
     /// The ID of the session to close.
     public var sessionId: SessionId
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
@@ -408,8 +746,8 @@ public struct CloseSessionRequest: Codable, Hashable, Sendable {
 /// Response from closing a session.
 public struct CloseSessionResponse: Codable, Hashable, Sendable {
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
@@ -447,6 +785,78 @@ public struct CloseSessionResponse: Codable, Hashable, Sendable {
     }
 }
 
+/// A slash command the user can invoke by including it in a prompt.
+///
+/// The `type` discriminator value is `command`.
+public struct Command: Codable, Hashable, Sendable {
+    /// Human-readable description of what the command does.
+    public var description: String
+
+    /// Command name without the leading `/` (e.g., `create_plan`, `research_codebase`).
+    ///
+    /// MUST NOT contain whitespace and MUST be unique within the command list.
+    public var name: String
+
+    /// Input for the command if required
+    ///
+    /// Omitted and `null` are equivalent and mean the command takes no input.
+    public var input: AvailableCommandInput?
+
+    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
+    ///
+    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+    public var meta: JSONValue?
+
+    /// Creates a `Command`.
+    public init(
+        description: String,
+        name: String,
+        input: AvailableCommandInput? = nil,
+        meta: JSONValue? = nil
+    ) {
+        self.description = description
+        self.name = name
+        self.input = input
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case description
+        case name
+        case input
+        case meta = "_meta"
+    }
+
+    /// Decodes a `Command`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
+    ///   or violates a wire invariant.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.description = try container.decode(String.self, forKey: .description)
+        self.name = try container.decode(String.self, forKey: .name)
+        self.input = container.forgivingDecodeIfPresent(AvailableCommandInput.self, forKey: .input)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `Command`, omitting nil optional fields — never
+    /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(description, forKey: .description)
+        try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(input, forKey: .input)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
 /// Permission request details for a command.
 public struct CommandPermissionSubject: Codable, Hashable, Sendable {
     /// The command that would be run if permission is granted.
@@ -462,8 +872,8 @@ public struct CommandPermissionSubject: Codable, Hashable, Sendable {
     public var toolCallId: ToolCallId?
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys. Omitted and `null` are equivalent and mean no subject metadata was provided.
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
@@ -517,428 +927,6 @@ public struct CommandPermissionSubject: Codable, Hashable, Sendable {
         try container.encode(cwd, forKey: .cwd)
         try container.encodeIfPresent(terminalId, forKey: .terminalId)
         try container.encodeIfPresent(toolCallId, forKey: .toolCallId)
-        try container.encodeIfPresent(meta, forKey: .meta)
-    }
-}
-
-/// A content block appended to a compaction's summary. A first-seen ID creates
-/// an in-progress compaction. Chunks append in receive order.
-public struct CompactionSummaryChunk: Codable, Hashable, Sendable {
-    /// ID of the compaction whose summary receives this content.
-    public var compactionId: CompactionId
-
-    /// One content block to append.
-    public var content: ContentBlock
-
-    /// Metadata scoped to this chunk. Omission and `null` both mean absent.
-    public var meta: JSONValue?
-
-    /// Creates a `CompactionSummaryChunk`.
-    public init(
-        compactionId: CompactionId,
-        content: ContentBlock,
-        meta: JSONValue? = nil
-    ) {
-        self.compactionId = compactionId
-        self.content = content
-        self.meta = meta
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case compactionId
-        case content
-        case meta = "_meta"
-    }
-
-    /// Decodes a `CompactionSummaryChunk`; forgiving fields degrade to their
-    /// schema defaults instead of failing the message.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
-    ///   or violates a wire invariant.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.compactionId = try container.decode(CompactionId.self, forKey: .compactionId)
-        self.content = try container.decode(ContentBlock.self, forKey: .content)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
-    }
-
-    /// Encodes a `CompactionSummaryChunk`, omitting nil optional fields — never
-    /// emitting JSON null for an absent capability-gated field.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(compactionId, forKey: .compactionId)
-        try container.encode(content, forKey: .content)
-        try container.encodeIfPresent(meta, forKey: .meta)
-    }
-}
-
-/// A context compaction upsert. The first notification fixes the compaction's
-/// timeline position. Later updates with the same ID patch that entity in place.
-///
-/// `summary`, `error`, and `_meta` have patch semantics: omission leaves the
-/// stored value unchanged, `null` clears it, and a concrete value replaces it.
-/// `summary: []` also clears the summary.
-public struct CompactionUpdate: Codable, Hashable, Sendable {
-    /// The Agent-owned ID of this compaction, unique within the session.
-    public var compactionId: CompactionId
-
-    /// Current lifecycle status.
-    public var status: CompactionStatus
-
-    /// Human-readable error details for the compaction.
-    public var error: PatchField<String>
-
-    /// Complete replacement user-displayable summary content for the compaction.
-    public var summary: PatchField<[ContentBlock]>
-
-    /// Extensible metadata patch for this compaction.
-    public var meta: PatchField<JSONValue>
-
-    /// Creates a `CompactionUpdate`.
-    public init(
-        compactionId: CompactionId,
-        status: CompactionStatus,
-        error: PatchField<String> = .unchanged,
-        summary: PatchField<[ContentBlock]> = .unchanged,
-        meta: PatchField<JSONValue> = .unchanged
-    ) {
-        self.compactionId = compactionId
-        self.status = status
-        self.error = error
-        self.summary = summary
-        self.meta = meta
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case compactionId
-        case status
-        case error
-        case summary
-        case meta = "_meta"
-    }
-
-    /// Decodes a `CompactionUpdate`; forgiving fields degrade to their
-    /// schema defaults instead of failing the message.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
-    ///   or violates a wire invariant.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.compactionId = try container.decode(CompactionId.self, forKey: .compactionId)
-        self.status = try container.decode(CompactionStatus.self, forKey: .status)
-        self.error = container.forgivingDecodePatchField(String.self, forKey: .error)
-        self.summary = container.forgivingDecodePatchArray(of: ContentBlock.self, forKey: .summary)
-        self.meta = container.forgivingDecodePatchField(JSONValue.self, forKey: .meta)
-    }
-
-    /// Encodes a `CompactionUpdate`, omitting nil optional fields — never
-    /// emitting JSON null for an absent capability-gated field.
-    ///
-    /// A patch-semantics field is the exception: `.cleared` writes an
-    /// explicit `null` rather than omitting the key, since here `null` is
-    /// itself the clear signal, not a stand-in for absence.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(compactionId, forKey: .compactionId)
-        try container.encode(status, forKey: .status)
-        try container.encodePatch(error, forKey: .error)
-        try container.encodePatch(summary, forKey: .summary)
-        try container.encodePatch(meta, forKey: .meta)
-    }
-
-    /// Folds this update onto a value that earlier updates made.
-    ///
-    /// A field with patch semantics keeps the earlier value when this
-    /// update omits it. Each other field takes the value in this update.
-    ///
-    /// - Parameter existing: The value that earlier updates made.
-    /// - Returns: The value after this update.
-    public func folded(onto existing: CompactionUpdate) -> CompactionUpdate {
-        CompactionUpdate(
-            compactionId: compactionId,
-            status: status,
-            error: error.folded(onto: existing.error),
-            summary: summary.folded(onto: existing.summary),
-            meta: meta.folded(onto: existing.meta)
-        )
-    }
-}
-
-/// Notification sent by the agent when a URL-based elicitation is complete.
-public struct CompleteElicitationNotification: Codable, Hashable, Sendable {
-    /// The ID of the elicitation that completed.
-    public var elicitationId: ElicitationId
-
-    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
-    ///
-    /// Optional. Omitted and `null` are equivalent and mean no metadata.
-    ///
-    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
-
-    /// Creates a `CompleteElicitationNotification`.
-    public init(
-        elicitationId: ElicitationId,
-        meta: JSONValue? = nil
-    ) {
-        self.elicitationId = elicitationId
-        self.meta = meta
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case elicitationId
-        case meta = "_meta"
-    }
-
-    /// Decodes a `CompleteElicitationNotification`; forgiving fields degrade to their
-    /// schema defaults instead of failing the message.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
-    ///   or violates a wire invariant.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.elicitationId = try container.decode(ElicitationId.self, forKey: .elicitationId)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
-    }
-
-    /// Encodes a `CompleteElicitationNotification`, omitting nil optional fields — never
-    /// emitting JSON null for an absent capability-gated field.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(elicitationId, forKey: .elicitationId)
-        try container.encodeIfPresent(meta, forKey: .meta)
-    }
-}
-
-/// Session configuration options have been updated.
-public struct ConfigOptionUpdate: Codable, Hashable, Sendable {
-    /// The full set of configuration options and their current values.
-    public var configOptions: [SessionConfigOption]
-
-    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
-    ///
-    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
-
-    /// Creates a `ConfigOptionUpdate`.
-    public init(
-        configOptions: [SessionConfigOption],
-        meta: JSONValue? = nil
-    ) {
-        self.configOptions = configOptions
-        self.meta = meta
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case configOptions
-        case meta = "_meta"
-    }
-
-    /// Decodes a `ConfigOptionUpdate`; forgiving fields degrade to their
-    /// schema defaults instead of failing the message.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
-    ///   or violates a wire invariant.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.configOptions = container.forgivingDecodeArray(of: SessionConfigOption.self, forKey: .configOptions)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
-    }
-
-    /// Encodes a `ConfigOptionUpdate`, omitting nil optional fields — never
-    /// emitting JSON null for an absent capability-gated field.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(configOptions, forKey: .configOptions)
-        try container.encodeIfPresent(meta, forKey: .meta)
-    }
-}
-
-/// Standard content block (text, images, resources).
-public struct Content: Codable, Hashable, Sendable {
-    /// The actual content block.
-    public var content: ContentBlock
-
-    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
-    ///
-    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
-
-    /// Creates a `Content`.
-    public init(
-        content: ContentBlock,
-        meta: JSONValue? = nil
-    ) {
-        self.content = content
-        self.meta = meta
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case content
-        case meta = "_meta"
-    }
-
-    /// Decodes a `Content`; forgiving fields degrade to their
-    /// schema defaults instead of failing the message.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
-    ///   or violates a wire invariant.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.content = try container.decode(ContentBlock.self, forKey: .content)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
-    }
-
-    /// Encodes a `Content`, omitting nil optional fields — never
-    /// emitting JSON null for an absent capability-gated field.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(content, forKey: .content)
-        try container.encodeIfPresent(meta, forKey: .meta)
-    }
-}
-
-/// A streamed item of message content.
-public struct ContentChunk: Codable, Hashable, Sendable {
-    /// A single item of content
-    public var content: ContentBlock
-
-    /// A unique identifier for the message this chunk belongs to.
-    ///
-    /// All chunks belonging to the same message share the same `messageId`.
-    /// A change in `messageId` indicates a new message has started.
-    public var messageId: MessageId
-
-    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys. This field is chunk-scoped.
-    ///
-    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
-
-    /// Creates a `ContentChunk`.
-    public init(
-        content: ContentBlock,
-        messageId: MessageId,
-        meta: JSONValue? = nil
-    ) {
-        self.content = content
-        self.messageId = messageId
-        self.meta = meta
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case content
-        case messageId
-        case meta = "_meta"
-    }
-
-    /// Decodes a `ContentChunk`; forgiving fields degrade to their
-    /// schema defaults instead of failing the message.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
-    ///   or violates a wire invariant.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.content = try container.decode(ContentBlock.self, forKey: .content)
-        self.messageId = try container.decode(MessageId.self, forKey: .messageId)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
-    }
-
-    /// Encodes a `ContentChunk`, omitting nil optional fields — never
-    /// emitting JSON null for an absent capability-gated field.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(content, forKey: .content)
-        try container.encode(messageId, forKey: .messageId)
-        try container.encodeIfPresent(meta, forKey: .meta)
-    }
-}
-
-/// Cost information for a session.
-public struct Cost: Codable, Hashable, Sendable {
-    /// Total cumulative cost for session.
-    public var amount: Double
-
-    /// ISO 4217 currency code (e.g., "USD", "EUR").
-    public var currency: String
-
-    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
-    ///
-    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
-
-    /// Creates a `Cost`.
-    public init(
-        amount: Double,
-        currency: String,
-        meta: JSONValue? = nil
-    ) {
-        self.amount = amount
-        self.currency = currency
-        self.meta = meta
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case amount
-        case currency
-        case meta = "_meta"
-    }
-
-    /// Decodes a `Cost`; forgiving fields degrade to their
-    /// schema defaults instead of failing the message.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
-    ///   or violates a wire invariant.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.amount = try container.decode(Double.self, forKey: .amount)
-        self.currency = try container.decode(String.self, forKey: .currency)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
-    }
-
-    /// Encodes a `Cost`, omitting nil optional fields — never
-    /// emitting JSON null for an absent capability-gated field.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(amount, forKey: .amount)
-        try container.encode(currency, forKey: .currency)
         try container.encodeIfPresent(meta, forKey: .meta)
     }
 }

@@ -112,7 +112,7 @@ private struct PermissionHarness {
 
         try await harness.cancel(cancelledSession)
 
-        #expect(try await harness.answer(to: answer).outcome == .cancelled)
+        #expect(try await harness.answer(to: answer).outcome == .cancelled(CancelledPermissionOutcome()))
     }
 
     @Test

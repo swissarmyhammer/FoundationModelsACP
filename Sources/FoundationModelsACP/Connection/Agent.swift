@@ -123,6 +123,26 @@ public protocol Agent: Sendable {
     /// - Throws: `RequestError.methodNotFound` unless overridden.
     func deleteSession(_ params: DeleteSessionRequest) async throws -> DeleteSessionResponse
 
+    /// Cancels one tool call of a session.
+    ///
+    /// Gated by the `cancel` capability that the agent advertises on the
+    /// tool call (`ToolCallCancelCapabilities`).
+    ///
+    /// - Parameter params: The cancel-tool-call request.
+    /// - Returns: The cancel-tool-call response.
+    /// - Throws: `RequestError.methodNotFound` unless overridden.
+    func cancelToolCall(_ params: CancelToolCallRequest) async throws -> CancelToolCallResponse
+
+    /// Cancels one terminal of a session.
+    ///
+    /// Gated by the `cancel` capability that the agent advertises on the
+    /// terminal (`TerminalCancelCapabilities`).
+    ///
+    /// - Parameter params: The cancel-terminal request.
+    /// - Returns: The cancel-terminal response.
+    /// - Throws: `RequestError.methodNotFound` unless overridden.
+    func cancelTerminal(_ params: CancelTerminalRequest) async throws -> CancelTerminalResponse
+
     /// Sets a session configuration option.
     ///
     /// The vendored schema declares no dedicated capability flag for this
@@ -163,6 +183,16 @@ extension Agent {
     /// Default implementation; throws method-not-found unless overridden.
     public func deleteSession(_ params: DeleteSessionRequest) async throws -> DeleteSessionResponse {
         try throwMethodNotFound("session/delete")
+    }
+
+    /// Default implementation; throws method-not-found unless overridden.
+    public func cancelToolCall(_ params: CancelToolCallRequest) async throws -> CancelToolCallResponse {
+        try throwMethodNotFound("tool_call/cancel")
+    }
+
+    /// Default implementation; throws method-not-found unless overridden.
+    public func cancelTerminal(_ params: CancelTerminalRequest) async throws -> CancelTerminalResponse {
+        try throwMethodNotFound("terminal/cancel")
     }
 
     /// Default implementation; throws method-not-found unless overridden.

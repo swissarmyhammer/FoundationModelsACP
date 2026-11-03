@@ -344,10 +344,10 @@ import FoundationModelsACP
             Self.declaredTypeNames(in: unions).filter {
                 Self.declaration(named: $0, in: unions)?.contains("case unknown(String, JSONValue)") == true
             } == [
-                "AuthMethod", "AvailableCommandInput", "ContentBlock", "ElicitationPropertySchema",
-                "MCPServer", "MultiSelectItems", "PlanUpdateContent", "ReplayFrom",
-                "RequestPermissionOutcome", "RequestPermissionSubject", "SessionUpdate",
-                "StateUpdate", "ToolCallContent",
+                "AuthMethod", "AvailableCommand", "AvailableCommandInput", "BackgroundWork",
+                "ContentBlock", "ElicitationPropertySchema", "MCPServer", "MultiSelectItems",
+                "PlanUpdateContent", "ReplayFrom", "RequestPermissionOutcome",
+                "RequestPermissionSubject", "SessionUpdate", "StateUpdate", "ToolCallContent",
             ]
         )
         // The remaining unions are scalar enums, whose fallback has no payload
@@ -388,14 +388,16 @@ import FoundationModelsACP
         //   `SessionConfigSelectOptions` by payload shape alone;
         //   `CreateElicitationResponse` mixes payload-flattening and inline
         //   variants in one `anyOf`; and `RequestId` is JSON-RPC's id, a
-        //   string, an integer, or null.
+        //   string, an integer, or null; `ErrorData` is the shapes ACP defines
+        //   (`UnsupportedProtocolVersionErrorData`, `SessionNotFoundErrorData`)
+        //   or any other value, with an `Other` branch that has no shape.
         //
         // Pinning the whole list, not a count: a definition sliding back onto
         // the seam has to be spelled out here to pass.
         #expect(
             Self.declaredTypeNames(in: unresolved) == [
                 "AgentResponse", "ClientResponse", "CreateElicitationResponse", "ElicitationContentValue",
-                "EmbeddedResourceResource", "ExtNotification", "ExtRequest", "ExtResponse",
+                "EmbeddedResourceResource", "ErrorData", "ExtNotification", "ExtRequest", "ExtResponse",
                 "RequestId", "SessionConfigSelectOptions",
             ]
         )
@@ -482,6 +484,8 @@ import FoundationModelsACP
                 "agent request session/prompt -> prompt(PromptRequest) : PromptResponse",
                 "agent request session/resume -> resumeSession(ResumeSessionRequest) : ResumeSessionResponse",
                 "agent request session/set_config_option -> setSessionConfigOption(SetSessionConfigOptionRequest) : SetSessionConfigOptionResponse",
+                "agent request terminal/cancel -> cancelTerminal(CancelTerminalRequest) : CancelTerminalResponse",
+                "agent request tool_call/cancel -> cancelToolCall(CancelToolCallRequest) : CancelToolCallResponse",
                 "client notification elicitation/complete -> elicitationComplete(CompleteElicitationNotification) : nil",
                 "client request elicitation/create -> createElicitation(CreateElicitationRequest) : CreateElicitationResponse",
                 "client request session/request_permission -> requestPermission(RequestPermissionRequest) : RequestPermissionResponse",
@@ -501,22 +505,20 @@ import FoundationModelsACP
         #expect(table.contains("public enum Unstable {"))
         #expect(
             Self.routingEntries(in: Self.unstableSection(of: table)) == [
-                "agent document/didChange -> documentDidChange",
-                "agent document/didClose -> documentDidClose",
-                "agent document/didFocus -> documentDidFocus",
-                "agent document/didOpen -> documentDidOpen",
-                "agent document/didSave -> documentDidSave",
+                "agent auth/status -> authStatus",
                 "agent mcp/message -> mcpMessage",
-                "agent nes/accept -> nesAccept",
-                "agent nes/close -> nesClose",
-                "agent nes/reject -> nesReject",
-                "agent nes/start -> nesStart",
-                "agent nes/suggest -> nesSuggest",
                 "agent providers/disable -> providersDisable",
                 "agent providers/list -> providersList",
                 "agent providers/set -> providersSet",
+                "agent session/archive -> sessionArchive",
                 "agent session/fork -> sessionFork",
+                "agent session/set_title -> sessionSetTitle",
+                "agent session/status -> sessionStatus",
+                "agent session/unarchive -> sessionUnarchive",
+                "client auth/status_update -> authStatusUpdate",
                 "client mcp/message -> mcpMessage",
+                "proxy proxy/initialize -> proxyInitialize",
+                "proxy proxy/successor -> proxySuccessor",
             ]
         )
     }
@@ -573,18 +575,20 @@ import FoundationModelsACP
                 "Identifiers.generated.swift": 14,
                 "MethodTable.generated.swift": 2,
                 "Models.generated.swift": 14,
+                "Models10.generated.swift": 12,
+                "Models11.generated.swift": 3,
                 "Models2.generated.swift": 16,
-                "Models3.generated.swift": 14,
-                "Models4.generated.swift": 15,
-                "Models5.generated.swift": 15,
-                "Models6.generated.swift": 15,
+                "Models3.generated.swift": 12,
+                "Models4.generated.swift": 16,
+                "Models5.generated.swift": 14,
+                "Models6.generated.swift": 14,
                 "Models7.generated.swift": 13,
                 "Models8.generated.swift": 13,
-                "Models9.generated.swift": 12,
-                "Unions.generated.swift": 14,
+                "Models9.generated.swift": 13,
+                "Unions.generated.swift": 13,
                 "Unions2.generated.swift": 12,
-                "Unions3.generated.swift": 3,
-                "Unresolved.generated.swift": 10,
+                "Unions3.generated.swift": 6,
+                "Unresolved.generated.swift": 11,
             ]
         )
     }

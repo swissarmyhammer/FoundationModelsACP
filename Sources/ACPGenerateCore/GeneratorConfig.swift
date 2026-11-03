@@ -140,18 +140,21 @@ public struct GeneratorConfig: Sendable {
 
     /// Configuration for the vendored `Schema/acp-v2.json` document.
     ///
-    /// `wireInvariantFields` is empty by design. v1 needed a per-field table
+    /// `wireInvariantFields` names only the line number. v1 needed a per-field table
     /// because it spelled absolute paths as bare `"type": "string"`; v2 gives
     /// them a first-class `AbsolutePath` definition, so every path field
     /// reaches the invariant through its own `$ref` and the table would only
     /// be a second, drift-prone copy of the schema. The override mechanism
     /// stays for schema revisions that describe an invariant in prose alone.
     ///
-    /// There is no `.lineNumber` mapping either: the vendored document
-    /// contains exactly one line-valued field, `ToolCallLocation.line`, and
-    /// neither the schema nor the v2 documentation states that it is 1-based.
-    /// An unstated invariant is not enforced at decode time.
+    /// The one line-valued field, `ToolCallLocation.line`, is mapped to
+    /// `.lineNumber`: since `schema-v2.0.0-alpha.10` the schema states that it
+    /// is 1-based (`minimum: 1`, "`0` is invalid").
     public static let acpV2 = GeneratorConfig(
+        wireInvariantFields: [
+            // 1-based since `schema-v2.0.0-alpha.10`; hand-written in Core.
+            "ToolCallLocation.line": .lineNumber
+        ],
         typeRenames: [
             // `Error` would shadow `Swift.Error` inside the module.
             "Error": "ACPError",
@@ -187,10 +190,12 @@ public struct GeneratorConfig: Sendable {
         // for three fields: "`summary`, `error`, and `_meta` have patch
         // semantics: omission leaves the stored value unchanged, `null`
         // clears it, and a concrete value replaces it."
+        // `UsageUpdate.cost` (since `schema-v2.0.0-alpha.11`): "Omitted leaves the
+        // last reported cost unchanged. `null` clears it. A value replaces it."
         // `CompactionSummaryChunk._meta` and `Notice._meta` say that omission
         // and `null` both mean absent, so they stay plain optionals.
         patchSemanticsFields: [
-            "CompactionUpdate.summary", "CompactionUpdate.error", "CompactionUpdate._meta",
+            "UsageUpdate.cost", "CompactionUpdate.summary", "CompactionUpdate.error", "CompactionUpdate._meta",
             "UserMessage.content", "UserMessage._meta",
             "AgentMessage.content", "AgentMessage._meta",
             "AgentThought.content", "AgentThought._meta",

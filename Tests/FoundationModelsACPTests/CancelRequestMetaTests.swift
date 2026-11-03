@@ -119,6 +119,7 @@ private struct IdleAgent: Agent {
                 ElicitationFormMode(
                     requestedSchema: ElicitationSchema(
                         properties: .object(["name": .object(["type": .string("string")])]),
+                    type: .object,
                         required: ["name"]
                     ),
                     scope: .session(ElicitationSessionScope(sessionId: SessionId(rawValue: "session-1")))

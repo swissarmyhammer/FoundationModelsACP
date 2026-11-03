@@ -790,6 +790,64 @@ private func reverseOrderDoubler(_ turns: ReverseTurns) -> Connection.RequestHan
     #expect(response == .object(["jsonrpc": .string("2.0"), "id": .number(1), "result": .bool(true)]))
 }
 
+// MARK: - Null ids (ACP v2: a request id is never null; an error response may have a null id)
+
+@Test func aRequestWithANullIdIsRefusedAndTheReadLoopContinues() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let handled = Mutex(false)
+    let agent = await Connection(transport: agentEnd, requestHandler: { _, _ in
+        handled.withLock { $0 = true }
+        return .bool(true)
+    })
+    defer { await agent.close() }
+    defer { clientEnd.close() }
+    let reader = WireReader(clientEnd)
+
+    try await send(
+        .object(["jsonrpc": .string("2.0"), "id": .null, "method": .string("ping")]),
+        over: clientEnd
+    )
+    let refusal = try #require(try await reader.next())
+    guard case .object(let fields) = refusal, case .object(let error) = fields["error"] ?? .null else {
+        Issue.record("expected an invalid-request error envelope, got \(refusal)")
+        return
+    }
+    #expect(fields["id"] == .null)
+    #expect(error["code"] == .number(-32600))
+    #expect(!handled.withLock { $0 })
+
+    try await send(
+        .object(["jsonrpc": .string("2.0"), "id": .number(1), "method": .string("ping")]),
+        over: clientEnd
+    )
+    let response = try #require(try await reader.next())
+    #expect(response == .object(["jsonrpc": .string("2.0"), "id": .number(1), "result": .bool(true)]))
+}
+
+@Test func anErrorResponseWithANullIdIsDroppedAndTheReadLoopContinues() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let agent = await Connection(transport: agentEnd, requestHandler: { _, _ in .bool(true) })
+    defer { await agent.close() }
+    defer { clientEnd.close() }
+    let reader = WireReader(clientEnd)
+
+    // A peer that could not read our request answers with a `null` id. No
+    // request of ours has that id, so nothing is resolved and nothing is sent.
+    try await send(
+        .object([
+            "jsonrpc": .string("2.0"), "id": .null,
+            "error": .object(["code": .number(-32700), "message": .string("Parse error")]),
+        ]),
+        over: clientEnd
+    )
+    try await send(
+        .object(["jsonrpc": .string("2.0"), "id": .number(1), "method": .string("ping")]),
+        over: clientEnd
+    )
+    let response = try #require(try await reader.next())
+    #expect(response == .object(["jsonrpc": .string("2.0"), "id": .number(1), "result": .bool(true)]))
+}
+
 // MARK: - _meta passthrough
 
 @Test func metaFieldsPassThroughParamsAndResultUnchanged() async throws {

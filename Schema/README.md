@@ -5,17 +5,17 @@ vendored byte-identical from upstream.
 
 ## Vendored version
 
-- **Source:** the upstream tag `schema-v2.0.0-alpha.8`, released 2026-10-09. A
+- **Source:** the upstream tag `schema-v2.0.0-alpha.13`, released 2026-11-02. A
   tag does not move. Thus you can get the same bytes again from the release
   assets at
-  `https://github.com/agentclientprotocol/agent-client-protocol/releases/tag/schema-v2.0.0-alpha.8`.
+  `https://github.com/agentclientprotocol/agent-client-protocol/releases/tag/schema-v2.0.0-alpha.13`.
 
 | Vendored file | Upstream release asset | SHA-256 |
 |---|---|---|
-| `acp-v2.json` | `schema.json` | `9bd47adb2af5f28c48d4ea6b3fe781ca05a152ab42defba04d141c432d2fa830` |
-| `acp-v2.meta.json` | `meta.json` | `ad94c01f2736416776fd53d66e3aaf89242ab72d99832664f39d6ab41e049736` |
-| `acp-v2.meta.unstable.json` | `meta.unstable.json` | `d9c1d9ab65740e988e4c78abd54bf1b4d60ff3ffd3db1d366c601cd9cc3462a2` |
-| `acp-v2.unstable.json` | `schema.unstable.json` | `b09f7d8782ec6ea5d12fc710010212a56f18afa682e2d8222caf6a2aee2c63f9` |
+| `acp-v2.json` | `schema.json` | `b6c91055df549d6f1db1d76d692d0561dad433e03d8ed114ea9b5baed9da72c5` |
+| `acp-v2.meta.json` | `meta.json` | `5eac58a28615d399af1db8e3d636767a7e404f2df38c9668a1ba00b1989e0714` |
+| `acp-v2.meta.unstable.json` | `meta.unstable.json` | `fb2d6096afa466713cdabe3329bebec582e0305012e008006cdb1aedb718d683` |
+| `acp-v2.unstable.json` | `schema.unstable.json` | `49e10f8c1935854363ed5b176cc6560d856642ba5020c97d264d34de4b6f1b31` |
 
 `acp-v2.json` is the JSON Schema (draft 2020-12) with all protocol types under
 `$defs`. The meta manifests map method identifiers to wire method names in

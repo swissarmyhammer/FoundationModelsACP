@@ -98,6 +98,16 @@ import Testing
             return DeleteSessionResponse()
         }
 
+        func cancelToolCall(_ params: CancelToolCallRequest) async throws -> CancelToolCallResponse {
+            await log.record(name: "cancelToolCall")
+            return CancelToolCallResponse()
+        }
+
+        func cancelTerminal(_ params: CancelTerminalRequest) async throws -> CancelTerminalResponse {
+            await log.record(name: "cancelTerminal")
+            return CancelTerminalResponse()
+        }
+
         func setSessionConfigOption(
             _ params: SetSessionConfigOptionRequest
         ) async throws -> SetSessionConfigOptionResponse {
@@ -184,6 +194,14 @@ import Testing
             _ = try await client.logoutAuth(LogoutAuthRequest())
         case "deleteSession":
             _ = try await client.deleteSession(DeleteSessionRequest(sessionId: Self.sessionId))
+        case "cancelToolCall":
+            _ = try await client.cancelToolCall(
+                CancelToolCallRequest(sessionId: Self.sessionId, toolCallId: ToolCallId(rawValue: "call-1"))
+            )
+        case "cancelTerminal":
+            _ = try await client.cancelTerminal(
+                CancelTerminalRequest(sessionId: Self.sessionId, terminalId: TerminalId(rawValue: "term-1"))
+            )
         case "setSessionConfigOption":
             _ = try await client.setSessionConfigOption(
                 SetSessionConfigOptionRequest(
@@ -262,7 +280,7 @@ import Testing
                     message: "Name required",
                     mode: .form(
                         ElicitationFormMode(
-                            requestedSchema: ElicitationSchema(),
+                            requestedSchema: ElicitationSchema(properties: .object([:]), type: .object),
                             scope: .session(ElicitationSessionScope(sessionId: Self.sessionId))
                         )
                     )

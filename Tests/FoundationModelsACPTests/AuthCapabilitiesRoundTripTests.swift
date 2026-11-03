@@ -19,7 +19,7 @@ import Testing
     }
 
     @Test func aTerminalMarkerEncodesAsANestedEmptyObject() throws {
-        let capabilities = ClientCapabilities(auth: AuthCapabilities(terminal: TerminalAuthCapabilities()))
+        let capabilities = ClientCapabilities(auth: ClientAuthCapabilities(terminal: TerminalAuthCapabilities()))
         let encoded = try WireRoundTrip.encode(capabilities)
         #expect(encoded["auth"] == .object(["terminal": .object([:])]))
     }

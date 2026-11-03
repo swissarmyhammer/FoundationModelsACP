@@ -76,7 +76,7 @@ final class PendingPermissionRequests: Sendable {
         case .sessionCancelled:
             handlerTask.cancel()
             Connection.deferAfterCurrentResponse({ await handlerTask.value }, onDiscard: nil)
-            return RequestPermissionResponse(outcome: .cancelled)
+            return RequestPermissionResponse(outcome: .cancelled(CancelledPermissionOutcome()))
         }
     }
 

@@ -118,7 +118,7 @@ private struct RawAgentHarness {
             method: sessionCancelMethod, params: try JSONValue.encode(result: cancel))
         #expect(try await harness.nextFrame() == expectedCancel)
         let expectedAnswer = try responseEnvelope(
-            id: permissionRequestId, result: RequestPermissionResponse(outcome: .cancelled))
+            id: permissionRequestId, result: RequestPermissionResponse(outcome: .cancelled(CancelledPermissionOutcome())))
         #expect(try await harness.nextFrame() == expectedAnswer)
 
         try await harness.cancelPermissionRequest()

@@ -15,7 +15,7 @@ private actor StubClient: Client {
     func requestPermission(
         _ params: RequestPermissionRequest
     ) async throws -> RequestPermissionResponse {
-        RequestPermissionResponse(outcome: .cancelled)
+        RequestPermissionResponse(outcome: .cancelled(CancelledPermissionOutcome()))
     }
 
     func createElicitation(
@@ -47,14 +47,14 @@ private actor StubClient: Client {
                 title: "Allow this?"
             )
         )
-        #expect(response.outcome == .cancelled)
+        #expect(response.outcome == .cancelled(CancelledPermissionOutcome()))
 
         let elicitation = try await client.createElicitation(
             CreateElicitationRequest(
                 message: "Name the file",
                 mode: .form(
                     ElicitationFormMode(
-                        requestedSchema: ElicitationSchema(),
+                        requestedSchema: ElicitationSchema(properties: .object([:]), type: .object),
                         scope: .session(ElicitationSessionScope(sessionId: sessionId))
                     )
                 )

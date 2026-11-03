@@ -28,7 +28,7 @@ private actor RecordingElicitationClient: Client {
     func requestPermission(
         _ params: RequestPermissionRequest
     ) async throws -> RequestPermissionResponse {
-        RequestPermissionResponse(outcome: .cancelled)
+        RequestPermissionResponse(outcome: .cancelled(CancelledPermissionOutcome()))
     }
 
     func createElicitation(
@@ -60,6 +60,7 @@ private actor RecordingElicitationClient: Client {
             ElicitationFormMode(
                 requestedSchema: ElicitationSchema(
                     properties: .object(["name": .object(["type": .string("string")])]),
+                    type: .object,
                     required: ["name"]
                 ),
                 scope: .session(ElicitationSessionScope(sessionId: sessionId))

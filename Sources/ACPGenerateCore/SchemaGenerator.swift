@@ -406,6 +406,20 @@ public struct SchemaGenerator: Sendable {
 
     // MARK: - Classification
 
+    /// Whether a `oneOf` sits on an object that declares its own properties
+    /// and every variant flattens an `allOf` payload.
+    ///
+    /// - Parameters:
+    ///   - members: The definition's object members.
+    ///   - variants: The `oneOf` entries.
+    /// - Returns: `true` for the flattened scope-union shape.
+    private static func isObjectScopeOneOf(members: [String: JSONValue], variants: [JSONValue]) -> Bool {
+        members[Self.typeKey]?.stringValue == Self.objectTypeName
+            && members[Self.propertiesKey] != nil
+            && !variants.isEmpty
+            && variants.allSatisfy { $0[Self.allOfKey] != nil }
+    }
+
     /// Classifies a definition into the shape family the generator emits.
     ///
     /// - Parameters:
@@ -422,6 +436,14 @@ public struct SchemaGenerator: Sendable {
         if members[Self.oneOfKey] != nil {
             guard let variants = members[Self.oneOfKey]?.arrayValue else {
                 throw GeneratorError.unsupportedShape(context: name, detail: "\(Self.oneOfKey) is not an array")
+            }
+            // An object that carries its own properties and a `oneOf` of
+            // flattened `allOf` payloads is the serde flattened scope union
+            // that earlier schemas wrote as `anyOf` (`ElicitationFormMode`
+            // since `schema-v2.0.0-alpha.10`). Exactly-one is the same
+            // selection by required members, so it shares that path.
+            if Self.isObjectScopeOneOf(members: members, variants: variants) {
+                return try classifyAnyOf(name: name, members: members, variants: variants)
             }
             return try classifyOneOf(name: name, variants: variants)
         }
@@ -2278,9 +2300,10 @@ public struct SchemaGenerator: Sendable {
 
     /// Chooses how the generated `init(from:)` decodes a property.
     ///
-    /// Wire invariants win over forgiving annotations: an invariant-mapped
-    /// field decodes strictly, so a value of the wrong JSON type stays a
-    /// decode-time error.
+    /// An absolute-path field decodes strictly whatever its forgiving
+    /// annotation says, so a value of the wrong JSON type stays a decode-time
+    /// error. A line-number field follows its forgiving annotation: the
+    /// schema says that a bad line degrades to omitted.
     ///
     /// - Parameters:
     ///   - of: The property's schema fragment.
@@ -2300,7 +2323,10 @@ public struct SchemaGenerator: Sendable {
         hasDefault: Bool,
         context: String
     ) throws -> DecodeStrategy {
-        guard override == nil else {
+        // An absolute path decodes strictly. A line number does not: the
+        // schema marks `ToolCallLocation.line` as default-on-error and says
+        // `0` is invalid, so a `0` costs the line, not the whole message.
+        guard override == nil || override == .lineNumber else {
             return .strict
         }
         if fragment[Self.skipInvalidItemsKey]?.boolValue == true {
@@ -2758,7 +2784,14 @@ extension SchemaGenerator {
         ("agentMethods", .agent),
         ("clientMethods", .client),
         ("protocolMethods", .protocolLevel),
+        ("proxyMethods", .proxy),
     ]
+
+    /// The routing groups a manifest may leave out.
+    ///
+    /// The stable manifest has no `proxyMethods` group; only the unstable
+    /// manifest (since `schema-v2.0.0-alpha.12`) routes the proxy methods.
+    private static let optionalManifestGroups: Set<String> = ["proxyMethods"]
 
     /// The manifest member naming the protocol revision it routes.
     private static let versionKey = "version"
@@ -2801,7 +2834,7 @@ extension SchemaGenerator {
         return rest.joined(separator: ", ") + conjunction + last
     }
 
-    /// A side's position in emission order (agent, client, protocol).
+    /// A side's position in emission order (agent, client, protocol, proxy).
     ///
     /// - Parameter of: The side to rank.
     /// - Returns: The side's emission rank.
@@ -2918,7 +2951,7 @@ extension SchemaGenerator {
     /// Parses and validates a routing manifest document.
     ///
     /// The manifest must declare the configured version and carry exactly the
-    /// three known routing groups; an unknown group or version fails loudly
+    /// known routing groups (the proxy group is optional); an unknown group or version fails loudly
     /// rather than silently dropping routes.
     ///
     /// - Parameters:
@@ -2941,7 +2974,7 @@ extension SchemaGenerator {
 
         var methodsBySide: [MethodSide: [String: String]] = [:]
         for (key, side) in Self.manifestGroups {
-            guard let group = members[key]?.objectValue else {
+            guard let group = members[key]?.objectValue ?? (Self.optionalManifestGroups.contains(key) ? [:] : nil) else {
                 throw GeneratorError.invalidSchema("\(context) is missing routing group \"\(key)\"")
             }
             methodsBySide[side] = try parseRoutingGroup(group: group, key: key, context: context)

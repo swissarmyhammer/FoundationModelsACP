@@ -439,13 +439,26 @@ public struct SessionMergeEngine: Hashable, Sendable {
         return .configOptionsChanged(options)
     }
 
-    /// Replaces the usage.
+    /// Replaces the sizes of the usage, and patches its cost.
+    ///
+    /// An omitted `cost` leaves the last reported cost unchanged, `null`
+    /// clears it, and a value replaces it. The stored usage keeps the result:
+    /// a `.value` cost, or `.unchanged` when the agent reported no cost.
     ///
     /// - Parameter usage: The value from a `usage_update`.
     /// - Returns: What changed.
     private mutating func setUsage(_ usage: UsageUpdate) -> Change {
-        self.usage = usage
-        return .usageChanged(usage)
+        var merged = usage
+        switch usage.cost {
+        case .value:
+            break
+        case .unchanged:
+            merged.cost = self.usage?.cost ?? .unchanged
+        case .cleared:
+            merged.cost = .unchanged
+        }
+        self.usage = merged
+        return .usageChanged(merged)
     }
 
     /// Folds a `session_info_update` onto the session information. An
@@ -485,7 +498,7 @@ extension PatchField where Wrapped == ToolCallStatus {
     fileprivate var isTerminal: Bool {
         switch self {
         case .value(.completed), .value(.failed), .value(.cancelled): true
-        case .unchanged, .cleared, .value(.pending), .value(.inProgress), .value(.unknown): false
+        case .unchanged, .cleared, .value(.pending), .value(.inProgress), .value(.paused), .value(.unknown): false
         }
     }
 }

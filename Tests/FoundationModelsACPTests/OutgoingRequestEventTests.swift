@@ -308,6 +308,24 @@ struct TypedCall: Sendable, CustomTestStringConvertible {
             successResult: { try WireRoundTrip.encode(DeleteSessionResponse()) }
         ),
         TypedCall(
+            handlerName: "cancelToolCall",
+            invoke: {
+                _ = try await $0.cancelToolCall(
+                    CancelToolCallRequest(sessionId: sessionId, toolCallId: ToolCallId(rawValue: "call-1"))
+                )
+            },
+            successResult: { try WireRoundTrip.encode(CancelToolCallResponse()) }
+        ),
+        TypedCall(
+            handlerName: "cancelTerminal",
+            invoke: {
+                _ = try await $0.cancelTerminal(
+                    CancelTerminalRequest(sessionId: sessionId, terminalId: TerminalId(rawValue: "term-1"))
+                )
+            },
+            successResult: { try WireRoundTrip.encode(CancelTerminalResponse()) }
+        ),
+        TypedCall(
             handlerName: "setSessionConfigOption",
             invoke: {
                 _ = try await $0.setSessionConfigOption(
@@ -492,7 +510,7 @@ private struct ElicitationRecordingClient: Client {
     func sessionUpdate(_ notification: UpdateSessionNotification) async {}
 
     func requestPermission(_ params: RequestPermissionRequest) async throws -> RequestPermissionResponse {
-        RequestPermissionResponse(outcome: .cancelled)
+        RequestPermissionResponse(outcome: .cancelled(CancelledPermissionOutcome()))
     }
 
     func createElicitation(_ params: CreateElicitationRequest) async throws -> CreateElicitationResponse {

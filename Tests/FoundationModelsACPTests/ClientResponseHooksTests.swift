@@ -51,7 +51,7 @@ private struct ScriptedPermissionClient: Client {
     /// - Returns: The `cancelled` outcome.
     func requestPermission(_ params: RequestPermissionRequest) async throws -> RequestPermissionResponse {
         await script(connection)
-        return RequestPermissionResponse(outcome: .cancelled)
+        return RequestPermissionResponse(outcome: .cancelled(CancelledPermissionOutcome()))
     }
 
     func createElicitation(_ params: CreateElicitationRequest) async throws -> CreateElicitationResponse {

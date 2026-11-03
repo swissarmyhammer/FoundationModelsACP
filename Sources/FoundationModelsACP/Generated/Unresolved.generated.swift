@@ -16,7 +16,7 @@ public typealias ClientResponse = JSONValue
 /// Deferred: this `anyOf` union's variants pin discriminators the generator cannot reconcile into one Swift enum; raw JSON is its representation.
 public typealias CreateElicitationResponse = JSONValue
 
-/// Allowed wire representations for [`ElicitationContentValue`].
+/// Allowed wire representations for `ElicitationContentValue`.
 ///
 /// Permanently deferred: no variant of this `anyOf` union pins a discriminator, so there is nothing to key a Swift enum on; raw JSON is its representation.
 public typealias ElicitationContentValue = JSONValue
@@ -26,7 +26,12 @@ public typealias ElicitationContentValue = JSONValue
 /// Permanently deferred: no variant of this `anyOf` union pins a discriminator, so there is nothing to key a Swift enum on; raw JSON is its representation.
 public typealias EmbeddedResourceResource = JSONValue
 
-/// Allows the Agent to send an arbitrary notification that is not part of the ACP spec.
+/// Schema for [`Error::data`]: the shapes ACP defines, or any other value.
+///
+/// Permanently deferred: no variant of this `anyOf` union pins a discriminator, so there is nothing to key a Swift enum on; raw JSON is its representation.
+public typealias ErrorData = JSONValue
+
+/// Allows either side to send an arbitrary notification that is not part of the ACP spec.
 /// Extension notifications provide a way to send one-way messages for custom functionality
 /// while maintaining protocol compatibility.
 ///
@@ -44,7 +49,7 @@ public typealias ExtNotification = JSONValue
 /// Free-form by schema: the definition places no shape constraints, so raw JSON is its final representation.
 public typealias ExtRequest = JSONValue
 
-/// Allows for sending an arbitrary response to an [`ExtRequest`] that is not part of the ACP spec.
+/// Allows for sending an arbitrary response to an extension request that is not part of the ACP spec.
 /// Extension methods provide a way to add custom functionality while maintaining
 /// protocol compatibility.
 ///
@@ -53,15 +58,11 @@ public typealias ExtRequest = JSONValue
 /// Free-form by schema: the definition places no shape constraints, so raw JSON is its final representation.
 public typealias ExtResponse = JSONValue
 
-/// JSON RPC Request Id
+/// A JSON-RPC request ID: a string or an integer. Unlike base JSON-RPC, it MUST NOT be `null`.
 ///
-/// An identifier established by the Client that MUST contain a String, Number, or NULL value if included. If it is not included it is assumed to be a notification. The value SHOULD normally not be Null \[1\] and Numbers SHOULD NOT contain fractional parts \[2\]
-///
-/// The Server MUST reply with the same value in the Response object if included. This member is used to correlate the context between the two objects.
-///
-/// \[1\] The use of Null as a value for the id member in a Request object is discouraged, because this specification uses a value of Null for Responses with an unknown id. Also, because JSON-RPC 1.0 uses an id value of Null for Notifications this could cause confusion in handling.
-///
-/// \[2\] Fractional parts may be problematic, since many decimal fractions cannot be represented exactly as binary fractions.
+/// The receiver MUST reply with the same value in the response. Each side chooses IDs for its own
+/// requests, so the same ID can be in use in both directions. A sender MUST NOT reuse an ID while
+/// a request with it is still awaiting a response.
 ///
 /// Permanently deferred: no variant of this `anyOf` union pins a discriminator, so there is nothing to key a Swift enum on; raw JSON is its representation.
 public typealias RequestId = JSONValue

@@ -44,7 +44,7 @@ private func usageUpdate(_ usage: UsageUpdate) -> UpdateSessionNotification {
 /// - Parameter currency: The currency code of the cost.
 /// - Returns: The notification that carries the usage update.
 private func usageUpdate(costIn currency: String) -> UpdateSessionNotification {
-    usageUpdate(UsageUpdate(size: windowSize, used: tokensUsed, cost: Cost(amount: sessionCost, currency: currency)))
+    usageUpdate(UsageUpdate(size: windowSize, used: tokensUsed, cost: .value(Cost(amount: sessionCost, currency: currency))))
 }
 
 /// A correct update that a test sends after a refused one, to show that the
@@ -159,8 +159,8 @@ struct OutboundStopReasonRuleTests {
 
 /// The agent side refuses a `usage_update` whose values break the schema.
 ///
-/// `used` and `size` are `uint64` values, and `cost.currency` is an ISO 4217
-/// code of three upper-case letters.
+/// `used` and `size` are `uint64` values. `cost.currency` is an ISO 4217 code
+/// for money, or another unit such as `credits`, so no currency is refused.
 @Suite
 struct OutboundUsageRuleTests {
     @Test func usageWithCountsOfZeroOrMoreIsSent() async throws {
@@ -192,11 +192,10 @@ struct OutboundUsageRuleTests {
         try await harness.expectSent(usageUpdate(costIn: validCurrency))
     }
 
-    @Test(arguments: ["usd", "US", "USDX", "U$D", "", "ÄBC"])
-    func aCurrencyThatIsNotThreeUpperCaseLettersIsRefused(currency: String) async throws {
+    @Test(arguments: ["credits", "usd", "tokens", "USDX", "US"])
+    func aCostInAnotherUnitIsSent(currency: String) async throws {
         let harness = await OutboundHarness.connect()
         defer { await harness.close() }
-        let description = try await harness.refusal(of: usageUpdate(costIn: currency))
-        #expect(description.contains("currency"))
+        try await harness.expectSent(usageUpdate(costIn: currency))
     }
 }

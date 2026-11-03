@@ -75,9 +75,71 @@ public enum AuthMethod: Codable, Hashable, Sendable {
     }
 }
 
+/// A command the agent advertises to the client.
+///
+/// The `type` field acts as the discriminator in the serialized JSON form.
+public enum AvailableCommand: Codable, Hashable, Sendable {
+    /// A slash command the user can invoke by including it in a prompt.
+    case command(Command)
+
+    /// An unrecognized `type` value, captured alongside the members
+    /// of the object that no other property owns, so a variant this revision
+    /// does not list decodes without error and re-encodes unchanged.
+    ///
+    /// The payload holds neither `type` nor any member declared
+    /// beside this union: those have their own storage, and a second copy
+    /// here would win on re-encode. Encoding a payload that declares one is
+    /// an `EncodingError`.
+    case unknown(String, JSONValue)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+    }
+
+    private enum Tag: String {
+        case command = "command"
+    }
+
+    private static let excludedMembers = ["type"]
+
+    /// Decodes by the `type` discriminator, routing
+    /// unrecognized values to `.unknown`.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when the discriminator is missing or a
+    ///   known variant's payload is malformed.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let discriminator = try container.decode(String.self, forKey: .type)
+        switch Tag(rawValue: discriminator) {
+        case .command:
+            self = .command(try Command(from: decoder))
+        case nil:
+            self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
+        }
+    }
+
+    /// Encodes the `type` discriminator, flattening the
+    /// payload's fields into the same object.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .command(let payload):
+            try container.encode(Tag.command.rawValue, forKey: .type)
+            try payload.encode(to: encoder)
+        case .unknown(let discriminator, let payload):
+            try container.encode(discriminator, forKey: .type)
+            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
+        }
+    }
+}
+
 /// The input specification for a command.
 public enum AvailableCommandInput: Codable, Hashable, Sendable {
-    /// All text that was typed after the command name is provided as input.
+    /// All text after the command name and the whitespace following it is provided as input.
     case text(TextCommandInput)
 
     /// An unrecognized `type` value, captured alongside the members
@@ -127,6 +189,85 @@ public enum AvailableCommandInput: Codable, Hashable, Sendable {
         switch self {
         case .text(let payload):
             try container.encode(Tag.text.rawValue, forKey: .type)
+            try payload.encode(to: encoder)
+        case .unknown(let discriminator, let payload):
+            try container.encode(discriminator, forKey: .type)
+            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
+        }
+    }
+}
+
+/// One piece of work running independently of the session's foreground work.
+///
+/// Items reference entities the Client already tracks. The Agent MUST announce each item
+/// before the first snapshot that lists it, and MUST report a terminal's `exitStatus` or a
+/// tool call's final status before the snapshot that removes it. Each piece of work is
+/// listed once: process-backed work is listed as its terminal, not also as its tool call.
+///
+/// See protocol docs: [Background Work](https://agentclientprotocol.com/protocol/v2/prompt-lifecycle#background-work)
+public enum BackgroundWork: Codable, Hashable, Sendable {
+    /// A process that keeps running after its tool call returned control to the model.
+    /// Live until its `terminal_update` reports `exitStatus`.
+    case terminal(BackgroundTerminal)
+
+    /// Work started by a tool call that continues without a process of its own, such as
+    /// a watcher, a workflow, or a scheduled wakeup. `pending` and `paused` tool calls
+    /// stay listed.
+    case toolCall(BackgroundToolCall)
+
+    /// An unrecognized `type` value, captured alongside the members
+    /// of the object that no other property owns, so a variant this revision
+    /// does not list decodes without error and re-encodes unchanged.
+    ///
+    /// The payload holds neither `type` nor any member declared
+    /// beside this union: those have their own storage, and a second copy
+    /// here would win on re-encode. Encoding a payload that declares one is
+    /// an `EncodingError`.
+    case unknown(String, JSONValue)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+    }
+
+    private enum Tag: String {
+        case terminal = "terminal"
+        case toolCall = "tool_call"
+    }
+
+    private static let excludedMembers = ["type"]
+
+    /// Decodes by the `type` discriminator, routing
+    /// unrecognized values to `.unknown`.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when the discriminator is missing or a
+    ///   known variant's payload is malformed.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let discriminator = try container.decode(String.self, forKey: .type)
+        switch Tag(rawValue: discriminator) {
+        case .terminal:
+            self = .terminal(try BackgroundTerminal(from: decoder))
+        case .toolCall:
+            self = .toolCall(try BackgroundToolCall(from: decoder))
+        case nil:
+            self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
+        }
+    }
+
+    /// Encodes the `type` discriminator, flattening the
+    /// payload's fields into the same object.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .terminal(let payload):
+            try container.encode(Tag.terminal.rawValue, forKey: .type)
+            try payload.encode(to: encoder)
+        case .toolCall(let payload):
+            try container.encode(Tag.toolCall.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)
@@ -205,24 +346,22 @@ public enum CompactionStatus: Codable, Hashable, Sendable {
 
 /// Content blocks represent displayable information in the Agent Client Protocol.
 ///
-/// They provide a structured way to handle various types of user-facing content—whether
-/// it's text from language models, images for analysis, or embedded resources for context.
-///
 /// Content blocks appear in:
 /// - User prompts sent via `session/prompt`
 /// - Language model output reported through `session/update` notifications as
 ///   message updates or streamed chunks
 /// - Progress updates and results from tool calls
 ///
-/// This structure is compatible with the Model Context Protocol (MCP), enabling
-/// agents to seamlessly forward content from MCP tool outputs without transformation.
+/// This structure is compatible with the Model Context Protocol (MCP), so agents can
+/// forward content from MCP tool outputs without transformation.
 ///
 /// See protocol docs: [Content](https://agentclientprotocol.com/protocol/v2/content)
 public enum ContentBlock: Codable, Hashable, Sendable {
     /// Text content. May be plain text or formatted with Markdown.
     ///
     /// All agents MUST support text content blocks in prompts.
-    /// Clients SHOULD render this text as Markdown.
+    /// Clients SHOULD render this text as CommonMark and MAY support GitHub Flavored Markdown
+    /// extensions.
     case text(TextContent)
 
     /// Images for visual context or analysis.
@@ -235,7 +374,7 @@ public enum ContentBlock: Codable, Hashable, Sendable {
     /// Requires the `audio` prompt capability when included in prompts.
     case audio(AudioContent)
 
-    /// References to resources that the agent can access.
+    /// References to resources that the receiver may be able to read.
     ///
     /// All agents MUST support resource links in prompts.
     case resourceLink(ResourceLink)
@@ -394,12 +533,19 @@ public enum DiffFileType: Codable, Hashable, Sendable {
     }
 }
 
-/// Text patch format used by [`DiffPatch`].
+/// Text patch format used by `DiffPatch`.
 public enum DiffPatchFormat: Codable, Hashable, Sendable {
     /// One or more `diff --git` sections in Git's `--patch` (`-p`) text format.
     ///
-    /// Paths MUST be absolute. Surrounding commit metadata and email envelopes
-    /// MUST NOT be included.
+    /// Unlike Git, which writes paths relative to the repository root, every
+    /// path MUST be absolute, including in `rename from`, `rename to`,
+    /// `copy from`, and `copy to` lines, and MUST NOT have a prefix such as
+    /// Git's default `a/` and `b/`. Otherwise paths follow Git: `/dev/null`
+    /// names the missing side of an added or deleted file in the `---` and
+    /// `+++` lines, and paths with unusual characters are quoted as Git quotes
+    /// them. Each path, once unquoted, is the same native absolute path string as
+    /// the matching `changes` entry. Surrounding commit metadata and email envelopes MUST NOT be
+    /// included.
     case gitPatch
 
     /// An unrecognized wire value, captured verbatim so a newer peer's
@@ -450,8 +596,8 @@ public enum DiffPatchFormat: Codable, Hashable, Sendable {
 /// Property schema for elicitation form fields.
 ///
 /// Each variant corresponds to a JSON Schema `"type"` value.
-/// Single-select enums use the `String` variant with `enum` or `oneOf` set.
-/// Multi-select enums use the `Array` variant.
+/// Single-select enums use `type: "string"` with `enum` or `oneOf` set.
+/// Multi-select enums use `type: "array"`.
 public enum ElicitationPropertySchema: Codable, Hashable, Sendable {
     /// String property (or single-select enum when `enum`/`oneOf` is set).
     case string(StringPropertySchema)
@@ -599,8 +745,9 @@ public enum ElicitationSchemaType: Codable, Hashable, Sendable {
 
 /// Predefined error codes for common JSON-RPC and ACP-specific errors.
 ///
-/// These codes follow the JSON-RPC 2.0 specification for standard errors
-/// and use the reserved range (-32000 to -32099) for protocol-specific errors.
+/// Standard errors use the JSON-RPC 2.0 codes. ACP-specific errors use the JSON-RPC
+/// server-error range (-32000 to -32099), and request cancellation uses -32800 from the
+/// range LSP reserves (-32899 to -32800).
 public enum ErrorCode: Codable, Hashable, Sendable {
     /// **Parse error**: Invalid JSON was received by the server.
     /// An error occurred on the server while parsing the JSON text.
@@ -616,7 +763,6 @@ public enum ErrorCode: Codable, Hashable, Sendable {
     case invalidParams
 
     /// **Internal error**: Internal JSON-RPC error.
-    /// Reserved for implementation-defined server errors.
     case internalError
 
     /// **Request cancelled**: Execution of the method was aborted either due to a cancellation request from the caller or
@@ -626,8 +772,12 @@ public enum ErrorCode: Codable, Hashable, Sendable {
     /// **Authentication required**: Authentication is required before this operation can be performed.
     case authenticationRequired
 
-    /// **Resource not found**: A given resource, such as a file, was not found.
+    /// **Resource not found**: A given resource, such as a session, was not found.
     case resourceNotFound
+
+    /// **Unsupported protocol version**: No protocol version supported by the Agent is at or below the requested version.
+    /// The error data is an [`UnsupportedProtocolVersionErrorData`].
+    case unsupportedProtocolVersion
 
     /// An unrecognized wire value, captured verbatim so a newer peer's
     /// value decodes without error and re-encodes unchanged.
@@ -642,6 +792,7 @@ public enum ErrorCode: Codable, Hashable, Sendable {
         case requestCancelled = -32800
         case authenticationRequired = -32000
         case resourceNotFound = -32002
+        case unsupportedProtocolVersion = -32022
     }
 
     /// The value as it crosses the wire.
@@ -655,6 +806,7 @@ public enum ErrorCode: Codable, Hashable, Sendable {
         case .requestCancelled: Tag.requestCancelled.rawValue
         case .authenticationRequired: Tag.authenticationRequired.rawValue
         case .resourceNotFound: Tag.resourceNotFound.rawValue
+        case .unsupportedProtocolVersion: Tag.unsupportedProtocolVersion.rawValue
         case .unknown(let value): value
         }
     }
@@ -673,6 +825,7 @@ public enum ErrorCode: Codable, Hashable, Sendable {
         case Tag.requestCancelled.rawValue: self = .requestCancelled
         case Tag.authenticationRequired.rawValue: self = .authenticationRequired
         case Tag.resourceNotFound.rawValue: self = .resourceNotFound
+        case Tag.unsupportedProtocolVersion.rawValue: self = .unsupportedProtocolVersion
         default: self = .unknown(wireValue)
         }
     }
@@ -826,204 +979,5 @@ public enum MCPServer: Codable, Hashable, Sendable {
             try container.encode(discriminator, forKey: .type)
             try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
         }
-    }
-}
-
-/// Items for a multi-select (array) property schema.
-public enum MultiSelectItems: Codable, Hashable, Sendable {
-    /// Multi-select string items with plain string values.
-    case string(StringMultiSelectItems)
-
-    /// Titled multi-select items with human-readable labels.
-    case titled(TitledMultiSelectItems)
-
-    /// An unrecognized `type` value, captured alongside the members
-    /// of the object that no other property owns, so a variant this revision
-    /// does not list decodes without error and re-encodes unchanged.
-    ///
-    /// The payload holds neither `type` nor any member declared
-    /// beside this union: those have their own storage, and a second copy
-    /// here would win on re-encode. Encoding a payload that declares one is
-    /// an `EncodingError`.
-    case unknown(String, JSONValue)
-
-    private enum CodingKeys: String, CodingKey {
-        case type
-    }
-
-    private enum Tag: String {
-        case string = "string"
-    }
-
-    private static let excludedMembers = ["type"]
-
-    /// Decodes by the `type` discriminator; an absent
-    /// discriminator selects the default variant and an unrecognized one
-    /// routes to `.unknown`.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a known variant's payload is malformed.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decodeIfPresent(String.self, forKey: .type) {
-        case Tag.string.rawValue?:
-            self = .string(try StringMultiSelectItems(from: decoder))
-        case nil:
-            self = .titled(try TitledMultiSelectItems(from: decoder))
-        case let other?:
-            self = .unknown(other, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
-        }
-    }
-
-    /// Encodes the `type` discriminator, flattening the
-    /// payload's fields into the same object; the default variant omits
-    /// the discriminator.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        switch self {
-        case .string(let payload):
-            try container.encode(Tag.string.rawValue, forKey: .type)
-            try payload.encode(to: encoder)
-        case .titled(let payload):
-            try payload.encode(to: encoder)
-        case .unknown(let discriminator, let payload):
-            try container.encode(discriminator, forKey: .type)
-            try payload.encodeMembers(to: encoder, reserving: Self.excludedMembers)
-        }
-    }
-}
-
-/// Severity hint for a session notice.
-public enum NoticeSeverity: Codable, Hashable, Sendable {
-    /// Informational notice.
-    case info
-
-    /// Warning notice.
-    case warning
-
-    /// Error notice.
-    case error
-
-    /// An unrecognized wire value, captured verbatim so a newer peer's
-    /// value decodes without error and re-encodes unchanged.
-    case unknown(String)
-
-    private enum Tag: String {
-        case info = "info"
-        case warning = "warning"
-        case error = "error"
-    }
-
-    /// The value as it crosses the wire.
-    public var wireValue: String {
-        switch self {
-        case .info: Tag.info.rawValue
-        case .warning: Tag.warning.rawValue
-        case .error: Tag.error.rawValue
-        case .unknown(let value): value
-        }
-    }
-
-    /// Creates the case matching a wire value, routing unrecognized
-    /// values to `.unknown`.
-    ///
-    /// - Parameter wireValue: The value as it crosses the wire.
-    public init(wireValue: String) {
-        switch wireValue {
-        case Tag.info.rawValue: self = .info
-        case Tag.warning.rawValue: self = .warning
-        case Tag.error.rawValue: self = .error
-        default: self = .unknown(wireValue)
-        }
-    }
-
-    /// Decodes the wire value, never failing on unrecognized values.
-    ///
-    /// - Parameter decoder: The decoder positioned at the value.
-    /// - Throws: `DecodingError` when the wire value is not a String.
-    public init(from decoder: any Decoder) throws {
-        self.init(wireValue: try decoder.singleValueContainer().decode(String.self))
-    }
-
-    /// Encodes the wire value; `.unknown` re-emits the value it captured.
-    ///
-    /// - Parameter encoder: The encoder to write the value into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(wireValue)
-    }
-}
-
-/// The type of permission option being presented to the user.
-///
-/// Helps clients choose appropriate icons and UI treatment.
-public enum PermissionOptionKind: Codable, Hashable, Sendable {
-    /// Allow this operation only this time.
-    case allowOnce
-
-    /// Allow this operation and remember the choice.
-    case allowAlways
-
-    /// Reject this operation only this time.
-    case rejectOnce
-
-    /// Reject this operation and remember the choice.
-    case rejectAlways
-
-    /// An unrecognized wire value, captured verbatim so a newer peer's
-    /// value decodes without error and re-encodes unchanged.
-    case unknown(String)
-
-    private enum Tag: String {
-        case allowOnce = "allow_once"
-        case allowAlways = "allow_always"
-        case rejectOnce = "reject_once"
-        case rejectAlways = "reject_always"
-    }
-
-    /// The value as it crosses the wire.
-    public var wireValue: String {
-        switch self {
-        case .allowOnce: Tag.allowOnce.rawValue
-        case .allowAlways: Tag.allowAlways.rawValue
-        case .rejectOnce: Tag.rejectOnce.rawValue
-        case .rejectAlways: Tag.rejectAlways.rawValue
-        case .unknown(let value): value
-        }
-    }
-
-    /// Creates the case matching a wire value, routing unrecognized
-    /// values to `.unknown`.
-    ///
-    /// - Parameter wireValue: The value as it crosses the wire.
-    public init(wireValue: String) {
-        switch wireValue {
-        case Tag.allowOnce.rawValue: self = .allowOnce
-        case Tag.allowAlways.rawValue: self = .allowAlways
-        case Tag.rejectOnce.rawValue: self = .rejectOnce
-        case Tag.rejectAlways.rawValue: self = .rejectAlways
-        default: self = .unknown(wireValue)
-        }
-    }
-
-    /// Decodes the wire value, never failing on unrecognized values.
-    ///
-    /// - Parameter decoder: The decoder positioned at the value.
-    /// - Throws: `DecodingError` when the wire value is not a String.
-    public init(from decoder: any Decoder) throws {
-        self.init(wireValue: try decoder.singleValueContainer().decode(String.self))
-    }
-
-    /// Encodes the wire value; `.unknown` re-emits the value it captured.
-    ///
-    /// - Parameter encoder: The encoder to write the value into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(wireValue)
     }
 }

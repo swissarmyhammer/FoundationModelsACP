@@ -8,8 +8,8 @@
 /// `initialize` response.
 public struct AgentAuthCapabilities: Codable, Hashable, Sendable {
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
@@ -56,23 +56,24 @@ public struct AgentAuthCapabilities: Codable, Hashable, Sendable {
 public struct AgentCapabilities: Codable, Hashable, Sendable {
     /// Authentication-related extension capabilities supported by the agent.
     ///
-    /// Optional. Omitted or `null` both mean the agent does not advertise any
+    /// Optional. Omitted and `null` are equivalent and mean the agent does not advertise any
     /// authentication-related extensions. This field does not advertise support
-    /// for `auth/login` or `auth/logout`; those methods are advertised by a
+    /// for `auth/login` or `auth/logout`. Those methods are advertised by a
     /// non-empty `authMethods` list in the `initialize` response.
     public var auth: AgentAuthCapabilities?
 
     /// Session capabilities supported by the agent.
     ///
-    /// Optional. Omitted or `null` both mean the agent does not support the
-    /// `session/*` method surface. Supplying `{}` means the agent supports the
-    /// baseline session methods: `session/new`, `session/prompt`,
-    /// `session/cancel`, and `session/update`.
+    /// Optional. Omitted and `null` are equivalent and mean the agent does not support the
+    /// `session/*` methods. Supplying `{}` means the agent supports the
+    /// baseline session methods: `session/new`, `session/list`,
+    /// `session/resume`, `session/close`, `session/prompt`, `session/cancel`,
+    /// and `session/update`.
     public var session: SessionCapabilities?
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
@@ -122,11 +123,11 @@ public struct AgentCapabilities: Codable, Hashable, Sendable {
 
 /// An agent message upsert.
 ///
-/// Only [`AgentMessage::message_id`] is required. `content` has patch semantics:
+/// Only `messageId` is required. `content` has patch semantics:
 /// an omitted field leaves existing message content unchanged, `null` clears the
 /// value, and a concrete array replaces the previous value. For a new
-/// `messageId`, omitted fields use client defaults. `content` is replaced as a
-/// whole array; send `[]` or `null` to clear it.
+/// `messageId`, omitted `content` starts empty. `content` is replaced as a
+/// whole array. Send `[]` or `null` to clear it.
 ///
 /// Message updates and chunks are applied in the order they are received. When
 /// an `agent_message` update includes `content`, that array replaces any
@@ -141,10 +142,13 @@ public struct AgentMessage: Codable, Hashable, Sendable {
     public var content: PatchField<[ContentBlock]>
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys. Omitted means no metadata update; `null` is an explicit clear signal.
+    /// metadata to their interactions. Omitted leaves the stored metadata unchanged. `null`
+    /// clears it. An object patches the stored metadata by top-level key: keys it omits are
+    /// unchanged, a key set to `null` is removed, and any other value replaces that key's
+    /// stored value without merging nested objects. Beyond this patch rule, implementations
+    /// MUST NOT assign meaning to keys they do not recognize.
     ///
-    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+    /// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
     public var meta: PatchField<JSONValue>
 
     /// Creates a `AgentMessage`.
@@ -311,11 +315,11 @@ public struct AgentRequest: Codable, Hashable, Sendable {
 
 /// An agent thought or reasoning message upsert.
 ///
-/// Only [`AgentThought::message_id`] is required. `content` has patch semantics:
+/// Only `messageId` is required. `content` has patch semantics:
 /// an omitted field leaves existing thought content unchanged, `null` clears the
 /// value, and a concrete array replaces the previous value. For a new
-/// `messageId`, omitted fields use client defaults. `content` is replaced as a
-/// whole array; send `[]` or `null` to clear it.
+/// `messageId`, omitted `content` starts empty. `content` is replaced as a
+/// whole array. Send `[]` or `null` to clear it.
 ///
 /// Message updates and chunks are applied in the order they are received. When
 /// an `agent_thought` update includes `content`, that array replaces any
@@ -330,10 +334,13 @@ public struct AgentThought: Codable, Hashable, Sendable {
     public var content: PatchField<[ContentBlock]>
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys. Omitted means no metadata update; `null` is an explicit clear signal.
+    /// metadata to their interactions. Omitted leaves the stored metadata unchanged. `null`
+    /// clears it. An object patches the stored metadata by top-level key: keys it omits are
+    /// unchanged, a key set to `null` is removed, and any other value replaces that key's
+    /// stored value without merging nested objects. Beyond this patch rule, implementations
+    /// MUST NOT assign meaning to keys they do not recognize.
     ///
-    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+    /// See protocol docs: [Metadata Patches](https://agentclientprotocol.com/protocol/v2/extensibility#metadata-patches)
     public var meta: PatchField<JSONValue>
 
     /// Creates a `AgentThought`.
@@ -401,19 +408,26 @@ public struct AgentThought: Codable, Hashable, Sendable {
 /// Optional annotations for the client. The client can use annotations to inform how objects are used or displayed
 public struct Annotations: Codable, Hashable, Sendable {
     /// Intended recipients for this content, such as the user or assistant.
+    ///
+    /// Omitted and `null` are equivalent and mean no audience is specified.
     public var audience: [Role]?
 
     /// Timestamp indicating when the underlying resource was last modified.
     ///
-    /// Must be an RFC 3339 formatted string (e.g., "2025-01-12T15:00:58Z").
+    /// Should be an ISO 8601 formatted string (e.g., "2025-01-12T15:00:58Z"), as in MCP.
+    ///
+    /// Omitted and `null` are equivalent and mean the modification time is not reported.
     public var lastModified: String?
 
-    /// Relative importance of this content when clients choose what to surface.
+    /// Relative importance of this content when clients choose what to surface, from 0 (least
+    /// important) to 1 (most important).
+    ///
+    /// Omitted and `null` are equivalent and mean no priority is specified.
     public var priority: Double?
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
@@ -475,11 +489,13 @@ public struct AudioContent: Codable, Hashable, Sendable {
     public var mimeType: MediaType
 
     /// Optional annotations that help clients decide how to display or route this content.
+    ///
+    /// Omitted and `null` are equivalent and mean no annotations are provided.
     public var annotations: Annotations?
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
@@ -532,65 +548,6 @@ public struct AudioContent: Codable, Hashable, Sendable {
     }
 }
 
-/// Authentication capabilities supported by the client.
-///
-/// Advertised during initialization to inform the agent which authentication
-/// method types the client can handle. This governs opt-in types that require
-/// additional client-side support.
-public struct AuthCapabilities: Codable, Hashable, Sendable {
-    /// Whether the client supports `terminal` authentication methods.
-    ///
-    /// Optional. Omitted or `null` both mean the client does not advertise support.
-    /// The client should supply `{}` only when it can reproduce the configured
-    /// agent invocation in an interactive terminal. Supplying `{}` means the
-    /// agent may include `terminal` entries in its authentication methods.
-    public var terminal: TerminalAuthCapabilities?
-
-    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
-    ///
-    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
-
-    /// Creates a `AuthCapabilities`.
-    public init(
-        terminal: TerminalAuthCapabilities? = nil,
-        meta: JSONValue? = nil
-    ) {
-        self.terminal = terminal
-        self.meta = meta
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case terminal
-        case meta = "_meta"
-    }
-
-    /// Decodes a `AuthCapabilities`; forgiving fields degrade to their
-    /// schema defaults instead of failing the message.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
-    ///   or violates a wire invariant.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.terminal = container.forgivingDecodeIfPresent(TerminalAuthCapabilities.self, forKey: .terminal)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
-    }
-
-    /// Encodes a `AuthCapabilities`, omitting nil optional fields — never
-    /// emitting JSON null for an absent capability-gated field.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encodeIfPresent(terminal, forKey: .terminal)
-        try container.encodeIfPresent(meta, forKey: .meta)
-    }
-}
-
 /// Agent handles authentication itself through `auth/login`.
 ///
 /// The `type` discriminator value is `agent`.
@@ -601,12 +558,14 @@ public struct AuthMethodAgent: Codable, Hashable, Sendable {
     /// Human-readable name of the authentication method.
     public var name: String
 
-    /// Optional description providing more details about this authentication method.
+    /// Optional human-readable description of this authentication method.
+    ///
+    /// Omitted and `null` are equivalent and mean no description is provided.
     public var description: String?
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
@@ -664,7 +623,7 @@ public struct AuthMethodAgent: Codable, Hashable, Sendable {
 /// The client runs the configured agent program as a separate interactive
 /// process for the user to authenticate via a TUI. Agents MUST advertise this
 /// method only when the client enabled its terminal authentication capability.
-/// A zero exit status signals success; any other termination signals failure.
+/// A zero exit status signals success. Any other termination signals failure.
 /// The client MUST NOT pass this method to `auth/login`.
 public struct AuthMethodTerminal: Codable, Hashable, Sendable {
     /// Unique identifier for this authentication method.
@@ -676,7 +635,9 @@ public struct AuthMethodTerminal: Codable, Hashable, Sendable {
     /// Additional arguments to append to the configured agent invocation for terminal auth.
     public var args: [String]?
 
-    /// Optional description providing more details about this authentication method.
+    /// Optional human-readable description of this authentication method.
+    ///
+    /// Omitted and `null` are equivalent and mean no description is provided.
     public var description: String?
 
     /// Additional environment variables to set on the configured agent invocation for terminal auth.
@@ -685,8 +646,8 @@ public struct AuthMethodTerminal: Codable, Hashable, Sendable {
     public var env: [EnvVariable]?
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
@@ -749,80 +710,14 @@ public struct AuthMethodTerminal: Codable, Hashable, Sendable {
     }
 }
 
-/// Information about a command.
-public struct AvailableCommand: Codable, Hashable, Sendable {
-    /// Human-readable description of what the command does.
-    public var description: String
-
-    /// Command name (e.g., `create_plan`, `research_codebase`).
-    public var name: String
-
-    /// Input for the command if required
-    public var input: AvailableCommandInput?
-
-    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
-    ///
-    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
-
-    /// Creates a `AvailableCommand`.
-    public init(
-        description: String,
-        name: String,
-        input: AvailableCommandInput? = nil,
-        meta: JSONValue? = nil
-    ) {
-        self.description = description
-        self.name = name
-        self.input = input
-        self.meta = meta
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case description
-        case name
-        case input
-        case meta = "_meta"
-    }
-
-    /// Decodes a `AvailableCommand`; forgiving fields degrade to their
-    /// schema defaults instead of failing the message.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
-    ///   or violates a wire invariant.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.description = try container.decode(String.self, forKey: .description)
-        self.name = try container.decode(String.self, forKey: .name)
-        self.input = container.forgivingDecodeIfPresent(AvailableCommandInput.self, forKey: .input)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
-    }
-
-    /// Encodes a `AvailableCommand`, omitting nil optional fields — never
-    /// emitting JSON null for an absent capability-gated field.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(description, forKey: .description)
-        try container.encode(name, forKey: .name)
-        try container.encodeIfPresent(input, forKey: .input)
-        try container.encodeIfPresent(meta, forKey: .meta)
-    }
-}
-
 /// Available commands are ready or have changed
 public struct AvailableCommandsUpdate: Codable, Hashable, Sendable {
     /// Commands the agent can execute.
     public var availableCommands: [AvailableCommand]
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?
@@ -865,6 +760,106 @@ public struct AvailableCommandsUpdate: Codable, Hashable, Sendable {
     }
 }
 
+/// A listed terminal running in the background.
+public struct BackgroundTerminal: Codable, Hashable, Sendable {
+    /// The ID of the listed terminal.
+    public var terminalId: TerminalId
+
+    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
+    ///
+    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+    public var meta: JSONValue?
+
+    /// Creates a `BackgroundTerminal`.
+    public init(
+        terminalId: TerminalId,
+        meta: JSONValue? = nil
+    ) {
+        self.terminalId = terminalId
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case terminalId
+        case meta = "_meta"
+    }
+
+    /// Decodes a `BackgroundTerminal`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
+    ///   or violates a wire invariant.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.terminalId = try container.decode(TerminalId.self, forKey: .terminalId)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `BackgroundTerminal`, omitting nil optional fields — never
+    /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(terminalId, forKey: .terminalId)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
+/// A listed tool call whose work continues in the background.
+public struct BackgroundToolCall: Codable, Hashable, Sendable {
+    /// The ID of the listed tool call.
+    public var toolCallId: ToolCallId
+
+    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
+    ///
+    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
+    public var meta: JSONValue?
+
+    /// Creates a `BackgroundToolCall`.
+    public init(
+        toolCallId: ToolCallId,
+        meta: JSONValue? = nil
+    ) {
+        self.toolCallId = toolCallId
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case toolCallId
+        case meta = "_meta"
+    }
+
+    /// Decodes a `BackgroundToolCall`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
+    ///   or violates a wire invariant.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.toolCallId = try container.decode(ToolCallId.self, forKey: .toolCallId)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `BackgroundToolCall`, omitting nil optional fields — never
+    /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(toolCallId, forKey: .toolCallId)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
 /// Binary resource contents.
 public struct BlobResourceContents: Codable, Hashable, Sendable {
     /// Base64-encoded bytes for a binary resource payload.
@@ -874,11 +869,13 @@ public struct BlobResourceContents: Codable, Hashable, Sendable {
     public var uri: String
 
     /// MIME type describing the encoded media payload.
+    ///
+    /// Omitted and `null` are equivalent and mean the MIME type is not specified.
     public var mimeType: MediaType?
 
     /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Implementations MUST NOT make assumptions about values at
-    /// these keys.
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
     ///
     /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
     public var meta: JSONValue?

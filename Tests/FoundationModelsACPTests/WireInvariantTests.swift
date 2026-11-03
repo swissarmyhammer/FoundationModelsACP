@@ -32,17 +32,37 @@ import Testing
         #expect(location.line == 12)
     }
 
-    @Test func toolCallLocationAcceptsLineZero() throws {
-        // v1 enforced 1-based line numbers through a `LineNumber` newtype. v2
-        // states no such thing: `ToolCallLocation.line` is the schema's only
-        // line-valued field, it is described as "Optional line number within
-        // the file", and it carries `minimum: 0`. Rejecting `0` would reject
-        // payloads v2 permits, so the v1 test requiring `0` to fail must not
-        // come back.
-        let location = try WireRoundTrip.expectLossless(ToolCallLocation.self, """
+    @Test func aLineNumberIsOneBased() throws {
+        // Since `schema-v2.0.0-alpha.10` the schema says that `line` is
+        // 1-based (`minimum: 1`, "`0` is invalid"), so `LineNumber` refuses `0`.
+        #expect(LineNumber(rawValue: 0) == nil)
+        #expect(LineNumber(rawValue: 1)?.rawValue == 1)
+    }
+
+    @Test func aLineOfZeroDegradesToOmittedRatherThanFailingTheMessage() throws {
+        // `line` is also `x-deserialize-default-on-error`: the invalid `0`
+        // costs the line number, not the whole tool call.
+        let location = try WireRoundTrip.decode(ToolCallLocation.self, from: """
             {"path":"/a.txt","line":0}
             """)
-        #expect(location.line == 0)
+        #expect(location.path == AbsolutePath(rawValue: "/a.txt"))
+        #expect(location.line == nil)
+    }
+
+    @Test func aTerminalExitCodeMayBeNegative() throws {
+        // `exitCode` is `int64` since `schema-v2.0.0-alpha.10`: signed Windows
+        // exit codes are values.
+        let status = try WireRoundTrip.expectLossless(TerminalExitStatus.self, """
+            {"exitCode":-1073741819}
+            """)
+        #expect(status.exitCode == -1_073_741_819)
+    }
+
+    @Test func aCostCurrencyMayBeAnyUnit() throws {
+        let cost = try WireRoundTrip.expectLossless(Cost.self, """
+            {"amount":12.5,"currency":"credits"}
+            """)
+        #expect(cost.currency == "credits")
     }
 
     @Test func toolCallLocationAcceptsAnOmittedLine() throws {

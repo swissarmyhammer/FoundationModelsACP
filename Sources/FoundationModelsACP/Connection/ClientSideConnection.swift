@@ -590,6 +590,26 @@ public final class ClientSideConnection: Sendable {
         try await core.call("deleteSession", params, returning: DeleteSessionResponse.self)
     }
 
+    /// Cancels one tool call of a session on the agent.
+    ///
+    /// - Parameter params: The cancel-tool-call request.
+    /// - Returns: The cancel-tool-call response.
+    /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
+    ///   disconnect.
+    public func cancelToolCall(_ params: CancelToolCallRequest) async throws -> CancelToolCallResponse {
+        try await core.call("cancelToolCall", params, returning: CancelToolCallResponse.self)
+    }
+
+    /// Cancels one terminal of a session on the agent.
+    ///
+    /// - Parameter params: The cancel-terminal request.
+    /// - Returns: The cancel-terminal response.
+    /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
+    ///   disconnect.
+    public func cancelTerminal(_ params: CancelTerminalRequest) async throws -> CancelTerminalResponse {
+        try await core.call("cancelTerminal", params, returning: CancelTerminalResponse.self)
+    }
+
     /// Sets a session configuration option on the agent.
     ///
     /// - Parameter params: The set-config-option request.

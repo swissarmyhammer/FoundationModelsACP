@@ -107,6 +107,10 @@ public final class AgentSideConnection: Sendable {
             return try await RoleDispatch.serveResult(params, as: LogoutAuthRequest.self, agent.logoutAuth)
         case "deleteSession":
             return try await RoleDispatch.serveResult(params, as: DeleteSessionRequest.self, agent.deleteSession)
+        case "cancelToolCall":
+            return try await RoleDispatch.serveResult(params, as: CancelToolCallRequest.self, agent.cancelToolCall)
+        case "cancelTerminal":
+            return try await RoleDispatch.serveResult(params, as: CancelTerminalRequest.self, agent.cancelTerminal)
         case "setSessionConfigOption":
             return try await RoleDispatch.serveResult(
                 params, as: SetSessionConfigOptionRequest.self, agent.setSessionConfigOption

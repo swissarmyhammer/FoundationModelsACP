@@ -113,7 +113,7 @@ import Testing
     @Test
     func aPendingPermissionRequestDoesNotBlockAConcurrentSessionUpdate() async throws {
         let session = StubAgent.sessionId
-        let connection = await GatedPermissionConnection.connect(outcome: .cancelled)
+        let connection = await GatedPermissionConnection.connect(outcome: .cancelled(CancelledPermissionOutcome()))
         let agentConnection = await connection.connectStubAgent()
         // The two closes run also when the test body throws.
         defer {
@@ -154,6 +154,6 @@ import Testing
         // request was genuinely still pending, not merely fast.
         connection.gate.open()
         let response = try await permission.value
-        #expect(response.outcome == .cancelled)
+        #expect(response.outcome == .cancelled(CancelledPermissionOutcome()))
     }
 }

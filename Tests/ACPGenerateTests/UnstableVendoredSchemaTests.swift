@@ -17,7 +17,7 @@ import Testing
 
     /// The SHA-256 digest that the `schema-v2.0.0-alpha.8` release gives for
     /// its `schema.unstable.json` asset.
-    private static let releaseAssetDigest = "b09f7d8782ec6ea5d12fc710010212a56f18afa682e2d8222caf6a2aee2c63f9"
+    private static let releaseAssetDigest = "49e10f8c1935854363ed5b176cc6560d856642ba5020c97d264d34de4b6f1b31"
 
     @Test func vendoredUnstableSchemaMatchesTheReleaseAssetByteForByte() throws {
         let digest = SHA256.hash(data: try VendoredSchemaTests.packageFile(Self.schemaPath))
