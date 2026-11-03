@@ -64,6 +64,7 @@ import FoundationModelsACP
         }
         let files = try SchemaGenerator(config: schemaSet.config).generate(
             schemaJSON: try artifact(schemaSet.schemaPath),
+            unstableSchemaJSON: try schemaSet.unstableSchemaPath.map(artifact),
             metaJSON: try schemaSet.metaPath.map(artifact),
             unstableMetaJSON: try schemaSet.unstableMetaPath.map(artifact),
             namespace: schemaSet.outputNamespace
@@ -231,6 +232,7 @@ import FoundationModelsACP
         ).trimmingCharacters(in: .whitespacesAndNewlines)
         let outcome = try SchemaGenerator(config: schemaSet.config).generateIfChanged(
             schemaJSON: try Self.packageFile(schemaSet.schemaPath),
+            unstableSchemaJSON: try schemaSet.unstableSchemaPath.map(Self.packageFile),
             metaJSON: try schemaSet.metaPath.map(Self.packageFile),
             unstableMetaJSON: try schemaSet.unstableMetaPath.map(Self.packageFile),
             namespace: schemaSet.outputNamespace,
@@ -252,7 +254,9 @@ import FoundationModelsACP
                 "agentThoughtChunk", "agentThought", "stateUpdate", "toolCallContentChunk",
                 "toolCallUpdate", "terminalUpdate", "terminalOutputChunk", "planUpdate",
                 "availableCommandsUpdate", "configOptionUpdate", "sessionInfoUpdate",
-                "usageUpdate", "notice", "compactionUpdate", "compactionSummaryChunk", "unknown",
+                "usageUpdate", "notice", "compactionUpdate", "compactionSummaryChunk",
+                // The unstable subagent updates, from `GeneratorConfig.unstableOverlay`.
+                "subagentUpdate", "sessionMessage", "sessionMessageChunk", "unknown",
             ]
         )
         #expect(declaration.contains("case terminalUpdate(TerminalUpdate)"))
@@ -455,6 +459,8 @@ import FoundationModelsACP
                 "ResumeSessionRequest.additionalDirectories: [AbsolutePath]?",
                 "SessionInfo.cwd: AbsolutePath",
                 "SessionInfo.additionalDirectories: [AbsolutePath]?",
+                "SubagentUpdate.additionalDirectories: PatchField<[AbsolutePath]>",
+                "SubagentUpdate.cwd: PatchField<AbsolutePath>",
                 "TerminalUpdate.cwd: PatchField<AbsolutePath>",
                 "ToolCallLocation.path: AbsolutePath",
             ]
@@ -575,19 +581,20 @@ import FoundationModelsACP
                 "Identifiers.generated.swift": 14,
                 "MethodTable.generated.swift": 2,
                 "Models.generated.swift": 14,
-                "Models10.generated.swift": 12,
-                "Models11.generated.swift": 3,
+                "Models10.generated.swift": 11,
+                "Models11.generated.swift": 12,
+                "Models12.generated.swift": 3,
                 "Models2.generated.swift": 16,
                 "Models3.generated.swift": 12,
-                "Models4.generated.swift": 16,
-                "Models5.generated.swift": 14,
+                "Models4.generated.swift": 14,
+                "Models5.generated.swift": 13,
                 "Models6.generated.swift": 14,
-                "Models7.generated.swift": 13,
-                "Models8.generated.swift": 13,
-                "Models9.generated.swift": 13,
+                "Models7.generated.swift": 14,
+                "Models8.generated.swift": 12,
+                "Models9.generated.swift": 11,
                 "Unions.generated.swift": 13,
-                "Unions2.generated.swift": 12,
-                "Unions3.generated.swift": 6,
+                "Unions2.generated.swift": 11,
+                "Unions3.generated.swift": 7,
                 "Unresolved.generated.swift": 11,
             ]
         )

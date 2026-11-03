@@ -199,3 +199,30 @@ struct OutboundUsageRuleTests {
         try await harness.expectSent(usageUpdate(costIn: currency))
     }
 }
+
+// MARK: - Subagent updates
+
+/// The agent side refuses a `subagent_update` with an empty child session ID.
+@Suite
+struct OutboundSubagentRuleTests {
+    @Test func aChildWithASessionIdIsSent() async throws {
+        let harness = await OutboundHarness.connect()
+        defer { await harness.close() }
+        let update = UpdateSessionNotification(
+            sessionId: ruleSession,
+            update: .subagentUpdate(SubagentUpdate(sessionId: SessionId(rawValue: "child-1")))
+        )
+        try await harness.expectSent(update)
+    }
+
+    @Test func aChildWithAnEmptySessionIdIsRefused() async throws {
+        let harness = await OutboundHarness.connect()
+        defer { await harness.close() }
+        let update = UpdateSessionNotification(
+            sessionId: ruleSession,
+            update: .subagentUpdate(SubagentUpdate(sessionId: SessionId(rawValue: "")))
+        )
+        let description = try await harness.refusal(of: update)
+        #expect(description.contains("sessionId"))
+    }
+}

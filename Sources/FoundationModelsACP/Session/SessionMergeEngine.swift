@@ -65,6 +65,11 @@ public struct SessionMergeEngine: Hashable, Sendable {
         /// The session information changed to this folded value.
         case sessionInfoChanged(SessionInfoUpdate)
 
+        /// A child session was announced or changed. The value holds the
+        /// folded state of the child. (Unstable: ACP v2 "Subagent
+        /// Sessions".)
+        case subagentChanged(SubagentUpdate)
+
         /// The agent sent this notice for the user. A notice is a live
         /// event, not session history, so the engine does not keep it and
         /// does not replay it. Nothing in the engine changed.
@@ -94,6 +99,12 @@ public struct SessionMergeEngine: Hashable, Sendable {
     /// The session information, folded as a patch. A field that no update
     /// gave stays `.unchanged`.
     public private(set) var sessionInfo = SessionInfoUpdate()
+
+    /// The child sessions that this session announced with `subagent_update`,
+    /// in the order of the first announcement. Each value holds the folded
+    /// state of the child: a field that no update gave stays `.unchanged`.
+    /// (Unstable: ACP v2 "Subagent Sessions".)
+    public private(set) var subagents: [SubagentUpdate] = []
 
     /// The index in ``entries`` of each entry identifier.
     private var indexByID: [SessionEntry.ID: Int] = [:]
@@ -142,6 +153,12 @@ public struct SessionMergeEngine: Hashable, Sendable {
             updateCompaction(compaction.compactionId) { $0.apply(compaction) }
         case .compactionSummaryChunk(let chunk):
             updateCompaction(chunk.compactionId) { $0.append(chunk) }
+        case .sessionMessage(let message):
+            updateSessionMessage(message.messageId) { $0.apply(message) }
+        case .sessionMessageChunk(let chunk):
+            updateSessionMessage(chunk.messageId) { $0.append(chunk) }
+        case .subagentUpdate(let subagent):
+            foldSubagent(subagent)
         case .notice(let notice):
             .notice(notice)
         case .unknown(let type, let payload):
@@ -261,7 +278,10 @@ public struct SessionMergeEngine: Hashable, Sendable {
         let options = configOptions.map { SessionUpdate.configOptionUpdate(ConfigOptionUpdate(configOptions: $0)) }
         let info = sessionInfo == SessionInfoUpdate() ? nil : SessionUpdate.sessionInfoUpdate(sessionInfo)
         let replay = [commands, options, usage.map(SessionUpdate.usageUpdate), info, agentState.map(SessionUpdate.stateUpdate)]
-        return replay.compactMap { $0 }
+        // A child session must be announced before any message names it, so
+        // the announcements go first. An agent that replays sends these
+        // before ``transcriptUpdates``.
+        return subagents.map(SessionUpdate.subagentUpdate) + replay.compactMap { $0 }
     }
 
     // MARK: - Transcript entries
@@ -290,6 +310,43 @@ public struct SessionMergeEngine: Hashable, Sendable {
             embed: role.kind,
             change: change
         )
+    }
+
+    /// Changes an inter-session message entry, and adds the entry when it is
+    /// new.
+    ///
+    /// - Parameters:
+    ///   - messageId: The identifier of the message.
+    ///   - change: Changes the message.
+    /// - Returns: What changed.
+    private mutating func updateSessionMessage(
+        _ messageId: MessageId,
+        change: (inout SessionEntry.InterSessionMessage) -> Void
+    ) -> Change {
+        upsert(
+            .sessionMessage(messageId),
+            initial: SessionEntry.InterSessionMessage(messageId: messageId),
+            extract: \.sessionMessage,
+            embed: SessionEntry.Kind.sessionMessage,
+            change: change
+        )
+    }
+
+    /// Folds a `subagent_update` onto the child with the same `sessionId`,
+    /// and adds the child when it is new.
+    ///
+    /// - Parameter update: The update.
+    /// - Returns: What changed.
+    private mutating func foldSubagent(_ update: SubagentUpdate) -> Change {
+        let folded: SubagentUpdate
+        if let index = subagents.firstIndex(where: { $0.sessionId == update.sessionId }) {
+            folded = update.folded(onto: subagents[index])
+            subagents[index] = folded
+        } else {
+            folded = update.folded(onto: SubagentUpdate(sessionId: update.sessionId))
+            subagents.append(folded)
+        }
+        return .subagentChanged(folded)
     }
 
     /// Changes a tool-call entry, and adds the entry when it is new.

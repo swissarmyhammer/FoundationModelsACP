@@ -760,6 +760,60 @@ public struct AvailableCommandsUpdate: Codable, Hashable, Sendable {
     }
 }
 
+/// **UNSTABLE**
+///
+/// This capability is not part of the spec yet, and may be removed or changed at any point.
+///
+/// A listed subagent session associated with this session through `subagent_update`.
+public struct BackgroundSubagent: Codable, Hashable, Sendable {
+    /// The ID of the listed session.
+    public var sessionId: SessionId
+
+    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
+    ///
+    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/draft/extensibility)
+    public var meta: JSONValue?
+
+    /// Creates a `BackgroundSubagent`.
+    public init(
+        sessionId: SessionId,
+        meta: JSONValue? = nil
+    ) {
+        self.sessionId = sessionId
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionId
+        case meta = "_meta"
+    }
+
+    /// Decodes a `BackgroundSubagent`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
+    ///   or violates a wire invariant.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.sessionId = try container.decode(SessionId.self, forKey: .sessionId)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `BackgroundSubagent`, omitting nil optional fields — never
+    /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sessionId, forKey: .sessionId)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
 /// A listed terminal running in the background.
 public struct BackgroundTerminal: Codable, Hashable, Sendable {
     /// The ID of the listed terminal.
@@ -856,74 +910,6 @@ public struct BackgroundToolCall: Codable, Hashable, Sendable {
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(toolCallId, forKey: .toolCallId)
-        try container.encodeIfPresent(meta, forKey: .meta)
-    }
-}
-
-/// Binary resource contents.
-public struct BlobResourceContents: Codable, Hashable, Sendable {
-    /// Base64-encoded bytes for a binary resource payload.
-    public var blob: String
-
-    /// URI associated with this resource or media payload.
-    public var uri: String
-
-    /// MIME type describing the encoded media payload.
-    ///
-    /// Omitted and `null` are equivalent and mean the MIME type is not specified.
-    public var mimeType: MediaType?
-
-    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
-    /// Implementations MUST NOT assign meaning to keys they do not recognize.
-    ///
-    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
-
-    /// Creates a `BlobResourceContents`.
-    public init(
-        blob: String,
-        uri: String,
-        mimeType: MediaType? = nil,
-        meta: JSONValue? = nil
-    ) {
-        self.blob = blob
-        self.uri = uri
-        self.mimeType = mimeType
-        self.meta = meta
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case blob
-        case uri
-        case mimeType
-        case meta = "_meta"
-    }
-
-    /// Decodes a `BlobResourceContents`; forgiving fields degrade to their
-    /// schema defaults instead of failing the message.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
-    ///   or violates a wire invariant.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.blob = try container.decode(String.self, forKey: .blob)
-        self.uri = try container.decode(String.self, forKey: .uri)
-        self.mimeType = container.forgivingDecodeIfPresent(MediaType.self, forKey: .mimeType)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
-    }
-
-    /// Encodes a `BlobResourceContents`, omitting nil optional fields — never
-    /// emitting JSON null for an absent capability-gated field.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(blob, forKey: .blob)
-        try container.encode(uri, forKey: .uri)
-        try container.encodeIfPresent(mimeType, forKey: .mimeType)
         try container.encodeIfPresent(meta, forKey: .meta)
     }
 }

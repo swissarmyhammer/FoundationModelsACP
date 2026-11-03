@@ -150,7 +150,7 @@ extension SessionUpdate {
         case .agentMessageChunk, .agentMessage, .agentThoughtChunk, .agentThought, .toolCallUpdate,
             .toolCallContentChunk, .terminalUpdate, .terminalOutputChunk, .planUpdate, .stateUpdate,
             .availableCommandsUpdate, .configOptionUpdate, .usageUpdate, .sessionInfoUpdate, .notice,
-            .compactionUpdate, .compactionSummaryChunk, .unknown:
+            .compactionUpdate, .compactionSummaryChunk, .subagentUpdate, .sessionMessage, .sessionMessageChunk, .unknown:
             nil
         }
     }

@@ -63,6 +63,9 @@ public struct SchemaGenerator: Sendable {
     ///
     /// - Parameters:
     ///   - schemaJSON: The raw bytes of the schema document.
+    ///   - unstableSchemaJSON: The raw bytes of the unstable schema document.
+    ///     Required when `config.unstableOverlay` names anything; the
+    ///     generator reads only what the overlay names.
     ///   - metaJSON: The raw bytes of the stable routing manifest
     ///     (`meta.json`); when present, the method-routing table is emitted.
     ///   - unstableMetaJSON: The raw bytes of the unstable routing manifest
@@ -80,6 +83,7 @@ public struct SchemaGenerator: Sendable {
     ///   annotations.
     public func generate(
         schemaJSON: Data,
+        unstableSchemaJSON: Data? = nil,
         metaJSON: Data? = nil,
         unstableMetaJSON: Data? = nil,
         namespace: String? = nil
@@ -90,9 +94,10 @@ public struct SchemaGenerator: Sendable {
             )
         }
         let schema = try decodeJSON(data: schemaJSON, context: "schema document")
-        guard let definitions = schema[Self.defsKey]?.objectValue else {
+        guard var definitions = schema[Self.defsKey]?.objectValue else {
             throw GeneratorError.invalidSchema("missing top-level \(Self.defsKey) object")
         }
+        try applyUnstableOverlay(to: &definitions, unstableSchemaJSON: unstableSchemaJSON)
         try validatePatchSemanticsFields(definitions: definitions)
         let emittedDefinitions = try emittedDefinitionNames(of: definitions)
 
@@ -2085,6 +2090,89 @@ public struct SchemaGenerator: Sendable {
                 )
             }
         }
+    }
+
+    // MARK: - Unstable overlay
+
+    /// Adds the definitions and union variants that
+    /// `config.unstableOverlay` names from the unstable schema document.
+    ///
+    /// A definition that the stable document already has is an error: the
+    /// overlay is only for what the stable document lacks. A variant goes
+    /// before the union's catch-all, which stays last.
+    ///
+    /// - Parameters:
+    ///   - definitions: The stable `$defs`, changed in place.
+    ///   - unstableSchemaJSON: The unstable schema document bytes.
+    /// - Throws: `GeneratorError.invalidSchema` when the overlay names
+    ///   something that the documents do not have, or when no unstable
+    ///   document is given.
+    private func applyUnstableOverlay(
+        to definitions: inout [String: JSONValue],
+        unstableSchemaJSON: Data?
+    ) throws {
+        let overlay = config.unstableOverlay
+        guard !overlay.isEmpty else { return }
+        guard let unstableSchemaJSON else {
+            throw GeneratorError.invalidSchema("the unstable overlay needs the unstable schema document")
+        }
+        let document = try decodeJSON(data: unstableSchemaJSON, context: "unstable schema document")
+        guard let unstable = document[Self.defsKey]?.objectValue else {
+            throw GeneratorError.invalidSchema("unstable schema document has no top-level \(Self.defsKey) object")
+        }
+        for name in overlay.definitions.sorted() {
+            guard let fragment = unstable[name] else {
+                throw GeneratorError.invalidSchema("the unstable overlay names \"\(name)\", which the unstable schema lacks")
+            }
+            guard definitions[name] == nil else {
+                throw GeneratorError.invalidSchema("the unstable overlay names \"\(name)\", which the stable schema has")
+            }
+            definitions[name] = fragment
+        }
+        for (union, discriminators) in Self.orderedEntries(of: overlay.variants) {
+            try appendUnstableVariants(union: union, discriminators: discriminators, unstable: unstable, to: &definitions)
+        }
+    }
+
+    /// Appends the named variants of an unstable union to the stable union.
+    ///
+    /// - Parameters:
+    ///   - union: The union's definition name.
+    ///   - discriminators: The `const` values that name the variants.
+    ///   - unstable: The unstable `$defs`.
+    ///   - definitions: The stable `$defs`, changed in place.
+    /// - Throws: `GeneratorError.invalidSchema` for a missing union, variant,
+    ///   or a variant that the stable union already has.
+    private func appendUnstableVariants(
+        union: String,
+        discriminators: [String],
+        unstable: [String: JSONValue],
+        to definitions: inout [String: JSONValue]
+    ) throws {
+        guard var stableMembers = definitions[union]?.objectValue,
+            let keyword = [Self.oneOfKey, Self.anyOfKey].first(where: { stableMembers[$0] != nil }),
+            var variants = stableMembers[keyword]?.arrayValue,
+            let unstableVariants = [Self.oneOfKey, Self.anyOfKey]
+                .compactMap({ unstable[union]?[$0]?.arrayValue }).first
+        else {
+            throw GeneratorError.invalidSchema("the unstable overlay names the union \"\(union)\", which is not a union in both documents")
+        }
+        var insertionIndex = variants.firstIndex(where: { $0[Self.notKey] != nil }) ?? variants.count
+        for discriminator in discriminators {
+            func pins(_ variant: JSONValue) -> Bool {
+                (variant[Self.propertiesKey]?.objectValue ?? [:]).values.contains { $0[Self.constKey]?.stringValue == discriminator }
+            }
+            guard let variant = unstableVariants.first(where: pins) else {
+                throw GeneratorError.invalidSchema("the unstable overlay names the variant \"\(discriminator)\" of \"\(union)\", which the unstable schema lacks")
+            }
+            guard !variants.contains(where: pins) else {
+                throw GeneratorError.invalidSchema("the unstable overlay names the variant \"\(discriminator)\" of \"\(union)\", which the stable schema has")
+            }
+            variants.insert(variant, at: insertionIndex)
+            insertionIndex += 1
+        }
+        stableMembers[keyword] = .array(variants)
+        definitions[union] = .object(stableMembers)
     }
 
     // MARK: - Reachable subset

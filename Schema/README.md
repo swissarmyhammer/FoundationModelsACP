@@ -35,6 +35,16 @@ primary set emits them: `SessionUpdate` has the cases `notice`,
 (`CompactionId`, `CompactionStatus`, `CompactionUpdate`,
 `CompactionSummaryChunk`, `Notice`, `NoticeSeverity`) are top-level types.
 
+The primary set also reads a named part of this document:
+`GeneratorConfig.unstableOverlay` lists the definitions and the `SessionUpdate`
+and `BackgroundWork` union variants that the stable document lacks. Today they
+are the subagent session types (`SubagentUpdate`, `SessionMessage`,
+`SessionMessageChunk`, `SubagentSessionCapabilities`,
+`SessionCancelCapabilities`, `BackgroundSubagent`), and the variants
+`subagent_update`, `session_message`, `session_message_chunk` and `subagent`.
+Nothing else of the unstable document is emitted. They are unstable: they may
+change or go in a later release.
+
 The document stays vendored beside the other artifacts of the same release.
 `UnstableVendoredSchemaTests` pins its digest. To emit a part of the unstable
 surface again, add a `SchemaSet` with an output namespace and the root

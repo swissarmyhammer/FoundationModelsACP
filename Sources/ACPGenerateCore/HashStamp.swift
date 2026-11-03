@@ -43,16 +43,18 @@ extension SchemaGenerator {
     ///
     /// - Parameters:
     ///   - schemaJSON: The schema document bytes.
+    ///   - unstableSchemaJSON: The unstable schema document bytes, or `nil`.
     ///   - metaJSON: The stable routing manifest bytes, or `nil`.
     ///   - unstableMetaJSON: The unstable routing manifest bytes, or `nil`.
     /// - Returns: The lowercase hex-encoded SHA-256 of the framed artifacts.
     public static func artifactHash(
         schemaJSON: Data,
+        unstableSchemaJSON: Data? = nil,
         metaJSON: Data?,
         unstableMetaJSON: Data?
     ) -> String {
         var hasher = SHA256()
-        for artifact in [schemaJSON, metaJSON, unstableMetaJSON] {
+        for artifact in [schemaJSON, unstableSchemaJSON, metaJSON, unstableMetaJSON] {
             guard let artifact else {
                 hasher.update(data: Data([absentArtifactMarker]))
                 continue
@@ -75,6 +77,8 @@ extension SchemaGenerator {
     ///
     /// - Parameters:
     ///   - schemaJSON: The raw bytes of the schema document.
+    ///   - unstableSchemaJSON: The raw bytes of the unstable schema document,
+    ///     or `nil`.
     ///   - metaJSON: The raw bytes of the stable routing manifest, or `nil`.
     ///   - unstableMetaJSON: The raw bytes of the unstable routing manifest,
     ///     or `nil`.
@@ -88,6 +92,7 @@ extension SchemaGenerator {
     /// - Throws: `GeneratorError` when generation fails.
     public func generateIfChanged(
         schemaJSON: Data,
+        unstableSchemaJSON: Data? = nil,
         metaJSON: Data? = nil,
         unstableMetaJSON: Data? = nil,
         namespace: String? = nil,
@@ -95,6 +100,7 @@ extension SchemaGenerator {
     ) throws -> GenerationOutcome {
         let hash = Self.artifactHash(
             schemaJSON: schemaJSON,
+            unstableSchemaJSON: unstableSchemaJSON,
             metaJSON: metaJSON,
             unstableMetaJSON: unstableMetaJSON
         )
@@ -103,6 +109,7 @@ extension SchemaGenerator {
         }
         var files = try generate(
             schemaJSON: schemaJSON,
+            unstableSchemaJSON: unstableSchemaJSON,
             metaJSON: metaJSON,
             unstableMetaJSON: unstableMetaJSON,
             namespace: namespace

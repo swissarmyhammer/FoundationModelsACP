@@ -17,6 +17,11 @@ public struct SchemaSet: Sendable {
     /// The schema document path, tree-relative to the package root.
     public let schemaPath: String
 
+    /// The unstable schema document path, or `nil`. The generator reads it
+    /// only for the definitions and union variants that
+    /// `GeneratorConfig.unstableOverlay` names.
+    public let unstableSchemaPath: String?
+
     /// The stable routing manifest path, or `nil` when the set routes no
     /// methods.
     public let metaPath: String?
@@ -34,6 +39,8 @@ public struct SchemaSet: Sendable {
     ///   - outputNamespace: The enclosing namespace enum, or `nil` for the
     ///     top level.
     ///   - schemaPath: The tree-relative schema document path.
+    ///   - unstableSchemaPath: The tree-relative unstable schema document
+    ///     path, or `nil`.
     ///   - metaPath: The tree-relative stable routing manifest path, or `nil`.
     ///   - unstableMetaPath: The tree-relative unstable routing manifest path,
     ///     or `nil`.
@@ -42,6 +49,7 @@ public struct SchemaSet: Sendable {
         versionLabel: String,
         outputNamespace: String?,
         schemaPath: String,
+        unstableSchemaPath: String? = nil,
         metaPath: String?,
         unstableMetaPath: String?,
         config: GeneratorConfig
@@ -49,6 +57,7 @@ public struct SchemaSet: Sendable {
         self.versionLabel = versionLabel
         self.outputNamespace = outputNamespace
         self.schemaPath = schemaPath
+        self.unstableSchemaPath = unstableSchemaPath
         self.metaPath = metaPath
         self.unstableMetaPath = unstableMetaPath
         self.config = config
@@ -64,6 +73,7 @@ public struct SchemaSet: Sendable {
         versionLabel: "v2",
         outputNamespace: nil,
         schemaPath: "Schema/acp-v2.json",
+        unstableSchemaPath: "Schema/acp-v2.unstable.json",
         metaPath: "Schema/acp-v2.meta.json",
         unstableMetaPath: "Schema/acp-v2.meta.unstable.json",
         config: .acpV2
@@ -76,8 +86,8 @@ public struct SchemaSet: Sendable {
     /// without change.
     ///
     /// The vendored unstable schema document (`Schema/acp-v2.unstable.json`)
-    /// is not a set here. Upstream made the only part of it this package
-    /// emitted — the compaction and notice session updates — stable in
-    /// `schema-v2.0.0-alpha.8`, so the primary set emits those types now.
+    /// is not a set here. The primary set reads the parts of it that
+    /// `GeneratorConfig.unstableOverlay` names (the subagent session
+    /// updates), and nothing else.
     public static let all: [SchemaSet] = [.acpV2]
 }

@@ -117,11 +117,13 @@ do {
     for schemaSet in SchemaSet.all {
         requireTreeRelative(schemaSet.schemaPath, role: "schema-path")
         let schemaJSON = try Data(contentsOf: URL(fileURLWithPath: schemaSet.schemaPath))
+        let unstableSchemaJSON = try loadArtifact(schemaSet.unstableSchemaPath, role: "unstable-schema-path")
         let metaJSON = try loadArtifact(schemaSet.metaPath, role: "meta-path")
         let unstableMetaJSON = try loadArtifact(schemaSet.unstableMetaPath, role: "unstable-meta-path")
         let stampName = SchemaGenerator.stampFileName(namespace: schemaSet.outputNamespace)
         let outcome = try SchemaGenerator(config: schemaSet.config).generateIfChanged(
             schemaJSON: schemaJSON,
+            unstableSchemaJSON: unstableSchemaJSON,
             metaJSON: metaJSON,
             unstableMetaJSON: unstableMetaJSON,
             namespace: schemaSet.outputNamespace,

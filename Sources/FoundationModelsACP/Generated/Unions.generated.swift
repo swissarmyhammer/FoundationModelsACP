@@ -215,6 +215,14 @@ public enum BackgroundWork: Codable, Hashable, Sendable {
     /// stay listed.
     case toolCall(BackgroundToolCall)
 
+    /// **UNSTABLE**
+    ///
+    /// This capability is not part of the spec yet, and may be removed or changed at any point.
+    ///
+    /// A detached subagent session that has anything running: its state is not `idle`, or
+    /// its own `background` list is non-empty or not reported.
+    case subagent(BackgroundSubagent)
+
     /// An unrecognized `type` value, captured alongside the members
     /// of the object that no other property owns, so a variant this revision
     /// does not list decodes without error and re-encodes unchanged.
@@ -232,6 +240,7 @@ public enum BackgroundWork: Codable, Hashable, Sendable {
     private enum Tag: String {
         case terminal = "terminal"
         case toolCall = "tool_call"
+        case subagent = "subagent"
     }
 
     private static let excludedMembers = ["type"]
@@ -250,6 +259,8 @@ public enum BackgroundWork: Codable, Hashable, Sendable {
             self = .terminal(try BackgroundTerminal(from: decoder))
         case .toolCall:
             self = .toolCall(try BackgroundToolCall(from: decoder))
+        case .subagent:
+            self = .subagent(try BackgroundSubagent(from: decoder))
         case nil:
             self = .unknown(discriminator, try JSONValue(from: decoder, excludingMembers: Self.excludedMembers))
         }
@@ -268,6 +279,9 @@ public enum BackgroundWork: Codable, Hashable, Sendable {
             try payload.encode(to: encoder)
         case .toolCall(let payload):
             try container.encode(Tag.toolCall.rawValue, forKey: .type)
+            try payload.encode(to: encoder)
+        case .subagent(let payload):
+            try container.encode(Tag.subagent.rawValue, forKey: .type)
             try payload.encode(to: encoder)
         case .unknown(let discriminator, let payload):
             try container.encode(discriminator, forKey: .type)

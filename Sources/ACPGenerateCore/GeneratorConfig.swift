@@ -23,6 +23,39 @@ public struct GeneratorConfig: Sendable {
         case lineNumber = "LineNumber"
     }
 
+    /// A named part of the unstable schema document to emit with the stable
+    /// surface.
+    ///
+    /// Nothing else of the unstable document is read: a definition or a
+    /// variant that is not named here is not emitted. Every name must exist
+    /// in the unstable document, or generation fails, so a stale entry cannot
+    /// linger past a re-vendor.
+    public struct UnstableOverlay: Sendable {
+        /// Definitions that the stable document lacks, copied as they are.
+        public var definitions: [String]
+
+        /// Union variants appended to a stable union, keyed by the union's
+        /// definition name. Each variant is named by the value of its
+        /// `const` discriminator (for example `subagent_update`). The
+        /// variant goes before the union's catch-all, in the order listed.
+        public var variants: [String: [String]]
+
+        /// Creates an overlay.
+        ///
+        /// - Parameters:
+        ///   - definitions: The definitions to copy.
+        ///   - variants: The union variants to append, by union name.
+        public init(definitions: [String] = [], variants: [String: [String]] = [:]) {
+            self.definitions = definitions
+            self.variants = variants
+        }
+
+        /// `true` when the overlay names nothing.
+        public var isEmpty: Bool {
+            definitions.isEmpty && variants.isEmpty
+        }
+    }
+
     /// Wire-invariant overrides keyed by `"DefinitionName.wireFieldName"`
     /// (schema definition names, before renames). For array fields the
     /// override applies to the element type.
@@ -75,6 +108,10 @@ public struct GeneratorConfig: Sendable {
     /// `deprecatedMethods` enforces for the routing table.
     public var patchSemanticsFields: Set<String>
 
+    /// The parts of the unstable schema document that the stable document
+    /// lacks and that the generator emits with the stable surface.
+    public var unstableOverlay: UnstableOverlay
+
     /// The `version` the vendored routing manifests must declare.
     ///
     /// Upstream sets this to the ACP protocol's major version, so it moves with
@@ -112,6 +149,7 @@ public struct GeneratorConfig: Sendable {
     ///   - handwrittenDefinitions: Definitions to skip emitting.
     ///   - deprecatedMethods: Wire method → deprecation message markers.
     ///   - patchSemanticsFields: Fields with three-state patch semantics.
+    ///   - unstableOverlay: The unstable definitions and union variants to emit.
     ///   - manifestVersion: The version the routing manifests must declare.
     ///   - rootDefinitions: The definitions that start the emitted subset, or
     ///     an empty set to emit every definition.
@@ -123,6 +161,7 @@ public struct GeneratorConfig: Sendable {
         handwrittenDefinitions: Set<String> = [],
         deprecatedMethods: [String: String] = [:],
         patchSemanticsFields: Set<String> = [],
+        unstableOverlay: UnstableOverlay = UnstableOverlay(),
         manifestVersion: Int = 1,
         rootDefinitions: Set<String> = [],
         sharedDefinitions: Set<String> = []
@@ -133,6 +172,7 @@ public struct GeneratorConfig: Sendable {
         self.handwrittenDefinitions = handwrittenDefinitions
         self.deprecatedMethods = deprecatedMethods
         self.patchSemanticsFields = patchSemanticsFields
+        self.unstableOverlay = unstableOverlay
         self.manifestVersion = manifestVersion
         self.rootDefinitions = rootDefinitions
         self.sharedDefinitions = sharedDefinitions
@@ -195,7 +235,12 @@ public struct GeneratorConfig: Sendable {
         // `CompactionSummaryChunk._meta` and `Notice._meta` say that omission
         // and `null` both mean absent, so they stay plain optionals.
         patchSemanticsFields: [
-            "UsageUpdate.cost", "CompactionUpdate.summary", "CompactionUpdate.error", "CompactionUpdate._meta",
+            "UsageUpdate.cost", "SubagentUpdate.title", "SubagentUpdate.description",
+            "SubagentUpdate.capabilities", "SubagentUpdate.state", "SubagentUpdate.cwd",
+            "SubagentUpdate.additionalDirectories", "SubagentUpdate._meta",
+            "SessionMessage.content", "SessionMessage.senderSessionId", "SessionMessage.recipientSessionId",
+            "SessionMessage.senderMessageId", "SessionMessage.recipientMessageId", "SessionMessage._meta",
+            "CompactionUpdate.summary", "CompactionUpdate.error", "CompactionUpdate._meta",
             "UserMessage.content", "UserMessage._meta",
             "AgentMessage.content", "AgentMessage._meta",
             "AgentThought.content", "AgentThought._meta",
@@ -206,6 +251,18 @@ public struct GeneratorConfig: Sendable {
             "ToolCallUpdate.content", "ToolCallUpdate.locations", "ToolCallUpdate.rawInput",
             "ToolCallUpdate.rawOutput", "ToolCallUpdate._meta",
         ],
+        unstableOverlay: UnstableOverlay(
+            // The ACP v2 "Subagent Sessions" and "Background Work" RFDs. The
+            // stable schema has none of them; the unstable one defines them.
+            definitions: [
+                "BackgroundSubagent", "SessionCancelCapabilities", "SessionMessage",
+                "SessionMessageChunk", "SubagentSessionCapabilities", "SubagentUpdate",
+            ],
+            variants: [
+                "BackgroundWork": ["subagent"],
+                "SessionUpdate": ["subagent_update", "session_message", "session_message_chunk"],
+            ]
+        ),
         manifestVersion: 2
     )
 }

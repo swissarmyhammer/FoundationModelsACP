@@ -21,6 +21,24 @@ extension SessionUpdate {
         if case .usageUpdate(let usage) = self {
             try usage.validateForSending()
         }
+        if case .subagentUpdate(let subagent) = self {
+            try subagent.validateForSending()
+        }
+    }
+}
+
+extension SubagentUpdate {
+    /// Makes sure that the child session ID is not empty. A client keys the
+    /// child by this ID, and the first update for an ID announces the child.
+    ///
+    /// - Throws: `EncodingError.invalidValue` for an empty ID.
+    func validateForSending() throws {
+        guard !sessionId.rawValue.isEmpty else {
+            throw EncodingError.sendRuleBroken(
+                by: sessionId.rawValue,
+                "the subagent_update sessionId is empty; a child session needs a session ID"
+            )
+        }
     }
 }
 

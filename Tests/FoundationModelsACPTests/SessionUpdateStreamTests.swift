@@ -175,6 +175,31 @@ private func startPrompt(
     return (task, id)
 }
 
+// MARK: - Child sessions
+
+@Test
+func aChildSessionsUpdatesAreDeliveredWhetherOrNotTheClientSubscribedBeforeTheAnnouncement() async throws {
+    let (clientEnd, agentEnd) = InMemoryTransport.pair()
+    let client = await ClientSideConnection(stream: clientEnd) { _ in MinimalClient() }
+    defer {
+        await client.close()
+        agentEnd.close()
+    }
+    let child = SessionId(rawValue: "child-stream-1")
+    var parentUpdates = client.subscribe(to: sessionOne).updates.makeAsyncIterator()
+    let announcement = SessionUpdate.subagentUpdate(SubagentUpdate(sessionId: child, title: .value("Researcher")))
+    let childMessage = SessionUpdate.sessionMessage(SessionMessage(messageId: MessageId(rawValue: "m-1")))
+
+    try await send(sessionUpdateEnvelope(notification(for: sessionOne, announcement)), over: agentEnd)
+    // The child's first update arrives before anyone subscribed to the child:
+    // the router keeps it for the first subscriber and does not drop it.
+    try await send(sessionUpdateEnvelope(notification(for: child, childMessage)), over: agentEnd)
+    #expect(await parentUpdates.nextUpdate() == announcement)
+
+    var childUpdates = client.subscribe(to: child).updates.makeAsyncIterator()
+    #expect(await childUpdates.nextUpdate() == childMessage)
+}
+
 // MARK: - Demux
 
 @Test

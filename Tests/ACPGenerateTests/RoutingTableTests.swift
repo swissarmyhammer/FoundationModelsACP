@@ -217,6 +217,7 @@ private let syntheticManifest = #"""
         }
         let files = try SchemaGenerator(config: set.config).generate(
             schemaJSON: try artifact(set.schemaPath),
+            unstableSchemaJSON: try set.unstableSchemaPath.map(artifact),
             metaJSON: try artifact(#require(set.metaPath)),
             unstableMetaJSON: try artifact(#require(set.unstableMetaPath)),
             namespace: set.outputNamespace

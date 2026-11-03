@@ -34,6 +34,10 @@ public struct SessionEntry: Hashable, Sendable, Identifiable {
         /// A context compaction, by its `compactionId`.
         case compaction(CompactionId)
 
+        /// An inter-session message, by its `messageId` in this session's
+        /// transcript. (Unstable: ACP v2 "Subagent Sessions".)
+        case sessionMessage(MessageId)
+
         /// An entry that has no wire identifier: an unknown session update,
         /// or a plan update with unknown content and no `planId`. The value is
         /// the position of the entry in the transcript. A replay in the same
@@ -70,6 +74,11 @@ public struct SessionEntry: Hashable, Sendable, Identifiable {
         /// or change an earlier entry.
         case compaction(Compaction)
 
+        /// A message between this session and another session of the same
+        /// agent, with its participants. (Unstable: ACP v2 "Subagent
+        /// Sessions".)
+        case sessionMessage(InterSessionMessage)
+
         /// A session update that this revision of the schema does not know.
         /// The entry keeps the update type and the raw payload, so that a
         /// replay sends the update again without change.
@@ -85,6 +94,39 @@ public struct SessionEntry: Hashable, Sendable, Identifiable {
         /// and a chunk appends to it. An unknown content block stays in the
         /// content as the generated `.unknown` value.
         public var content: [ContentBlock] = []
+
+        /// The `_meta` field of the message, folded with the patch rules.
+        public var meta: PatchField<JSONValue> = .unchanged
+    }
+
+    /// The merged state of one inter-session message. (Unstable: ACP v2
+    /// "Subagent Sessions".)
+    ///
+    /// A `session_message` folds onto this state with the patch rules, and a
+    /// `session_message_chunk` appends one content block. A chunk carries no
+    /// participants: they come from `session_message` upserts, which can
+    /// arrive before, between, or after the chunks.
+    public struct InterSessionMessage: Hashable, Sendable {
+        /// The identifier of the message in this session's transcript.
+        public var messageId: MessageId
+
+        /// The content of the message. An upsert with `content` replaces it,
+        /// `null` clears it, and a chunk appends to it.
+        public var content: [ContentBlock] = []
+
+        /// The sending session.
+        public var senderSessionId: PatchField<SessionId> = .unchanged
+
+        /// The receiving session.
+        public var recipientSessionId: PatchField<SessionId> = .unchanged
+
+        /// On an incoming view, the `messageId` of the same message in the
+        /// sender's transcript.
+        public var senderMessageId: PatchField<MessageId> = .unchanged
+
+        /// On an outgoing view, the `messageId` of the same message in the
+        /// recipient's transcript.
+        public var recipientMessageId: PatchField<MessageId> = .unchanged
 
         /// The `_meta` field of the message, folded with the patch rules.
         public var meta: PatchField<JSONValue> = .unchanged
@@ -142,7 +184,7 @@ extension SessionEntry.Kind {
     internal var message: SessionEntry.Message? {
         switch self {
         case .userMessage(let message), .agentMessage(let message), .agentThought(let message): message
-        case .toolCall, .terminal, .plan, .compaction, .unknown: nil
+        case .toolCall, .terminal, .plan, .compaction, .sessionMessage, .unknown: nil
         }
     }
 
@@ -150,7 +192,7 @@ extension SessionEntry.Kind {
     internal var toolCall: ToolCallUpdate? {
         switch self {
         case .toolCall(let toolCall): toolCall
-        case .userMessage, .agentMessage, .agentThought, .terminal, .plan, .compaction, .unknown: nil
+        case .userMessage, .agentMessage, .agentThought, .terminal, .plan, .compaction, .sessionMessage, .unknown: nil
         }
     }
 
@@ -158,7 +200,7 @@ extension SessionEntry.Kind {
     internal var terminal: AccumulatedTerminal? {
         switch self {
         case .terminal(_, let terminal): terminal
-        case .userMessage, .agentMessage, .agentThought, .toolCall, .plan, .compaction, .unknown: nil
+        case .userMessage, .agentMessage, .agentThought, .toolCall, .plan, .compaction, .sessionMessage, .unknown: nil
         }
     }
 
@@ -166,7 +208,15 @@ extension SessionEntry.Kind {
     internal var plan: PlanUpdate? {
         switch self {
         case .plan(let plan): plan
-        case .userMessage, .agentMessage, .agentThought, .toolCall, .terminal, .compaction, .unknown: nil
+        case .userMessage, .agentMessage, .agentThought, .toolCall, .terminal, .compaction, .sessionMessage, .unknown: nil
+        }
+    }
+
+    /// The inter-session message, when this entry is one.
+    internal var sessionMessage: SessionEntry.InterSessionMessage? {
+        switch self {
+        case .sessionMessage(let message): message
+        case .userMessage, .agentMessage, .agentThought, .toolCall, .terminal, .plan, .compaction, .unknown: nil
         }
     }
 
@@ -174,7 +224,7 @@ extension SessionEntry.Kind {
     internal var compaction: SessionEntry.Compaction? {
         switch self {
         case .compaction(let compaction): compaction
-        case .userMessage, .agentMessage, .agentThought, .toolCall, .terminal, .plan, .unknown: nil
+        case .userMessage, .agentMessage, .agentThought, .toolCall, .terminal, .plan, .sessionMessage, .unknown: nil
         }
     }
 }
@@ -198,6 +248,8 @@ extension SessionEntry {
             .planUpdate(plan)
         case .compaction(let compaction):
             compaction.replayUpdate
+        case .sessionMessage(let message):
+            .sessionMessage(message.replayUpdate)
         case .unknown(let type, let payload):
             .unknown(type, payload)
         }
@@ -255,6 +307,52 @@ extension SessionEntry.Compaction {
     /// `compaction_update`.
     fileprivate var replayUpdate: SessionUpdate {
         .compactionUpdate(asUpdate)
+    }
+}
+
+extension SessionEntry.InterSessionMessage {
+    /// Makes the state of a message that no update has changed yet.
+    ///
+    /// - Parameter messageId: The identifier of the message.
+    internal init(messageId: MessageId) {
+        self.messageId = messageId
+    }
+
+    /// This state as one `session_message`, with the patch semantics of the
+    /// wire. Empty content is omitted, because a new message also starts
+    /// empty.
+    fileprivate var replayUpdate: SessionMessage {
+        SessionMessage(
+            messageId: messageId,
+            content: content.isEmpty ? .unchanged : .value(content),
+            recipientMessageId: recipientMessageId,
+            recipientSessionId: recipientSessionId,
+            senderMessageId: senderMessageId,
+            senderSessionId: senderSessionId,
+            meta: meta
+        )
+    }
+
+    /// Folds a `session_message` onto this state with the patch rules.
+    ///
+    /// - Parameter update: The upsert.
+    internal mutating func apply(_ update: SessionMessage) {
+        let merged = update.folded(onto: replayUpdate)
+        content = merged.content.resolved(onto: [])
+        senderSessionId = merged.senderSessionId
+        recipientSessionId = merged.recipientSessionId
+        senderMessageId = merged.senderMessageId
+        recipientMessageId = merged.recipientMessageId
+        meta = merged.meta
+    }
+
+    /// Appends the content block of a chunk. A chunk that has `_meta`
+    /// replaces the `_meta` of the message.
+    ///
+    /// - Parameter chunk: The streamed chunk.
+    internal mutating func append(_ chunk: SessionMessageChunk) {
+        content.append(chunk.content)
+        meta = PatchField(optional: chunk.meta).folded(onto: meta)
     }
 }
 
