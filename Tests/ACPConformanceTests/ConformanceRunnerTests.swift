@@ -47,4 +47,20 @@ import Testing
         let report = await ConformanceRunner.run(configuration([]))
         #expect(report.results.first { $0.check == .turnStates }?.outcome == .fail)
     }
+
+    @Test func anInterruptedTurnRunsFirstAndTheResumesTargetItsSession() async throws {
+        let script = ConformanceScript(resumes: [.init(replayFrom: true)], interruptedTurn: true)
+        let report = await ConformanceRunner.run(configuration(["--scenario", "conformant"], script: script))
+        let interrupted = try #require(report.runs.first { $0.name == "interrupted" })
+        let resume = try #require(report.runs.first { $0.name == "resume-1-replay" })
+        let session = interrupted.entries.compactMap { entry -> SessionId? in
+            if case .update(let id, _) = entry { id } else { nil }
+        }.first
+        #expect(resume.resumeSessionId == session)
+    }
+
+    @Test func aScriptWithoutAnInterruptedTurnRecordsNoInterruptedRun() async {
+        let report = await ConformanceRunner.run(configuration(["--scenario", "conformant"]))
+        #expect(!report.runs.contains { $0.name == "interrupted" })
+    }
 }

@@ -56,6 +56,19 @@ new agent process.
 - `untilToolCall`: end the recording after the final status of this tool call. Absent
   means the recording ends when the wire is quiet after the response.
 
+### A child that runs when the process ends
+
+To check an agent that restores a child which was running when the process ended, set
+`interruptedTurn` in the script:
+
+    { "resumes": [ { "replayFrom": true } ], "interruptedTurn": true }
+
+The runner then plays one more turn. It sends the prompt and does not wait for the
+response. When a second session reports `running`, the runner closes the agent. The
+resumes then target the session of this turn. The prompt must start a child and keep it
+running (for example, a child that waits at a gate). The runner closes the agent before
+the prompt call ends. The default is false.
+
 ### Use in CI
 
 Build the product `acp-conformance` from this package, and run it with the agent after `--`.

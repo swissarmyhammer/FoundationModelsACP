@@ -17,8 +17,15 @@ enum ConformanceEvaluator {
 
     /// The `state_update` kinds of one session in the entries, with their positions.
     static func states(in entries: [RecordedRun.Entry], session: SessionId) -> [(position: Int, kind: StateKind)] {
+        states(in: entries) { $0 == session }
+    }
+
+    /// The `state_update` kinds of the sessions that `isIncluded` accepts, with their positions.
+    static func states(
+        in entries: [RecordedRun.Entry], where isIncluded: (SessionId) -> Bool
+    ) -> [(position: Int, kind: StateKind)] {
         entries.enumerated().compactMap { position, entry in
-            guard case .update(let id, .stateUpdate(let state)) = entry, id == session else { return nil }
+            guard case .update(let id, .stateUpdate(let state)) = entry, isIncluded(id) else { return nil }
             switch state {
             case .running: return (position, .running)
             case .idle: return (position, .idle)

@@ -60,4 +60,17 @@ struct ConformanceScript: Codable, Sendable {
     }
 
     var resumes: [Resume]
+
+    /// Whether the runner plays an extra turn that it breaks off. The turn
+    /// sends the prompt without waiting for the response, waits until a
+    /// second session reports `running` (a child of the prompted session),
+    /// and then closes the agent. The resumes then target the session of that
+    /// turn. Use it for an agent that restores a child which was running when
+    /// the process ended. Default: false.
+    var interruptedTurn: Bool?
+
+    init(resumes: [Resume], interruptedTurn: Bool? = nil) {
+        self.resumes = resumes
+        self.interruptedTurn = interruptedTurn
+    }
 }
