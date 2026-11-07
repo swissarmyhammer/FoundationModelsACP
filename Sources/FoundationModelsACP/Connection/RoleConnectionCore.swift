@@ -27,11 +27,15 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
     /// The write-once cell holding the served role.
     private let holder: RoleHolder<Role>
 
+    /// Holds the read loop until `setRole(_:extensionHandlers:)` runs.
+    private let inboundGate: InboundGate
+
     /// Creates the engine and starts its read loop with the role unset.
     ///
-    /// The owner calls `setRole(_:extensionHandlers:)` from its factory before
-    /// the read loop can dispatch; until then, inbound calls answer
-    /// method-not-found.
+    /// The read loop reads no frame until the owner calls
+    /// `setRole(_:extensionHandlers:)`. Thus a frame that is already in the
+    /// transport, for example an `initialize` that the peer wrote before
+    /// this connection existed, always finds the role.
     ///
     /// - Parameters:
     ///   - stream: The bidirectional transport to run over.
@@ -53,6 +57,8 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
     ///   - scheduleRequestTimeout: Starts the timeout of each outbound request
     ///     that has a time limit. Only a test gives a value that is not the
     ///     default.
+    ///   - onInboundWait: Runs when the read loop starts to wait for the
+    ///     role. Only a test gives a value.
     init(
         stream: any ACPTransport,
         logger: ACPLogger,
@@ -64,10 +70,12 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
         dispatchNotification: @escaping NotificationDispatch,
         onClose: Connection.CloseHandler? = nil,
         outgoingRequests: OutgoingRequestTracker = OutgoingRequestTracker(),
-        scheduleRequestTimeout: @escaping Connection.RequestTimeoutScheduler = Connection.startRequestTimeout
+        scheduleRequestTimeout: @escaping Connection.RequestTimeoutScheduler = Connection.startRequestTimeout,
+        onInboundWait: (@Sendable () -> Void)? = nil
     ) async {
         self.peerSide = peerSide
         let holder = RoleHolder<Role>()
+        let inboundGate = InboundGate(onWait: onInboundWait)
         let served = RoleRouting.served(on: servedSide)
         connection = await Connection(
             transport: stream,
@@ -84,13 +92,15 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
             },
             onClose: onClose,
             outgoingRequests: outgoingRequests,
-            scheduleRequestTimeout: scheduleRequestTimeout
+            scheduleRequestTimeout: scheduleRequestTimeout,
+            inboundGate: inboundGate
         )
         self.holder = holder
+        self.inboundGate = inboundGate
     }
 
-    /// Stores the served role and its extension handlers; called once before
-    /// the read loop dispatches.
+    /// Stores the served role and its extension handlers, then lets the read
+    /// loop read frames. The owner calls it one time.
     ///
     /// - Parameters:
     ///   - role: The role object to serve inbound calls.
@@ -98,6 +108,7 @@ final class RoleConnectionCore<Role: Sendable>: Sendable {
     ///     notifications that the role serves.
     func setRole(_ role: Role, extensionHandlers: ExtensionHandlers) {
         holder.set(ServedRole(role: role, extensionHandlers: extensionHandlers))
+        inboundGate.open()
     }
 
     // MARK: - Inbound routing

@@ -598,6 +598,9 @@ public actor Connection {
     ///   - scheduleRequestTimeout: Starts the timeout of each outbound request
     ///     that has a time limit. Only a test gives a value that is not the
     ///     default.
+    ///   - inboundGate: When not `nil`, the read loop waits until this gate
+    ///     opens before it reads the first frame. A role connection opens it
+    ///     after it stores its role.
     init(
         transport: any ACPTransport,
         logger: ACPLogger,
@@ -607,7 +610,8 @@ public actor Connection {
         onClose: CloseHandler?,
         outgoingRequests: OutgoingRequestTracker,
         scheduleRequestWork: @escaping RequestWorkScheduler = Connection.startRequestWork,
-        scheduleRequestTimeout: @escaping RequestTimeoutScheduler = Connection.startRequestTimeout
+        scheduleRequestTimeout: @escaping RequestTimeoutScheduler = Connection.startRequestTimeout,
+        inboundGate: InboundGate? = nil
     ) async {
         self.transport = transport
         self.logger = logger
@@ -618,7 +622,7 @@ public actor Connection {
         self.outgoingRequests = outgoingRequests
         self.scheduleRequestWork = scheduleRequestWork
         self.scheduleRequestTimeout = scheduleRequestTimeout
-        readTask = Task { await self.readLoop() }
+        readTask = Task { await self.readLoop(after: inboundGate) }
     }
 
     // MARK: - Outbound
@@ -813,7 +817,15 @@ public actor Connection {
     /// then waits for each inbound request task to end, and only then gives
     /// the close reason to `closed`. A notification handler runs on this
     /// loop, so it ended too.
-    private func readLoop() async {
+    ///
+    /// - Parameter gate: When not `nil`, the loop reads no frame until this
+    ///   gate opens. When `close()` comes first, the cancel opens the gate.
+    ///   The loop then reads the transport in a cancelled task. That read
+    ///   ends at once and cancels the input stream, which some transports
+    ///   use to close their other direction. A request frame that it still
+    ///   reads gets no handler, because the connection is closed.
+    private func readLoop(after gate: InboundGate?) async {
+        await gate?.wait()
         let reason = shutDown(reason: await readFrames())
         await waitForLiveInboundTasks()
         closeSignal.fire(reason)
@@ -1381,7 +1393,7 @@ public actor Connection {
     /// changes nothing.
     ///
     /// The read loop gives the reason to `closed` later, after each inbound
-    /// task ended (see `readLoop()`).
+    /// task ended (see `readLoop(after:)`).
     ///
     /// - Parameter reason: Why the connection closes.
     /// - Returns: The close reason of the connection: `reason` on the first
