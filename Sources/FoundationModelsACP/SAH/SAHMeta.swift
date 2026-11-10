@@ -4,13 +4,17 @@ extension SAH {
     /// The SAH object in `_meta.sah` of the `initialize` response.
     ///
     /// The agent tells the client with it that it has the SAH extensions, and
-    /// which GraphQL endpoints it has:
+    /// which agent-level GraphQL endpoints it has when the client connects:
     ///
     /// ```json
     /// "_meta": {"sah": {"version": 1, "graphql": [
-    ///   {"name": "kanban", "version": "1", "scope": "sessionFolder", "schema": "type Query { board: Board }"}
+    ///   {"name": "settings", "version": "1", "scope": "server", "schema": "type Query { settings: Settings }"}
     /// ]}}
     /// ```
+    ///
+    /// This list is not the full list. The tools of a session add more
+    /// endpoints (for example `kanban`), and these come only after
+    /// `session/new`. For the live list, send `_sah/graphql/endpoints`.
     ///
     /// A client that finds no valid object knows that the agent has no SAH
     /// extensions.
@@ -18,8 +22,10 @@ extension SAH {
         /// The version of the SAH extensions of the agent. See ``SAH/version``.
         public var version: Int
 
-        /// The GraphQL endpoints of the agent: `_meta.sah.graphql`. It is the
-        /// same list as the result of `_sah/graphql/endpoints`.
+        /// The agent-level GraphQL endpoints at `initialize`:
+        /// `_meta.sah.graphql`. The result of `_sah/graphql/endpoints` is the
+        /// live list. It can also hold the endpoints that the tools of a
+        /// session add, so it can be longer than this list.
         public var graphql: [GraphQL.Endpoint]
 
         /// Makes the SAH object.
