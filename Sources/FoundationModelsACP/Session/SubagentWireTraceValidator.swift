@@ -62,6 +62,13 @@ public struct SubagentWireTraceValidator: Sendable {
         /// Rule 2. No historical `state_update` is replayed as current: one
         /// `state_update` of the resumed session before the response, and
         /// none for another session.
+        ///
+        /// A live update that was in transit is not part of the replay. Between
+        /// a resume request and the first update in the stream of the resumed
+        /// session, an update of a session that was announced earlier on the
+        /// same connection is such an update: the agent could write it before
+        /// it read the request. The validator checks no rule on it. The replay
+        /// and the current snapshots after the response give its content again.
         case noHistoricalStateAsCurrent
 
         /// Rule 3. A child is announced by `subagent_update` before any update
@@ -168,6 +175,14 @@ extension SubagentWireTraceValidator {
         var stateUpdatesInWindow = 0
         var sawRootStateInWindow = false
 
+        /// The sessions announced on the connection before the resume request.
+        /// Until the replay starts, an update of one of them is a live update
+        /// that was in transit.
+        var announcedBeforeRequest: Set<SessionId> = []
+        /// Whether the replay started: an update in the stream of the resumed
+        /// session came after the resume request.
+        var replayStarted = false
+
         var announced: Set<SessionId> = []
         var unannouncedReported: Set<SessionId> = []
         var announcedBeforeResponse: Set<SessionId> = []
@@ -201,8 +216,10 @@ extension SubagentWireTraceValidator {
                 // A resume starts a new replay. Nothing from an earlier window
                 // carries over, except the violations.
                 let earlier = violations
+                let earlierAnnounced = announced
                 self = Run()
                 violations = earlier
+                announcedBeforeRequest = earlierAnnounced
                 phase = .replaying
                 claimRootIfUnset(sessionId)
             case .resumeResponse:
@@ -233,6 +250,7 @@ extension SubagentWireTraceValidator {
         }
 
         mutating func applyUpdate(_ update: SessionUpdate, in stream: SessionId, at position: Int) {
+            if isInTransit(stream) { return }
             claimRootIfUnset(stream)
             if !announced.contains(stream), unannouncedReported.insert(stream).inserted {
                 report(.announceBeforeUse, position, "an update in \(stream.rawValue) before it is announced")
@@ -266,6 +284,20 @@ extension SubagentWireTraceValidator {
             default:
                 break
             }
+        }
+
+        /// Whether an update in a stream is a live update that was in transit
+        /// at the resume request. It also records the start of the replay.
+        ///
+        /// - Parameter stream: The session of the update.
+        /// - Returns: `true` when the validator must skip the update.
+        mutating func isInTransit(_ stream: SessionId) -> Bool {
+            guard inWindow, !replayStarted else { return false }
+            if stream == root {
+                replayStarted = true
+                return false
+            }
+            return announcedBeforeRequest.contains(stream)
         }
 
         mutating func applySubagent(_ update: SubagentUpdate, in stream: SessionId, at position: Int) {

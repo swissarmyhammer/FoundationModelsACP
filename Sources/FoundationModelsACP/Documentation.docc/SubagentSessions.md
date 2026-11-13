@@ -115,3 +115,11 @@ connection in wire order as ``WireTraceEvent`` values, and call
 rules in this article. Each violation has a ``SubagentWireTraceValidator/Rule``
 and the position in the trace. An empty result means that the trace follows the
 rules.
+
+A resume on a connection that already carries the sessions can have live
+updates in transit. The agent can write an update before it reads the
+`session/resume` request, and the update then arrives after the request. Thus,
+between the request and the first update in the stream of the resumed session,
+the validator skips an update of a session that was announced earlier on the
+same connection. The first update of the resumed session starts the replay,
+and from there each rule applies.

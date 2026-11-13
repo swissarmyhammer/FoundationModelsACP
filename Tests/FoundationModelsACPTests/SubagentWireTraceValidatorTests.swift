@@ -101,6 +101,40 @@ import Testing
         #expect(violations == [], "\(violations)")
     }
 
+    /// Two resumes on one connection, with `event` put directly after the
+    /// second resume request, or after the first update of the replay of the
+    /// second resume.
+    private func secondResume(
+        with event: WireTraceEvent, afterReplayStart: Bool = false
+    ) async throws -> [WireTraceEvent] {
+        let trace = try await recordedTrace()
+        var twice = trace + trace
+        let secondRequest = trace.count
+        twice.insert(event, at: secondRequest + (afterReplayStart ? 2 : 1))
+        return twice
+    }
+
+    private static let liveChildState = WireTraceEvent.update(
+        sessionId: child, update: .stateUpdate(.running(RunningStateUpdate())))
+
+    @Test func aLiveUpdateOfAnAnnouncedSessionBeforeTheReplayStartsPasses() async throws {
+        let trace = try await secondResume(with: Self.liveChildState)
+        let violations = SubagentWireTraceValidator().validate(trace)
+        #expect(violations == [], "\(violations)")
+    }
+
+    @Test func rule3_anUpdateOfASessionThatWasNeverAnnouncedBeforeTheReplayStartsIsAViolation() async throws {
+        let stranger = SessionId(rawValue: "stranger")
+        let trace = try await secondResume(
+            with: .update(sessionId: stranger, update: .stateUpdate(.running(RunningStateUpdate()))))
+        #expect(rules(trace).contains(.announceBeforeUse))
+    }
+
+    @Test func rule2_aStateUpdateOfAnAnnouncedChildAfterTheReplayStartsIsAViolation() async throws {
+        let trace = try await secondResume(with: Self.liveChildState, afterReplayStart: true)
+        #expect(rules(trace).contains(.noHistoricalStateAsCurrent))
+    }
+
     @Test func rule1_aSessionInfoUpdateBeforeTheCurrentStateIsAViolation() async throws {
         var trace = try await recordedTrace()
         let state = try index(in: trace, where: Self.isRootState)
