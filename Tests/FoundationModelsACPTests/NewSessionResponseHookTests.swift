@@ -166,7 +166,23 @@ private struct HookHarness {
         }
     }
 
-    /// Reads the next `session/new` request that the client wrote.
+    /// Starts one `forkSession(_:onResponse:)` call whose hook records into
+    /// `log`.
+    ///
+    /// - Parameter cwd: The working directory of the request.
+    /// - Returns: The task of the call.
+    func startForkSession(cwd: AbsolutePath) -> Task<ForkSessionResponse, any Error> {
+        let client = client
+        let log = log
+        return Task {
+            try await client.forkSession(ForkSessionRequest(cwd: cwd, sessionId: SessionId(rawValue: "fork-source"))) { response in
+                log.append(hookEvent(response.sessionId))
+            }
+        }
+    }
+
+    /// Reads the next `session/new` or `session/fork` request that the
+    /// client wrote.
     ///
     /// - Returns: The wire id and the working directory of the request.
     /// - Throws: When the stream ends before a frame comes, or when the frame
@@ -313,6 +329,64 @@ private func sendTogether(_ messages: [JSONValue], over transport: some ACPTrans
         let harness = await HookHarness.connect()
         defer { await harness.close() }
         let call = harness.startNewSession(cwd: firstWorkingDirectory)
+        _ = try await harness.nextNewSessionRequest()
+
+        await harness.client.close()
+
+        await #expect(throws: ConnectionError.self) {
+            try await call.value
+        }
+        #expect(harness.log.entries.isEmpty)
+    }
+}
+
+/// `ClientSideConnection.forkSession(_:onResponse:)` has the contract of
+/// `newSession(_:onResponse:)`.
+@Suite struct ForkSessionResponseHookTests {
+    @Test func theHookRunsBeforeTheNextFrameIsDispatched() async throws {
+        let harness = await HookHarness.connect()
+        defer { await harness.close() }
+        let call = harness.startForkSession(cwd: firstWorkingDirectory)
+        let request = try await harness.nextNewSessionRequest()
+
+        // The fork response and a request for the fork arrive in one write,
+        // in this order.
+        let permission = try JSONValue.encode(result: RequestPermissionRequest.stub(for: firstSession))
+        try await sendTogether(
+            [
+                try responseEnvelope(id: request.id, result: ForkSessionResponse(sessionId: firstSession)),
+                RawPeerEnvelope.request(id: permissionRequestId, method: requestPermissionMethod, params: permission),
+            ],
+            over: harness.agentEnd
+        )
+
+        let observation = try #require(await harness.nextObservation())
+        let response = try await call.value
+
+        #expect(observation.sessionId == firstSession)
+        #expect(observation.hookRanBefore)
+        #expect(response.sessionId == firstSession)
+        #expect(harness.log.entries == [hookEvent(firstSession), requestEvent(firstSession)])
+    }
+
+    @Test func anErrorResponseDoesNotRunTheHook() async throws {
+        let harness = await HookHarness.connect()
+        defer { await harness.close() }
+        let call = harness.startForkSession(cwd: firstWorkingDirectory)
+        let request = try await harness.nextNewSessionRequest()
+
+        try await send(errorEnvelope(id: request.id, error: .invalidParams), over: harness.agentEnd)
+
+        await #expect(throws: RequestError.self) {
+            try await call.value
+        }
+        #expect(harness.log.entries.isEmpty)
+    }
+
+    @Test func aCloseBeforeTheResponseDoesNotRunTheHook() async throws {
+        let harness = await HookHarness.connect()
+        defer { await harness.close() }
+        let call = harness.startForkSession(cwd: firstWorkingDirectory)
         _ = try await harness.nextNewSessionRequest()
 
         await harness.client.close()

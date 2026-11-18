@@ -654,6 +654,44 @@ public final class ClientSideConnection: Sendable {
         try await core.call("forkSession", params, returning: ForkSessionResponse.self)
     }
 
+    /// Forks a session on the agent, and gives the response to `onResponse`
+    /// before the connection dispatches the next inbound frame. (Unstable:
+    /// ACP v2 `session/fork`.)
+    ///
+    /// Use this when the agent can send a request for the new session (for
+    /// example `session/request_permission` or `elicitation/create`) directly
+    /// after the `session/fork` response. `onResponse` runs before the
+    /// handler of that request starts, so the client can record "this
+    /// session is opening" there.
+    ///
+    /// The contract of `onResponse` is the same as for
+    /// ``newSession(_:onResponse:)``:
+    /// - It is synchronous, and it must not block. The connection reads no
+    ///   frame while it runs.
+    /// - It runs on the actor of the connection, in the read loop, in frame
+    ///   order. It does not run on the main actor.
+    /// - It runs before the connection dispatches the next frame, and before
+    ///   this call returns.
+    /// - It runs at most one time, and only for the response to this call.
+    /// - It does not run on an error response, a response that does not
+    ///   decode, a timeout, a cancel or a close. In each of these cases this
+    ///   call throws.
+    ///
+    /// - Parameters:
+    ///   - params: The fork-session request.
+    ///   - onResponse: Gets the decoded response, as described above.
+    /// - Returns: The fork-session response. It is the same value that
+    ///   `onResponse` got.
+    /// - Throws: `RequestError` on a peer error, `ConnectionError` on
+    ///   disconnect, `CancellationError` when the calling task is cancelled,
+    ///   or a decode failure on a malformed response.
+    public func forkSession(
+        _ params: ForkSessionRequest,
+        onResponse: @escaping @Sendable (ForkSessionResponse) -> Void
+    ) async throws -> ForkSessionResponse {
+        try await core.call("forkSession", params, returning: ForkSessionResponse.self, onResponse: onResponse)
+    }
+
     /// Cancels one tool call of a session on the agent.
     ///
     /// - Parameter params: The cancel-tool-call request.
