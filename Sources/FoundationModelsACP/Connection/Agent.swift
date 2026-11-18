@@ -123,6 +123,19 @@ public protocol Agent: Sendable {
     /// - Throws: `RequestError.methodNotFound` unless overridden.
     func deleteSession(_ params: DeleteSessionRequest) async throws -> DeleteSessionResponse
 
+    /// Forks a session: makes a new session from the context of an existing
+    /// one. (Unstable: ACP v2 `session/fork`.)
+    ///
+    /// Gated by `capabilities.session.fork`. The new session has its own
+    /// identifier, and the two sessions are independent after the fork. A
+    /// request with no cut in `_meta.sah.forkCut` (``SAH/ForkCut``) forks at
+    /// the last completed turn.
+    ///
+    /// - Parameter params: The fork-session request.
+    /// - Returns: The fork-session response, with the new session identifier.
+    /// - Throws: `RequestError.methodNotFound` unless overridden.
+    func forkSession(_ params: ForkSessionRequest) async throws -> ForkSessionResponse
+
     /// Cancels one tool call of a session.
     ///
     /// Gated by the `cancel` capability that the agent advertises on the
@@ -183,6 +196,11 @@ extension Agent {
     /// Default implementation; throws method-not-found unless overridden.
     public func deleteSession(_ params: DeleteSessionRequest) async throws -> DeleteSessionResponse {
         try throwMethodNotFound("session/delete")
+    }
+
+    /// Default implementation; throws method-not-found unless overridden.
+    public func forkSession(_ params: ForkSessionRequest) async throws -> ForkSessionResponse {
+        try throwMethodNotFound("session/fork")
     }
 
     /// Default implementation; throws method-not-found unless overridden.

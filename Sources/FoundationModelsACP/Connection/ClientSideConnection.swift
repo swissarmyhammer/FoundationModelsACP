@@ -639,6 +639,21 @@ public final class ClientSideConnection: Sendable {
         try await core.call("deleteSession", params, returning: DeleteSessionResponse.self)
     }
 
+    /// Forks a session on the agent. (Unstable: ACP v2 `session/fork`.)
+    ///
+    /// Send it only when the agent advertises `capabilities.session.fork`.
+    /// Put a cut in `_meta.sah.forkCut` with ``SAH/ForkCut/inject(into:)``
+    /// only when the agent also advertises the cut
+    /// (``SAH/ForkCut/isAdvertised(by:)``).
+    ///
+    /// - Parameter params: The fork-session request.
+    /// - Returns: The fork-session response, with the new session identifier.
+    /// - Throws: `RequestError` on a peer error, or `ConnectionError` on
+    ///   disconnect.
+    public func forkSession(_ params: ForkSessionRequest) async throws -> ForkSessionResponse {
+        try await core.call("forkSession", params, returning: ForkSessionResponse.self)
+    }
+
     /// Cancels one tool call of a session on the agent.
     ///
     /// - Parameter params: The cancel-tool-call request.

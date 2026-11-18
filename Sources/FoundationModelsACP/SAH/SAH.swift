@@ -12,7 +12,8 @@ import Foundation
 /// - The `_meta` payloads: ``SAH/InitializeMeta`` under `_meta.sah` of the
 ///   `initialize` response, ``SAH/SessionMessage`` under `_meta.sah.message`,
 ///   ``SAH/AgentRun`` under `_meta.sah.agentRun`, ``SAH/RestoreFailure`` under
-///   `_meta.sah.restoreFailure`, and ``SAH/RuleDenial`` under
+///   `_meta.sah.restoreFailure`, ``SAH/ForkCut`` under `_meta.sah.forkCut`, and
+///   ``SAH/RuleDenial`` under
 ///   `_meta["sah/ruleDenial"]`.
 ///
 /// The types only carry data. They do not send or receive a message, and they

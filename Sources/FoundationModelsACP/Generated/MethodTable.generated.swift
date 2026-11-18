@@ -64,6 +64,15 @@ public enum ACPMethodTable {
             deprecationMessage: nil
         ),
         MethodInfo(
+            wireMethod: "session/fork",
+            handlerName: "forkSession",
+            side: .agent,
+            kind: .request,
+            paramsTypeName: "ForkSessionRequest",
+            resultTypeName: "ForkSessionResponse",
+            deprecationMessage: nil
+        ),
+        MethodInfo(
             wireMethod: "session/list",
             handlerName: "listSessions",
             side: .agent,
@@ -216,11 +225,6 @@ public enum Unstable {
             UnstableMethodInfo(
                 wireMethod: "session/archive",
                 handlerName: "sessionArchive",
-                side: .agent
-            ),
-            UnstableMethodInfo(
-                wireMethod: "session/fork",
-                handlerName: "sessionFork",
                 side: .agent
             ),
             UnstableMethodInfo(

@@ -564,6 +564,82 @@ public enum StringFormat: Codable, Hashable, Sendable {
     }
 }
 
+/// **UNSTABLE**
+///
+/// This capability is not part of the spec yet, and may be removed or changed at any point.
+///
+/// How the Agent combines a client-provided system prompt with its own instructions.
+///
+/// Unknown modes are preserved so they can be stored,
+/// proxied, or forwarded. An Agent MUST return an error for a mode it does not
+/// support rather than treating it as `append` or `override`.
+public enum SystemPromptMode: Codable, Hashable, Sendable {
+    /// Add the content to the Agent's own instructions rather than replacing them.
+    ///
+    /// Every Agent that advertises `session.systemPrompt` supports this mode.
+    /// Agents SHOULD give the content system-level precedence, for example in the
+    /// model's system prompt or developer instructions rather than in user-turn
+    /// content. Where it is placed and how it is formatted is implementation-defined.
+    case append
+
+    /// Replace the Agent's built-in default instructions with the content.
+    ///
+    /// This does not change tool availability, MCP servers, permissions, or session
+    /// configuration. Context the Agent supplies from the workspace or environment
+    /// MAY still be included. Clients that use this mode take responsibility for any
+    /// tool guidance or safety instructions the Agent's default instructions
+    /// provided, and MUST only use it when the Agent advertises
+    /// `session.systemPrompt.mode.override`.
+    case override
+
+    /// An unrecognized wire value, captured verbatim so a newer peer's
+    /// value decodes without error and re-encodes unchanged.
+    case unknown(String)
+
+    private enum Tag: String {
+        case append = "append"
+        case override = "override"
+    }
+
+    /// The value as it crosses the wire.
+    public var wireValue: String {
+        switch self {
+        case .append: Tag.append.rawValue
+        case .override: Tag.override.rawValue
+        case .unknown(let value): value
+        }
+    }
+
+    /// Creates the case matching a wire value, routing unrecognized
+    /// values to `.unknown`.
+    ///
+    /// - Parameter wireValue: The value as it crosses the wire.
+    public init(wireValue: String) {
+        switch wireValue {
+        case Tag.append.rawValue: self = .append
+        case Tag.override.rawValue: self = .override
+        default: self = .unknown(wireValue)
+        }
+    }
+
+    /// Decodes the wire value, never failing on unrecognized values.
+    ///
+    /// - Parameter decoder: The decoder positioned at the value.
+    /// - Throws: `DecodingError` when the wire value is not a String.
+    public init(from decoder: any Decoder) throws {
+        self.init(wireValue: try decoder.singleValueContainer().decode(String.self))
+    }
+
+    /// Encodes the wire value; `.unknown` re-emits the value it captured.
+    ///
+    /// - Parameter encoder: The encoder to write the value into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(wireValue)
+    }
+}
+
 /// Content produced by a tool call.
 ///
 /// Tool calls can produce different types of content including standard

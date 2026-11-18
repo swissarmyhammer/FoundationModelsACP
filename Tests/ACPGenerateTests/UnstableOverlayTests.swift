@@ -81,3 +81,92 @@ import Testing
         }
     }
 }
+
+/// `GeneratorConfig.UnstableOverlay.members` adds a property to a stable
+/// definition, and `methods` routes an unstable method with its types.
+@Suite struct UnstableOverlayMemberAndMethodTests {
+    private static let stable = Data(#"""
+        {"$defs":{
+          "Caps":{"type":"object","properties":{"a":{"type":"boolean"}}},
+          "PingRequest":{"type":"object","properties":{},"x-side":"agent","x-method":"session/ping"},
+          "PingResponse":{"type":"object","properties":{},"x-side":"agent","x-method":"session/ping"}
+        }}
+        """#.utf8)
+
+    private static let unstable = Data(#"""
+        {"$defs":{
+          "Caps":{"type":"object","properties":{"a":{"type":"boolean"},"fork":{"anyOf":[{"$ref":"#/$defs/ForkCaps"},{"type":"null"}]}}},
+          "ForkCaps":{"type":"object","properties":{"n":{"type":"string"}}},
+          "ForkRequest":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"x-side":"agent","x-method":"session/fork"},
+          "ForkResponse":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"x-side":"agent","x-method":"session/fork"}
+        }}
+        """#.utf8)
+
+    private static let meta = Data(#"""
+        {"version":1,"agentMethods":{"ping":"session/ping"},"clientMethods":{},"protocolMethods":{}}
+        """#.utf8)
+
+    private static let unstableMeta = Data(#"""
+        {"version":1,"agentMethods":{"ping":"session/ping","session_fork":"session/fork","other":"session/other"},"clientMethods":{},"protocolMethods":{}}
+        """#.utf8)
+
+    private static let forkOverlay = GeneratorConfig.UnstableOverlay(
+        definitions: ["ForkCaps", "ForkRequest", "ForkResponse"],
+        members: ["Caps": ["fork"]],
+        methods: ["session/fork"]
+    )
+
+    private func generate(_ overlay: GeneratorConfig.UnstableOverlay, unstableMeta: Data? = unstableMeta) throws -> String {
+        let files = try SchemaGenerator(config: GeneratorConfig(unstableOverlay: overlay)).generate(
+            schemaJSON: Self.stable,
+            unstableSchemaJSON: Self.unstable,
+            metaJSON: Self.meta,
+            unstableMetaJSON: unstableMeta
+        )
+        return files.map(\.contents).joined(separator: "\n")
+    }
+
+    @Test func aMemberIsAddedToTheStableDefinition() throws {
+        let source = try generate(Self.forkOverlay)
+        #expect(source.contains("public var fork: ForkCaps?"))
+        #expect(source.contains("public var a: Bool?"))
+    }
+
+    @Test func aMethodRoutesWithItsTypesAndLeavesTheUnstableNamespace() throws {
+        let source = try generate(Self.forkOverlay)
+        #expect(source.contains(#"wireMethod: "session/fork""#))
+        #expect(source.contains(#"paramsTypeName: "ForkRequest""#))
+        #expect(source.contains(#"resultTypeName: "ForkResponse""#))
+        let unstableSection = try #require(source.range(of: "public enum Unstable {")).upperBound
+        #expect(!source[unstableSection...].contains("session/fork"))
+        #expect(source[unstableSection...].contains("session/other"))
+    }
+
+    @Test(arguments: [
+        GeneratorConfig.UnstableOverlay(definitions: ["ForkCaps"], members: ["Caps": ["missing"]]),
+        GeneratorConfig.UnstableOverlay(definitions: ["ForkCaps"], members: ["Caps": ["a"]]),
+        GeneratorConfig.UnstableOverlay(definitions: ["ForkCaps"], members: ["Nope": ["fork"]]),
+        GeneratorConfig.UnstableOverlay(definitions: ["ForkRequest", "ForkResponse"], methods: ["session/missing"]),
+        GeneratorConfig.UnstableOverlay(methods: ["session/ping"]),
+    ])
+    func anOverlayThatNamesAWrongMemberOrMethodFailsLoudly(overlay: GeneratorConfig.UnstableOverlay) {
+        #expect(throws: GeneratorError.self) {
+            _ = try generate(overlay)
+        }
+    }
+
+    @Test func aMethodWithoutTheUnstableManifestFails() {
+        #expect(throws: GeneratorError.self) {
+            _ = try generate(Self.forkOverlay, unstableMeta: nil)
+        }
+    }
+
+    @Test func theTypesWithoutTheMethodFailBecauseNothingRoutesThem() {
+        // The copied definitions carry the route annotations, so the
+        // double-entry check refuses them when the overlay does not route
+        // the method.
+        #expect(throws: GeneratorError.self) {
+            _ = try generate(.init(definitions: ["ForkRequest", "ForkResponse"]))
+        }
+    }
+}

@@ -308,6 +308,13 @@ struct TypedCall: Sendable, CustomTestStringConvertible {
             successResult: { try WireRoundTrip.encode(DeleteSessionResponse()) }
         ),
         TypedCall(
+            handlerName: "forkSession",
+            invoke: {
+                _ = try await $0.forkSession(ForkSessionRequest(cwd: AbsolutePath(rawValue: "/work"), sessionId: sessionId))
+            },
+            successResult: { try WireRoundTrip.encode(ForkSessionResponse(sessionId: SessionId(rawValue: "session-fork"))) }
+        ),
+        TypedCall(
             handlerName: "cancelToolCall",
             invoke: {
                 _ = try await $0.cancelToolCall(

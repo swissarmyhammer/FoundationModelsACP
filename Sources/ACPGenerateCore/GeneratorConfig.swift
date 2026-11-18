@@ -40,19 +40,42 @@ public struct GeneratorConfig: Sendable {
         /// variant goes before the union's catch-all, in the order listed.
         public var variants: [String: [String]]
 
+        /// Properties added to a stable object definition, keyed by the
+        /// definition's name. Each property is copied from the unstable
+        /// definition of the same name, as it is. The stable definition must
+        /// not have the property.
+        public var members: [String: [String]]
+
+        /// Unstable wire methods that route with their types, as a stable
+        /// method does. Each method must be in the unstable routing manifest
+        /// and not in the stable one. The overlay must also name the
+        /// method's `*Request` and `*Response` definitions in
+        /// ``definitions``. The method then leaves the `Unstable` namespace
+        /// of the routing table.
+        public var methods: [String]
+
         /// Creates an overlay.
         ///
         /// - Parameters:
         ///   - definitions: The definitions to copy.
         ///   - variants: The union variants to append, by union name.
-        public init(definitions: [String] = [], variants: [String: [String]] = [:]) {
+        ///   - members: The properties to add, by stable definition name.
+        ///   - methods: The unstable wire methods to route with types.
+        public init(
+            definitions: [String] = [],
+            variants: [String: [String]] = [:],
+            members: [String: [String]] = [:],
+            methods: [String] = []
+        ) {
             self.definitions = definitions
             self.variants = variants
+            self.members = members
+            self.methods = methods
         }
 
         /// `true` when the overlay names nothing.
         public var isEmpty: Bool {
-            definitions.isEmpty && variants.isEmpty
+            definitions.isEmpty && variants.isEmpty && members.isEmpty && methods.isEmpty
         }
     }
 
@@ -253,16 +276,24 @@ public struct GeneratorConfig: Sendable {
             "TerminalUpdate.capabilities",
         ],
         unstableOverlay: UnstableOverlay(
-            // The ACP v2 "Subagent Sessions" and "Background Work" RFDs. The
+            // The ACP v2 "Subagent Sessions" and "Background Work" RFDs, and
+            // the unstable `session/fork` method (D205 of Testudo). The
             // stable schema has none of them; the unstable one defines them.
             definitions: [
-                "BackgroundSubagent", "SessionCancelCapabilities", "SessionMessage",
+                "BackgroundSubagent", "ForkSessionRequest", "ForkSessionResponse",
+                "SessionCancelCapabilities", "SessionForkCapabilities", "SessionMessage",
                 "SessionMessageChunk", "SubagentSessionCapabilities", "SubagentUpdate",
+                // `ForkSessionRequest.systemPrompt`.
+                "SystemPrompt", "SystemPromptMode",
             ],
             variants: [
                 "BackgroundWork": ["subagent"],
                 "SessionUpdate": ["subagent_update", "session_message", "session_message_chunk"],
-            ]
+            ],
+            members: [
+                "SessionCapabilities": ["fork"]
+            ],
+            methods: ["session/fork"]
         ),
         manifestVersion: 2
     )

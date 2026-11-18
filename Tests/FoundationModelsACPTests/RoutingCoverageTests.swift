@@ -98,6 +98,11 @@ import Testing
             return DeleteSessionResponse()
         }
 
+        func forkSession(_ params: ForkSessionRequest) async throws -> ForkSessionResponse {
+            await log.record(name: "forkSession")
+            return ForkSessionResponse(sessionId: SessionId(rawValue: "session-fork"))
+        }
+
         func cancelToolCall(_ params: CancelToolCallRequest) async throws -> CancelToolCallResponse {
             await log.record(name: "cancelToolCall")
             return CancelToolCallResponse()
@@ -194,6 +199,8 @@ import Testing
             _ = try await client.logoutAuth(LogoutAuthRequest())
         case "deleteSession":
             _ = try await client.deleteSession(DeleteSessionRequest(sessionId: Self.sessionId))
+        case "forkSession":
+            _ = try await client.forkSession(ForkSessionRequest(cwd: AbsolutePath(rawValue: "/work"), sessionId: Self.sessionId))
         case "cancelToolCall":
             _ = try await client.cancelToolCall(
                 CancelToolCallRequest(sessionId: Self.sessionId, toolCallId: ToolCallId(rawValue: "call-1"))

@@ -166,6 +166,189 @@ public struct ErrorStopReason: Codable, Hashable, Sendable {
     }
 }
 
+/// **UNSTABLE**
+///
+/// This capability is not part of the spec yet, and may be removed or changed at any point.
+///
+/// Request parameters for forking an existing session.
+///
+/// Creates a new session based on the context of an existing one, allowing
+/// operations like generating summaries without affecting the original session's history.
+///
+/// Only available if the Agent supports the `session.fork` capability.
+public struct ForkSessionRequest: Codable, Hashable, Sendable {
+    /// The working directory for this session. Must be an absolute path.
+    public var cwd: AbsolutePath
+
+    /// The ID of the session to fork.
+    public var sessionId: SessionId
+
+    /// Additional workspace roots to activate for this session. Each path must be absolute.
+    ///
+    /// When omitted or empty, no additional roots are activated. When non-empty,
+    /// this is the complete resulting additional-root list for the forked
+    /// session.
+    public var additionalDirectories: [AbsolutePath]?
+
+    /// List of MCP servers to connect to for this session.
+    public var mcpServers: [MCPServer]?
+
+    /// **UNSTABLE**
+    ///
+    /// This capability is not part of the spec yet, and may be removed or changed at any point.
+    ///
+    /// System-level instructions for the forked session.
+    ///
+    /// Optional. Omitted and `null` are equivalent. The Agent may then keep a
+    /// system prompt it stored with the source session or use its default
+    /// instructions. Clients MUST only send this when the Agent advertises
+    /// `session.systemPrompt`, and SHOULD send the same value they used for the
+    /// source session.
+    public var systemPrompt: SystemPrompt?
+
+    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
+    ///
+    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/draft/extensibility)
+    public var meta: JSONValue?
+
+    /// Creates a `ForkSessionRequest`.
+    public init(
+        cwd: AbsolutePath,
+        sessionId: SessionId,
+        additionalDirectories: [AbsolutePath]? = nil,
+        mcpServers: [MCPServer]? = nil,
+        systemPrompt: SystemPrompt? = nil,
+        meta: JSONValue? = nil
+    ) {
+        self.cwd = cwd
+        self.sessionId = sessionId
+        self.additionalDirectories = additionalDirectories
+        self.mcpServers = mcpServers
+        self.systemPrompt = systemPrompt
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case cwd
+        case sessionId
+        case additionalDirectories
+        case mcpServers
+        case systemPrompt
+        case meta = "_meta"
+    }
+
+    /// Decodes a `ForkSessionRequest`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
+    ///   or violates a wire invariant.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.cwd = try container.decode(AbsolutePath.self, forKey: .cwd)
+        self.sessionId = try container.decode(SessionId.self, forKey: .sessionId)
+        self.additionalDirectories = try container.decodeIfPresent([AbsolutePath].self, forKey: .additionalDirectories)
+        self.mcpServers = try container.decodeIfPresent([MCPServer].self, forKey: .mcpServers)
+        self.systemPrompt = try container.decodeIfPresent(SystemPrompt.self, forKey: .systemPrompt)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `ForkSessionRequest`, omitting nil optional fields — never
+    /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cwd, forKey: .cwd)
+        try container.encode(sessionId, forKey: .sessionId)
+        try container.encodeIfPresent(additionalDirectories, forKey: .additionalDirectories)
+        try container.encodeIfPresent(mcpServers, forKey: .mcpServers)
+        try container.encodeIfPresent(systemPrompt, forKey: .systemPrompt)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
+/// **UNSTABLE**
+///
+/// This capability is not part of the spec yet, and may be removed or changed at any point.
+///
+/// Response from forking an existing session.
+public struct ForkSessionResponse: Codable, Hashable, Sendable {
+    /// Unique identifier for the newly created forked session.
+    public var sessionId: SessionId
+
+    /// Initial commands the agent can execute in this session.
+    ///
+    /// Optional. Omitted or empty means no initial commands are advertised.
+    /// Senders MUST use an array, not `null`. Receivers treat `null` like omission.
+    /// Later `available_commands_update` notifications replace this list.
+    public var availableCommands: [AvailableCommand]?
+
+    /// Initial session configuration options.
+    ///
+    /// Optional. Omitted or empty means no config options are advertised.
+    /// Senders MUST use an array, not `null`. Receivers treat `null` like omission.
+    /// Later `config_option_update` notifications replace this list.
+    public var configOptions: [SessionConfigOption]?
+
+    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
+    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
+    /// Implementations MUST NOT assign meaning to keys they do not recognize.
+    ///
+    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/draft/extensibility)
+    public var meta: JSONValue?
+
+    /// Creates a `ForkSessionResponse`.
+    public init(
+        sessionId: SessionId,
+        availableCommands: [AvailableCommand]? = nil,
+        configOptions: [SessionConfigOption]? = nil,
+        meta: JSONValue? = nil
+    ) {
+        self.sessionId = sessionId
+        self.availableCommands = availableCommands
+        self.configOptions = configOptions
+        self.meta = meta
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionId
+        case availableCommands
+        case configOptions
+        case meta = "_meta"
+    }
+
+    /// Decodes a `ForkSessionResponse`; forgiving fields degrade to their
+    /// schema defaults instead of failing the message.
+    ///
+    /// - Parameter decoder: The decoder positioned at the object.
+    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
+    ///   or violates a wire invariant.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.sessionId = try container.decode(SessionId.self, forKey: .sessionId)
+        self.availableCommands = container.forgivingDecodeArrayIfPresent(of: AvailableCommand.self, forKey: .availableCommands)
+        self.configOptions = container.forgivingDecodeArrayIfPresent(of: SessionConfigOption.self, forKey: .configOptions)
+        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
+    }
+
+    /// Encodes a `ForkSessionResponse`, omitting nil optional fields — never
+    /// emitting JSON null for an absent capability-gated field.
+    ///
+    /// - Parameter encoder: The encoder to write the object into.
+    /// - Throws: Rethrows any error from the underlying encoder.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sessionId, forKey: .sessionId)
+        try container.encodeIfPresent(availableCommands, forKey: .availableCommands)
+        try container.encodeIfPresent(configOptions, forKey: .configOptions)
+        try container.encodeIfPresent(meta, forKey: .meta)
+    }
+}
+
 /// An HTTP header to set when making requests to the MCP server.
 public struct HTTPHeader: Codable, Hashable, Sendable {
     /// The name of the HTTP header.
@@ -703,223 +886,6 @@ public struct InitializeResponse: Codable, Hashable, Sendable {
         try container.encode(protocolVersion, forKey: .protocolVersion)
         try container.encodeIfPresent(authMethods, forKey: .authMethods)
         try container.encode(capabilities, forKey: .capabilities)
-        try container.encodeIfPresent(meta, forKey: .meta)
-    }
-}
-
-/// Schema for integer properties in an elicitation form.
-public struct IntegerPropertySchema: Codable, Hashable, Sendable {
-    /// Default value.
-    ///
-    /// Optional. Omitted and `null` are equivalent and mean no default value is provided.
-    public var `default`: Int?
-
-    /// Human-readable description.
-    ///
-    /// Optional. Omitted and `null` are equivalent and mean no description is provided.
-    public var description: String?
-
-    /// Maximum value (inclusive).
-    ///
-    /// Optional. Omitted and `null` are equivalent and mean there is no inclusive upper bound.
-    public var maximum: Int?
-
-    /// Minimum value (inclusive).
-    ///
-    /// Optional. Omitted and `null` are equivalent and mean there is no inclusive lower bound.
-    public var minimum: Int?
-
-    /// Optional title for the property.
-    ///
-    /// Optional. Omitted and `null` are equivalent and mean no title is provided.
-    public var title: String?
-
-    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
-    /// Implementations MUST NOT assign meaning to keys they do not recognize.
-    ///
-    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
-
-    /// Creates a `IntegerPropertySchema`.
-    public init(
-        `default`: Int? = nil,
-        description: String? = nil,
-        maximum: Int? = nil,
-        minimum: Int? = nil,
-        title: String? = nil,
-        meta: JSONValue? = nil
-    ) {
-        self.`default` = `default`
-        self.description = description
-        self.maximum = maximum
-        self.minimum = minimum
-        self.title = title
-        self.meta = meta
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case `default` = "default"
-        case description
-        case maximum
-        case minimum
-        case title
-        case meta = "_meta"
-    }
-
-    /// Decodes a `IntegerPropertySchema`; forgiving fields degrade to their
-    /// schema defaults instead of failing the message.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
-    ///   or violates a wire invariant.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.`default` = container.forgivingDecodeIfPresent(Int.self, forKey: .`default`)
-        self.description = container.forgivingDecodeIfPresent(String.self, forKey: .description)
-        self.maximum = try container.decodeIfPresent(Int.self, forKey: .maximum)
-        self.minimum = try container.decodeIfPresent(Int.self, forKey: .minimum)
-        self.title = container.forgivingDecodeIfPresent(String.self, forKey: .title)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
-    }
-
-    /// Encodes a `IntegerPropertySchema`, omitting nil optional fields — never
-    /// emitting JSON null for an absent capability-gated field.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encodeIfPresent(`default`, forKey: .`default`)
-        try container.encodeIfPresent(description, forKey: .description)
-        try container.encodeIfPresent(maximum, forKey: .maximum)
-        try container.encodeIfPresent(minimum, forKey: .minimum)
-        try container.encodeIfPresent(title, forKey: .title)
-        try container.encodeIfPresent(meta, forKey: .meta)
-    }
-}
-
-/// Request parameters for listing existing sessions.
-public struct ListSessionsRequest: Codable, Hashable, Sendable {
-    /// Opaque cursor token from a previous response's nextCursor field for cursor-based pagination
-    ///
-    /// Omitted and `null` are equivalent and mean the first page is requested.
-    public var cursor: SessionListCursor?
-
-    /// Filter sessions by working directory. Must be an absolute path.
-    ///
-    /// Only sessions whose `cwd` is this same directory match. Subdirectories and
-    /// `additionalDirectories` don't. Agents MAY normalize paths when comparing.
-    ///
-    /// Omitted and `null` are equivalent and mean sessions are not filtered by working directory.
-    public var cwd: AbsolutePath?
-
-    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
-    /// Implementations MUST NOT assign meaning to keys they do not recognize.
-    ///
-    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
-
-    /// Creates a `ListSessionsRequest`.
-    public init(
-        cursor: SessionListCursor? = nil,
-        cwd: AbsolutePath? = nil,
-        meta: JSONValue? = nil
-    ) {
-        self.cursor = cursor
-        self.cwd = cwd
-        self.meta = meta
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case cursor
-        case cwd
-        case meta = "_meta"
-    }
-
-    /// Decodes a `ListSessionsRequest`; forgiving fields degrade to their
-    /// schema defaults instead of failing the message.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
-    ///   or violates a wire invariant.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.cursor = try container.decodeIfPresent(SessionListCursor.self, forKey: .cursor)
-        self.cwd = try container.decodeIfPresent(AbsolutePath.self, forKey: .cwd)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
-    }
-
-    /// Encodes a `ListSessionsRequest`, omitting nil optional fields — never
-    /// emitting JSON null for an absent capability-gated field.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encodeIfPresent(cursor, forKey: .cursor)
-        try container.encodeIfPresent(cwd, forKey: .cwd)
-        try container.encodeIfPresent(meta, forKey: .meta)
-    }
-}
-
-/// Response from listing sessions.
-public struct ListSessionsResponse: Codable, Hashable, Sendable {
-    /// Array of session information objects.
-    public var sessions: [SessionInfo]
-
-    /// Opaque cursor token. If present, pass this in the next request's cursor parameter
-    /// to fetch the next page. Omitted and `null` are equivalent and mean there are no more
-    /// results. An empty string is a valid cursor, not the end of results.
-    public var nextCursor: SessionListCursor?
-
-    /// The _meta property is reserved by ACP to allow clients and agents to attach additional
-    /// metadata to their interactions. Omitted and `null` are equivalent and mean no metadata.
-    /// Implementations MUST NOT assign meaning to keys they do not recognize.
-    ///
-    /// See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/v2/extensibility)
-    public var meta: JSONValue?
-
-    /// Creates a `ListSessionsResponse`.
-    public init(
-        sessions: [SessionInfo],
-        nextCursor: SessionListCursor? = nil,
-        meta: JSONValue? = nil
-    ) {
-        self.sessions = sessions
-        self.nextCursor = nextCursor
-        self.meta = meta
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case sessions
-        case nextCursor
-        case meta = "_meta"
-    }
-
-    /// Decodes a `ListSessionsResponse`; forgiving fields degrade to their
-    /// schema defaults instead of failing the message.
-    ///
-    /// - Parameter decoder: The decoder positioned at the object.
-    /// - Throws: `DecodingError` when a strict field is missing, mistyped,
-    ///   or violates a wire invariant.
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.sessions = container.forgivingDecodeArray(of: SessionInfo.self, forKey: .sessions)
-        self.nextCursor = try container.decodeIfPresent(SessionListCursor.self, forKey: .nextCursor)
-        self.meta = container.forgivingDecodeIfPresent(JSONValue.self, forKey: .meta)
-    }
-
-    /// Encodes a `ListSessionsResponse`, omitting nil optional fields — never
-    /// emitting JSON null for an absent capability-gated field.
-    ///
-    /// - Parameter encoder: The encoder to write the object into.
-    /// - Throws: Rethrows any error from the underlying encoder.
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(sessions, forKey: .sessions)
-        try container.encodeIfPresent(nextCursor, forKey: .nextCursor)
         try container.encodeIfPresent(meta, forKey: .meta)
     }
 }

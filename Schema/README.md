@@ -21,7 +21,9 @@ vendored byte-identical from upstream.
 `$defs`. The meta manifests map method identifiers to wire method names in
 `agentMethods` / `clientMethods` / `protocolMethods` routing tables;
 `acp-v2.meta.unstable.json` additionally includes unstable methods, which the
-generator emits into the `Unstable` namespace as names and sides only.
+generator emits into the `Unstable` namespace as names and sides only. A
+method that `GeneratorConfig.unstableOverlay.methods` names routes with its
+types instead.
 
 ### The unstable schema document
 
@@ -36,12 +38,20 @@ primary set emits them: `SessionUpdate` has the cases `notice`,
 `CompactionSummaryChunk`, `Notice`, `NoticeSeverity`) are top-level types.
 
 The primary set also reads a named part of this document:
-`GeneratorConfig.unstableOverlay` lists the definitions and the `SessionUpdate`
-and `BackgroundWork` union variants that the stable document lacks. Today they
-are the subagent session types (`SubagentUpdate`, `SessionMessage`,
-`SessionMessageChunk`, `SubagentSessionCapabilities`,
-`SessionCancelCapabilities`, `BackgroundSubagent`), and the variants
-`subagent_update`, `session_message`, `session_message_chunk` and `subagent`.
+`GeneratorConfig.unstableOverlay` lists what the stable document lacks:
+
+- Definitions. Today they are the subagent session types (`SubagentUpdate`,
+  `SessionMessage`, `SessionMessageChunk`, `SubagentSessionCapabilities`,
+  `SessionCancelCapabilities`, `BackgroundSubagent`), and the `session/fork`
+  types (`ForkSessionRequest`, `ForkSessionResponse`,
+  `SessionForkCapabilities`, `SystemPrompt`, `SystemPromptMode`).
+- Union variants: `subagent_update`, `session_message` and
+  `session_message_chunk` of `SessionUpdate`, and `subagent` of
+  `BackgroundWork`.
+- Members of a stable definition: `fork` of `SessionCapabilities`.
+- Methods that route with their types: `session/fork`. It is in the typed
+  routing table (`forkSession`), not in the `Unstable` namespace.
+
 Nothing else of the unstable document is emitted. They are unstable: they may
 change or go in a later release.
 

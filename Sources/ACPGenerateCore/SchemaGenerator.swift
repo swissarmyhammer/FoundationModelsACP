@@ -2141,6 +2141,46 @@ public struct SchemaGenerator: Sendable {
         for (union, discriminators) in Self.orderedEntries(of: overlay.variants) {
             try appendUnstableVariants(union: union, discriminators: discriminators, unstable: unstable, to: &definitions)
         }
+        for (owner, properties) in Self.orderedEntries(of: overlay.members) {
+            try addUnstableMembers(owner: owner, properties: properties, unstable: unstable, to: &definitions)
+        }
+    }
+
+    /// Copies the named properties of an unstable object definition onto the
+    /// stable definition of the same name.
+    ///
+    /// - Parameters:
+    ///   - owner: The definition name.
+    ///   - properties: The property names to copy.
+    ///   - unstable: The unstable `$defs`.
+    ///   - definitions: The stable `$defs`, changed in place.
+    /// - Throws: `GeneratorError.invalidSchema` for a definition that is not
+    ///   an object with properties in both documents, a property that the
+    ///   unstable definition lacks, or a property that the stable definition
+    ///   already has.
+    private func addUnstableMembers(
+        owner: String,
+        properties: [String],
+        unstable: [String: JSONValue],
+        to definitions: inout [String: JSONValue]
+    ) throws {
+        guard var stableMembers = definitions[owner]?.objectValue,
+            var stableProperties = stableMembers[Self.propertiesKey]?.objectValue,
+            let unstableProperties = unstable[owner]?[Self.propertiesKey]?.objectValue
+        else {
+            throw GeneratorError.invalidSchema("the unstable overlay adds members to \"\(owner)\", which is not an object in both documents")
+        }
+        for property in properties {
+            guard let fragment = unstableProperties[property] else {
+                throw GeneratorError.invalidSchema("the unstable overlay names the member \"\(property)\" of \"\(owner)\", which the unstable schema lacks")
+            }
+            guard stableProperties[property] == nil else {
+                throw GeneratorError.invalidSchema("the unstable overlay names the member \"\(property)\" of \"\(owner)\", which the stable schema has")
+            }
+            stableProperties[property] = fragment
+        }
+        stableMembers[Self.propertiesKey] = .object(stableProperties)
+        definitions[owner] = .object(stableMembers)
     }
 
     /// Appends the named variants of an unstable union to the stable union.
@@ -3025,14 +3065,14 @@ extension SchemaGenerator {
         unstableMetaJSON: Data?,
         namespace: String?
     ) throws -> GeneratedFile {
-        let manifest = try parseRoutingManifest(data: metaJSON, context: "routing manifest")
+        var manifest = try parseRoutingManifest(data: metaJSON, context: "routing manifest")
+        let unstableManifest = try unstableMetaJSON.map {
+            try parseRoutingManifest(data: $0, context: "unstable routing manifest")
+        }
+        manifest = try routingOverlayMethods(onto: manifest, unstable: unstableManifest)
         let stable = try stableMethodModels(manifest: manifest, routes: try schemaRoutes(from: definitions))
         var declarations = [Emitter.methodTableDeclaration(stable)]
-        if let unstableMetaJSON {
-            let unstableManifest = try parseRoutingManifest(
-                data: unstableMetaJSON,
-                context: "unstable routing manifest"
-            )
+        if let unstableManifest {
             declarations.append(
                 Emitter.unstableNamespaceDeclaration(
                     try unstableMethodModels(stable: manifest, unstable: unstableManifest)
@@ -3043,6 +3083,43 @@ extension SchemaGenerator {
             name: "MethodTable.generated.swift",
             contents: Emitter.file(declarations: declarations, namespace: namespace)
         )
+    }
+
+    /// Adds the unstable methods that `config.unstableOverlay.methods` names
+    /// to the stable routing manifest, so that they route with their types.
+    ///
+    /// - Parameters:
+    ///   - manifest: The parsed stable routing manifest.
+    ///   - unstable: The parsed unstable routing manifest, or `nil`.
+    /// - Returns: The stable manifest with the overlay methods.
+    /// - Throws: `GeneratorError.invalidSchema` when the overlay names a
+    ///   method and no unstable manifest is given, or names a method that
+    ///   the unstable manifest does not route or that the stable manifest
+    ///   routes already.
+    private func routingOverlayMethods(
+        onto manifest: RoutingManifest,
+        unstable: RoutingManifest?
+    ) throws -> RoutingManifest {
+        let methods = config.unstableOverlay.methods
+        guard !methods.isEmpty else { return manifest }
+        guard let unstable else {
+            throw GeneratorError.invalidSchema("the unstable overlay routes methods, which needs the unstable routing manifest")
+        }
+        var methodsBySide = manifest.methodsBySide
+        for wireMethod in methods.sorted() {
+            let stableRoutes = methodsBySide.values.contains { $0.values.contains(wireMethod) }
+            guard !stableRoutes else {
+                throw GeneratorError.invalidSchema("the unstable overlay routes \"\(wireMethod)\", which the stable manifest routes")
+            }
+            let routes = unstable.methodsBySide
+                .flatMap { side, group in group.filter { $0.value == wireMethod }.map { (side: side, routingKey: $0.key) } }
+                .sorted { (Self.rank(of: $0.side), $0.routingKey) < (Self.rank(of: $1.side), $1.routingKey) }
+            guard let route = routes.first else {
+                throw GeneratorError.invalidSchema("the unstable overlay routes \"\(wireMethod)\", which the unstable manifest does not route")
+            }
+            methodsBySide[route.side, default: [:]][route.routingKey] = wireMethod
+        }
+        return RoutingManifest(methodsBySide: methodsBySide)
     }
 
     /// Parses and validates a routing manifest document.
