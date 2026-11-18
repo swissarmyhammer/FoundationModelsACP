@@ -1,0 +1,4 @@
+{"content": {"text": "I tell the other session.", "type": "text"}, "messageId": "a1", "sessionUpdate": "agent_message_chunk"}
+{"messageId": "sm1", "recipientMessageId": "y1", "recipientSessionId": "01M7QEPAXRJWGYXGA6E63GSSY0", "senderSessionId": "s-self", "sessionUpdate": "session_message"}
+{"content": {"text": "Run the tests, ", "type": "text"}, "messageId": "sm1", "sessionUpdate": "session_message_chunk"}
+{"content": {"text": "please.", "type": "text"}, "messageId": "sm1", "sessionUpdate": "session_message_chunk"}

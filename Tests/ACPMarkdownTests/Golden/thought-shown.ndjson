@@ -1,0 +1,4 @@
+{"content": {"text": "Why?", "type": "text"}, "messageId": "u1", "sessionUpdate": "user_message_chunk"}
+{"content": {"text": "The user asks why.\n", "type": "text"}, "messageId": "th1", "sessionUpdate": "agent_thought_chunk"}
+{"content": {"text": "I must explain.", "type": "text"}, "messageId": "th1", "sessionUpdate": "agent_thought_chunk"}
+{"content": {"text": "Because it is so.", "type": "text"}, "messageId": "a1", "sessionUpdate": "agent_message_chunk"}

@@ -116,6 +116,19 @@ public struct SessionMergeEngine: Hashable, Sendable {
     /// Creates an engine with an empty transcript and no session state.
     public init() {}
 
+    /// Creates an engine that holds the history that `updates` give.
+    ///
+    /// The engine applies each update with ``apply(_:)``, in order. An agent
+    /// uses it to make the history of a session from its recorded updates.
+    ///
+    /// - Parameter updates: The session updates to merge, in order.
+    public init(replaying updates: some Sequence<SessionUpdate>) {
+        self.init()
+        for update in updates {
+            apply(update)
+        }
+    }
+
     // MARK: - Applying updates
 
     /// Merges one `session/update` payload into the session state.

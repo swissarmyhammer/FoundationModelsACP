@@ -1,0 +1,1 @@
+{"content": [{"changes": [{"operation": "modify", "path": "/p/a.swift"}], "patch": {"format": "git_patch", "text": "diff --git a/a.swift b/a.swift\n--- a/a.swift\n+++ b/a.swift\n@@ -1 +1 @@\n-let a = 1\n+let a = 2\n"}, "type": "diff"}], "kind": "edit", "sessionUpdate": "tool_call_update", "status": "completed", "title": "Edit a.swift", "toolCallId": "c1"}

@@ -1,0 +1,7 @@
+{"content": {"text": "Please list ", "type": "text"}, "messageId": "u1", "sessionUpdate": "user_message_chunk"}
+{"content": {"text": "the files.", "type": "text"}, "messageId": "u1", "sessionUpdate": "user_message_chunk"}
+{"content": {"text": "Here are ", "type": "text"}, "messageId": "a1", "sessionUpdate": "agent_message_chunk"}
+{"content": {"text": "the **files**:\n\n- a.swift\n- b.swift\n", "type": "text"}, "messageId": "a1", "sessionUpdate": "agent_message_chunk"}
+{"content": [{"text": "Thanks.", "type": "text"}], "messageId": "u2", "sessionUpdate": "user_message"}
+{"content": {"text": "This text is replaced.", "type": "text"}, "messageId": "a2", "sessionUpdate": "agent_message_chunk"}
+{"content": [{"text": "You are welcome.", "type": "text"}], "messageId": "a2", "sessionUpdate": "agent_message"}

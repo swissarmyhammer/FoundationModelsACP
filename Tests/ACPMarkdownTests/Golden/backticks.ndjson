@@ -1,0 +1,1 @@
+{"content": [{"content": {"resource": {"text": "Use this:\n\n````swift\nlet a = 1\n````\n", "uri": "file:///p/README.md"}, "type": "resource"}, "type": "content"}, {"type": "future_content", "x": 1}], "kind": "read", "sessionUpdate": "tool_call_update", "status": "completed", "title": "Show the docs", "toolCallId": "c1"}

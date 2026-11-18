@@ -1,0 +1,5 @@
+{"content": {"text": "Before.", "type": "text"}, "messageId": "a1", "sessionUpdate": "agent_message_chunk"}
+{"compactionId": "k1", "sessionUpdate": "compaction_update", "status": "in_progress"}
+{"compactionId": "k1", "content": {"text": "A summary that is not in the document.", "type": "text"}, "sessionUpdate": "compaction_summary_chunk"}
+{"compactionId": "k1", "sessionUpdate": "compaction_update", "status": "completed"}
+{"content": {"text": "After.", "type": "text"}, "messageId": "a2", "sessionUpdate": "agent_message_chunk"}

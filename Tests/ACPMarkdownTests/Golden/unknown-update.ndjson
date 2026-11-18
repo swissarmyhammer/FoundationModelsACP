@@ -1,0 +1,6 @@
+{"content": {"text": "Hi.", "type": "text"}, "messageId": "u1", "sessionUpdate": "user_message_chunk"}
+{"sessionUpdate": "future_update", "value": 1}
+{"sessionUpdate": "state_update", "state": "running"}
+{"sessionUpdate": "usage_update", "size": 100, "used": 10}
+{"availableCommands": [], "sessionUpdate": "available_commands_update"}
+{"sessionUpdate": "notice", "severity": "info", "title": "Not kept"}

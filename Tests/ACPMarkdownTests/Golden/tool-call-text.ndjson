@@ -1,0 +1,4 @@
+{"kind": "search", "sessionUpdate": "tool_call_update", "status": "in_progress", "title": "Search <the> code", "toolCallId": "c1"}
+{"content": {"content": {"text": "Found 3 matches.", "type": "text"}, "type": "content"}, "sessionUpdate": "tool_call_content_chunk", "toolCallId": "c1"}
+{"content": {"content": {"text": "In `a.swift`.", "type": "text"}, "type": "content"}, "sessionUpdate": "tool_call_content_chunk", "toolCallId": "c1"}
+{"sessionUpdate": "tool_call_update", "status": "completed", "toolCallId": "c1"}

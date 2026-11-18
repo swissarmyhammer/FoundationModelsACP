@@ -1,0 +1,3 @@
+{"_meta": {"sah": {"message": {"messageId": "m-9", "sender": {"agent": "claude", "cwd": "/p", "kind": "session", "sessionId": "01M7QEPAXRJWGYXGA6E63GSSY0", "title": "Review"}}}}, "content": [{"text": "Line one.\nLine two.", "type": "text"}], "messageId": "u1", "sessionUpdate": "user_message"}
+{"content": {"text": "I got it.", "type": "text"}, "messageId": "a1", "sessionUpdate": "agent_message_chunk"}
+{"_meta": {"sah": {"message": {"messageId": "m-9", "sender": {"agent": "claude", "cwd": "/p", "kind": "user", "sessionId": "01M7QEPAXRJWGYXGA6E63GSSY0", "title": null}}}}, "content": [{"text": "From the user.", "type": "text"}], "messageId": "u2", "sessionUpdate": "user_message"}

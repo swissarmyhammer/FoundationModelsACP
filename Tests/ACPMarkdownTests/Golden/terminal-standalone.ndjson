@@ -1,0 +1,4 @@
+{"content": {"text": "Build it.", "type": "text"}, "messageId": "u1", "sessionUpdate": "user_message_chunk"}
+{"command": "swift build", "sessionUpdate": "terminal_update", "terminalId": "term-1"}
+{"data": "QnVpbGQgY29tcGxldGUhCg==", "sessionUpdate": "terminal_output_chunk", "terminalId": "term-1"}
+{"exitStatus": {"exitCode": 1, "signal": "SIGTERM"}, "sessionUpdate": "terminal_update", "terminalId": "term-1"}

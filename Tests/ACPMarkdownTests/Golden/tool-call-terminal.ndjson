@@ -1,0 +1,6 @@
+{"content": [{"terminalId": "term-1", "type": "terminal"}], "kind": "execute", "sessionUpdate": "tool_call_update", "status": "in_progress", "title": "Run ls", "toolCallId": "c1"}
+{"command": "ls -1", "sessionUpdate": "terminal_update", "terminalId": "term-1"}
+{"data": "YS5zd2lmdAo=", "sessionUpdate": "terminal_output_chunk", "terminalId": "term-1"}
+{"data": "Yi5zd2lmdAo=", "sessionUpdate": "terminal_output_chunk", "terminalId": "term-1"}
+{"exitStatus": {"exitCode": 0}, "sessionUpdate": "terminal_update", "terminalId": "term-1"}
+{"sessionUpdate": "tool_call_update", "status": "completed", "toolCallId": "c1"}

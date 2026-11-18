@@ -11,6 +11,12 @@ let package = Package(
             name: "FoundationModelsACP",
             targets: ["FoundationModelsACP"]
         ),
+        // The Markdown renderer of a session (D202). The UI and the agent
+        // link it to export a session as one document.
+        .library(
+            name: "ACPMarkdown",
+            targets: ["ACPMarkdown"]
+        ),
         // Consumed by `IntegrationTests/Package.swift`, which cannot depend on
         // this package's `acp-test-agent` *target* from outside this
         // manifest — only a declared product lets a sibling package build it
@@ -56,6 +62,11 @@ let package = Package(
             resources: [.copy("Documentation.docc")]
         ),
         .target(
+            name: "ACPMarkdown",
+            dependencies: ["FoundationModelsACP"],
+            path: "Sources/ACPMarkdown"
+        ),
+        .target(
             name: "ACPConformance",
             dependencies: ["FoundationModelsACP"],
             path: "Sources/ACPConformance"
@@ -92,6 +103,12 @@ let package = Package(
             name: "ACPConformanceTests",
             dependencies: ["ACPConformance", "FoundationModelsACP", "acp-test-agent"],
             path: "Tests/ACPConformanceTests"
+        ),
+        .testTarget(
+            name: "ACPMarkdownTests",
+            dependencies: ["ACPMarkdown", "FoundationModelsACP"],
+            path: "Tests/ACPMarkdownTests",
+            exclude: ["Golden"]
         ),
         .testTarget(
             name: "ACPGenerateTests",

@@ -1,0 +1,5 @@
+{"content": {"text": "Ask the other session.", "type": "text"}, "messageId": "u1", "sessionUpdate": "user_message_chunk"}
+{"content": {"text": "I asked it.", "type": "text"}, "messageId": "a1", "sessionUpdate": "agent_message_chunk"}
+{"_meta": {"sah": {"message": {"messageId": "m-9", "sender": {"agent": "claude", "cwd": "/p", "kind": "session", "sessionId": "01M7QEPAXRJWGYXGA6E63GSSY0", "title": "Build the app"}}}}, "content": [{"text": "The build is green.\n\nI pushed it.", "type": "text"}], "messageId": "sm1", "recipientSessionId": "s-self", "senderMessageId": "x1", "senderSessionId": "01M7QEPAXRJWGYXGA6E63GSSY0", "sessionUpdate": "session_message"}
+{"content": {"text": "The other session says the build is green.", "type": "text"}, "messageId": "a2", "sessionUpdate": "agent_message_chunk"}
+{"content": [{"text": "No title here.", "type": "text"}], "messageId": "sm2", "senderMessageId": "x2", "senderSessionId": "01M7QEPFY4RN59DH7298G1Y9QC", "sessionUpdate": "session_message"}

@@ -1,0 +1,3 @@
+{"kind": "read", "rawInput": {"path": "/p/Package.swift"}, "sessionUpdate": "tool_call_update", "status": "pending", "title": "Read Package.swift", "toolCallId": "c1"}
+{"rawOutput": {"bytes": 10}, "sessionUpdate": "tool_call_update", "status": "completed", "toolCallId": "c1"}
+{"sessionUpdate": "tool_call_update", "status": "failed", "toolCallId": "c2"}
