@@ -1,0 +1,144 @@
+[
+  {
+    "content" : {
+      "text" : "Fix the failing test in app.swift.",
+      "type" : "text"
+    },
+    "messageId" : "u-1",
+    "sessionUpdate" : "user_message_chunk"
+  },
+  {
+    "content" : {
+      "text" : "I read the test first.",
+      "type" : "text"
+    },
+    "messageId" : "msg_01/thinking",
+    "sessionUpdate" : "agent_thought_chunk"
+  },
+  {
+    "content" : {
+      "text" : "I run the tests.",
+      "type" : "text"
+    },
+    "messageId" : "msg_01",
+    "sessionUpdate" : "agent_message_chunk"
+  },
+  {
+    "kind" : "execute",
+    "sessionUpdate" : "tool_call_update",
+    "status" : "pending",
+    "title" : "Bash: swift test",
+    "toolCallId" : "toolu_bash"
+  },
+  {
+    "content" : {
+      "content" : {
+        "text" : "1 test failed",
+        "type" : "text"
+      },
+      "type" : "content"
+    },
+    "sessionUpdate" : "tool_call_content_chunk",
+    "toolCallId" : "toolu_bash"
+  },
+  {
+    "sessionUpdate" : "tool_call_update",
+    "status" : "failed",
+    "toolCallId" : "toolu_bash"
+  },
+  {
+    "content" : [
+      {
+        "changes" : [
+          {
+            "operation" : "modify",
+            "path" : "/work/app/app.swift"
+          }
+        ],
+        "patch" : {
+          "format" : "git_patch",
+          "text" : "--- a/work/app/app.swift\n+++ b/work/app/app.swift\n@@\n-let a = 1\n+let a = 2\n"
+        },
+        "type" : "diff"
+      }
+    ],
+    "kind" : "edit",
+    "sessionUpdate" : "tool_call_update",
+    "status" : "pending",
+    "title" : "Edit: /work/app/app.swift",
+    "toolCallId" : "toolu_edit"
+  },
+  {
+    "content" : {
+      "content" : {
+        "text" : "The file was updated.",
+        "type" : "text"
+      },
+      "type" : "content"
+    },
+    "sessionUpdate" : "tool_call_content_chunk",
+    "toolCallId" : "toolu_edit"
+  },
+  {
+    "sessionUpdate" : "tool_call_update",
+    "status" : "completed",
+    "toolCallId" : "toolu_edit"
+  },
+  {
+    "plan" : {
+      "entries" : [
+        {
+          "content" : "Fix app.swift",
+          "priority" : "medium",
+          "status" : "completed"
+        },
+        {
+          "content" : "Run the tests",
+          "priority" : "medium",
+          "status" : "in_progress"
+        }
+      ],
+      "planId" : "toolu_todo",
+      "type" : "items"
+    },
+    "sessionUpdate" : "plan_update"
+  },
+  {
+    "content" : {
+      "text" : "The test passes now.",
+      "type" : "text"
+    },
+    "messageId" : "msg_04",
+    "sessionUpdate" : "agent_message_chunk"
+  },
+  {
+    "compactionId" : "compact-s-1",
+    "sessionUpdate" : "compaction_update",
+    "status" : "completed"
+  },
+  {
+    "content" : {
+      "text" : "What is in this image?",
+      "type" : "text"
+    },
+    "messageId" : "u-5",
+    "sessionUpdate" : "user_message_chunk"
+  },
+  {
+    "content" : {
+      "data" : "iVBORw0KGgo=",
+      "mimeType" : "image/png",
+      "type" : "image"
+    },
+    "messageId" : "u-5",
+    "sessionUpdate" : "user_message_chunk"
+  },
+  {
+    "content" : {
+      "text" : "A red square.",
+      "type" : "text"
+    },
+    "messageId" : "msg_05",
+    "sessionUpdate" : "agent_message_chunk"
+  }
+]

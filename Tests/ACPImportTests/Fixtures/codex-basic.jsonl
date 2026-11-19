@@ -1,0 +1,23 @@
+{"timestamp":"2026-11-02T09:00:00.000Z","type":"session_meta","payload":{"id":"0199aaaa-0000-7000-8000-00000000c0de","timestamp":"2026-11-02T09:00:00.000Z","cwd":"/work/cli","originator":"codex_cli_rs","cli_version":"0.50.0","instructions":null}}
+{"timestamp":"2026-11-02T09:00:01.000Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<permissions>...</permissions>"}]}}
+{"timestamp":"2026-11-02T09:00:01.100Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/work/cli</cwd>\n</environment_context>"}]}}
+{"timestamp":"2026-11-02T09:00:01.200Z","type":"turn_context","payload":{"cwd":"/work/cli","model":"gpt"}}
+{"timestamp":"2026-11-02T09:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"List the files and add a README."}]}}
+{"timestamp":"2026-11-02T09:00:02.100Z","type":"event_msg","payload":{"type":"user_message","message":"List the files and add a README."}}
+{"timestamp":"2026-11-02T09:00:03.000Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"**Listing files**"}],"encrypted_content":"abc"}}
+{"timestamp":"2026-11-02T09:00:04.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\": [\"ls\", \"-1\"], \"workdir\": \"/work/cli\"}","call_id":"call_ls"}}
+{"timestamp":"2026-11-02T09:00:05.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_ls","output":"{\"output\": \"main.rs\\nCargo.toml\\n\", \"metadata\": {\"exit_code\": 0, \"duration_seconds\": 0.1}}"}}
+garbage line
+{"timestamp":"2026-11-02T09:00:06.000Z","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\": [{\"step\": \"List files\", \"status\": \"completed\"}, {\"step\": \"Add README\", \"status\": \"in_progress\"}]}","call_id":"call_plan"}}
+{"timestamp":"2026-11-02T09:00:06.500Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_plan","output":"Plan updated"}}
+{"timestamp":"2026-11-02T09:00:07.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"*** Begin Patch\n*** Add File: README.md\n+# CLI\n*** End Patch\n","call_id":"call_patch","status":"completed"}}
+{"timestamp":"2026-11-02T09:00:08.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_patch","output":"Success. Updated the following files:\nA README.md\n"}}
+{"timestamp":"2026-11-02T09:00:09.000Z","type":"response_item","payload":{"type":"local_shell_call","call_id":"call_fail","status":"completed","action":{"type":"exec","command":["cargo","build"]}}}
+{"timestamp":"2026-11-02T09:00:10.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_fail","output":"{\"output\": \"error[E0425]\", \"metadata\": {\"exit_code\": 101}}"}}
+{"timestamp":"2026-11-02T09:00:11.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I added the README. The build fails."}]}}
+{"timestamp":"2026-11-02T09:00:11.500Z","type":"event_msg","payload":{"type":"token_count","info":null}}
+{"timestamp":"2026-11-02T09:00:12.000Z","type":"compacted","payload":{"message":"Summary of the earlier turns."}}
+{"timestamp":"2026-11-02T09:00:13.000Z","type":"response_item","payload":{"type":"future_item","x":1}}
+{"timestamp":"2026-11-02T09:00:13.500Z","type":"future_record","payload":{"x":1}}
+{"timestamp":"2026-11-02T09:00:14.000Z","type":"event_msg","payload":{"type":"thread_name_updated","thread_name":"Add a README"}}
+{"timestamp":"2026-11-02T09:00:15.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Thanks."}]}}

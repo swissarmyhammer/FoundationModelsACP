@@ -17,6 +17,12 @@ let package = Package(
             name: "ACPMarkdown",
             targets: ["ACPMarkdown"]
         ),
+        // The readers of the session files of other agents (D209). They make
+        // ACP session updates from the bytes of a file.
+        .library(
+            name: "ACPImport",
+            targets: ["ACPImport"]
+        ),
         // Consumed by `IntegrationTests/Package.swift`, which cannot depend on
         // this package's `acp-test-agent` *target* from outside this
         // manifest — only a declared product lets a sibling package build it
@@ -67,6 +73,11 @@ let package = Package(
             path: "Sources/ACPMarkdown"
         ),
         .target(
+            name: "ACPImport",
+            dependencies: ["FoundationModelsACP"],
+            path: "Sources/ACPImport"
+        ),
+        .target(
             name: "ACPConformance",
             dependencies: ["FoundationModelsACP"],
             path: "Sources/ACPConformance"
@@ -109,6 +120,12 @@ let package = Package(
             dependencies: ["ACPMarkdown", "FoundationModelsACP"],
             path: "Tests/ACPMarkdownTests",
             exclude: ["Golden"]
+        ),
+        .testTarget(
+            name: "ACPImportTests",
+            dependencies: ["ACPImport", "ACPMarkdown", "FoundationModelsACP"],
+            path: "Tests/ACPImportTests",
+            exclude: ["Fixtures"]
         ),
         .testTarget(
             name: "ACPGenerateTests",

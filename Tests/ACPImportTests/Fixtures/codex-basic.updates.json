@@ -1,0 +1,142 @@
+[
+  {
+    "content" : {
+      "text" : "List the files and add a README.",
+      "type" : "text"
+    },
+    "messageId" : "codex-4",
+    "sessionUpdate" : "user_message_chunk"
+  },
+  {
+    "content" : {
+      "text" : "**Listing files**",
+      "type" : "text"
+    },
+    "messageId" : "codex-6",
+    "sessionUpdate" : "agent_thought_chunk"
+  },
+  {
+    "kind" : "execute",
+    "sessionUpdate" : "tool_call_update",
+    "status" : "pending",
+    "title" : "shell: ls -1",
+    "toolCallId" : "call_ls"
+  },
+  {
+    "content" : {
+      "content" : {
+        "text" : "main.rs\nCargo.toml\n",
+        "type" : "text"
+      },
+      "type" : "content"
+    },
+    "sessionUpdate" : "tool_call_content_chunk",
+    "toolCallId" : "call_ls"
+  },
+  {
+    "sessionUpdate" : "tool_call_update",
+    "status" : "completed",
+    "toolCallId" : "call_ls"
+  },
+  {
+    "plan" : {
+      "entries" : [
+        {
+          "content" : "List files",
+          "priority" : "medium",
+          "status" : "completed"
+        },
+        {
+          "content" : "Add README",
+          "priority" : "medium",
+          "status" : "in_progress"
+        }
+      ],
+      "planId" : "call_plan",
+      "type" : "items"
+    },
+    "sessionUpdate" : "plan_update"
+  },
+  {
+    "content" : [
+      {
+        "changes" : [
+          {
+            "operation" : "add",
+            "path" : "/work/cli/README.md"
+          }
+        ],
+        "patch" : {
+          "format" : "apply_patch",
+          "text" : "*** Begin Patch\n*** Add File: README.md\n+# CLI\n*** End Patch\n"
+        },
+        "type" : "diff"
+      }
+    ],
+    "kind" : "edit",
+    "sessionUpdate" : "tool_call_update",
+    "status" : "pending",
+    "title" : "apply_patch",
+    "toolCallId" : "call_patch"
+  },
+  {
+    "content" : {
+      "content" : {
+        "text" : "Success. Updated the following files:\nA README.md\n",
+        "type" : "text"
+      },
+      "type" : "content"
+    },
+    "sessionUpdate" : "tool_call_content_chunk",
+    "toolCallId" : "call_patch"
+  },
+  {
+    "sessionUpdate" : "tool_call_update",
+    "status" : "completed",
+    "toolCallId" : "call_patch"
+  },
+  {
+    "kind" : "execute",
+    "sessionUpdate" : "tool_call_update",
+    "status" : "pending",
+    "title" : "shell: cargo build",
+    "toolCallId" : "call_fail"
+  },
+  {
+    "content" : {
+      "content" : {
+        "text" : "error[E0425]",
+        "type" : "text"
+      },
+      "type" : "content"
+    },
+    "sessionUpdate" : "tool_call_content_chunk",
+    "toolCallId" : "call_fail"
+  },
+  {
+    "sessionUpdate" : "tool_call_update",
+    "status" : "failed",
+    "toolCallId" : "call_fail"
+  },
+  {
+    "content" : {
+      "text" : "I added the README. The build fails.",
+      "type" : "text"
+    },
+    "messageId" : "codex-16",
+    "sessionUpdate" : "agent_message_chunk"
+  },
+  {
+    "compactionId" : "codex-18",
+    "sessionUpdate" : "compaction_update",
+    "status" : "completed"
+  },
+  {
+    "content" : {
+      "text" : "Thanks.",
+      "type" : "text"
+    },
+    "messageId" : "codex-22",
+    "sessionUpdate" : "user_message_chunk"
+  }
+]
