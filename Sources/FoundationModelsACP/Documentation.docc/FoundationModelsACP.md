@@ -33,3 +33,9 @@ connection over a transport, a merge engine that builds session state from
 - ``ForkSessionResponse``
 - ``SessionForkCapabilities``
 - ``SAH/ForkCut``
+
+### Session search
+
+- ``SessionSearchChunker``
+- ``SessionSearchChunk``
+- ``SessionEntry/ID/searchHitID``
