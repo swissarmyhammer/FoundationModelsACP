@@ -58,13 +58,19 @@ enum GoldenFiles {
     /// - Parameters:
     ///   - document: The rendered document.
     ///   - name: The name of the pair.
-    static func assertGolden(_ document: String, named name: String, sourceLocation: SourceLocation = #_sourceLocation) throws {
-        let url = directory.appendingPathComponent(name + ".md")
+    ///   - fileExtension: The extension of the golden file.
+    static func assertGolden(
+        _ document: String,
+        named name: String,
+        extension fileExtension: String = "md",
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) throws {
+        let url = directory.appendingPathComponent(name + "." + fileExtension)
         if isRecording {
             try Data(document.utf8).write(to: url)
             return
         }
         let expected = try String(contentsOf: url, encoding: .utf8)
-        #expect(document == expected, "\(name).md differs; run with RECORD_GOLDEN=1 and review the diff", sourceLocation: sourceLocation)
+        #expect(document == expected, "\(name).\(fileExtension) differs; run with RECORD_GOLDEN=1 and review the diff", sourceLocation: sourceLocation)
     }
 }

@@ -1,0 +1,24 @@
+{"sessionUpdate": "session_info_update", "title": "Share me"}
+{"availableCommands": [], "sessionUpdate": "available_commands_update"}
+{"sessionUpdate": "state_update", "state": "running"}
+{"content": {"text": "Fix the build.", "type": "text"}, "messageId": "u1", "sessionUpdate": "user_message_chunk"}
+{"content": {"text": "The build fails in a.swift.", "type": "text"}, "messageId": "th1", "sessionUpdate": "agent_thought_chunk"}
+{"content": {"text": "I run the build.", "type": "text"}, "messageId": "a1", "sessionUpdate": "agent_message_chunk"}
+{"content": [{"terminalId": "term-1", "type": "terminal"}], "kind": "execute", "rawInput": {"command": "swift build"}, "sessionUpdate": "tool_call_update", "status": "in_progress", "title": "Run swift build", "toolCallId": "c1"}
+{"command": "swift build", "sessionUpdate": "terminal_update", "terminalId": "term-1"}
+{"data": "ZXJyb3I6IGEuc3dpZnQ6Mwo=", "sessionUpdate": "terminal_output_chunk", "terminalId": "term-1"}
+{"exitStatus": {"exitCode": 1}, "sessionUpdate": "terminal_update", "terminalId": "term-1"}
+{"rawOutput": {"exit": 1}, "sessionUpdate": "tool_call_update", "status": "failed", "toolCallId": "c1"}
+{"content": [{"content": {"text": "let a = 1\nlet a = 2", "type": "text"}, "type": "content"}], "kind": "read", "sessionUpdate": "tool_call_update", "status": "completed", "title": "Read a.swift", "toolCallId": "c2"}
+{"content": [{"content": {"text": "Removed the second a.", "type": "text"}, "type": "content"}, {"changes": [{"operation": "modify", "path": "/p/a.swift"}], "patch": {"format": "git_patch", "text": "-let a = 2\n"}, "type": "diff"}], "kind": "edit", "sessionUpdate": "tool_call_update", "status": "completed", "title": "Edit a.swift", "toolCallId": "c3"}
+{"command": "swift test", "sessionUpdate": "terminal_update", "terminalId": "term-2"}
+{"data": "QWxsIHRlc3RzIHBhc3NlZC4K", "sessionUpdate": "terminal_output_chunk", "terminalId": "term-2"}
+{"plan": {"entries": [{"content": "Fix a.swift", "priority": "high", "status": "completed"}, {"content": "Run the tests", "priority": "high", "status": "in_progress"}], "planId": "p1", "type": "items"}, "sessionUpdate": "plan_update"}
+{"sessionUpdate": "usage_update", "size": 100, "used": 10}
+{"sessionUpdate": "notice", "severity": "info", "title": "Not kept"}
+{"content": {"text": "The build is green.", "type": "text"}, "messageId": "a2", "sessionUpdate": "agent_message_chunk"}
+{"_meta": {"sah": {"message": {"sender": {"kind": "session", "sessionId": "01M7QEPAXRJWGYXGA6E63GSSY0", "title": "Review"}}}}, "content": [{"text": "Thanks.", "type": "text"}], "messageId": "m1", "senderMessageId": "x1", "senderSessionId": "01M7QEPAXRJWGYXGA6E63GSSY0", "sessionUpdate": "session_message"}
+{"compactionId": "k1", "sessionUpdate": "compaction_update", "status": "completed"}
+{"sessionUpdate": "future_update", "value": 1}
+{"content": {"text": "And the docs?", "type": "text"}, "messageId": "u2", "sessionUpdate": "user_message_chunk"}
+{"content": {"text": "Done.", "type": "text"}, "messageId": "a3", "sessionUpdate": "agent_message_chunk"}

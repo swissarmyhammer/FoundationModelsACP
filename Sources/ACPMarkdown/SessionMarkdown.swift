@@ -31,7 +31,7 @@ import FoundationModelsACP
 /// - The state updates and the notices are not in the document. An unknown
 ///   update is an HTML comment.
 public enum SessionMarkdown {
-    /// Folds the updates with a new ``SessionMergeEngine``, then renders the
+    /// Folds the updates with a new `SessionMergeEngine`, then renders the
     /// transcript.
     ///
     /// When ``Options/title`` is `nil`, the title comes from the folded
