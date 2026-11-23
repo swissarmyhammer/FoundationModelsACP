@@ -249,6 +249,26 @@ import Testing
         #expect(try await Self.collect(batches) == format.fullUpdates(Data(contentsOf: file)))
     }
 
+    /// The block read of the copy gives the session of a full read: the
+    /// metadata, each update, and the count and the kinds of the skipped
+    /// records. A line that is not JSON is skipped and counted.
+    @Test(arguments: SessionFormat.allCases)
+    func theBlockReadGivesTheSessionOfAFullRead(_ format: SessionFormat) async throws {
+        try await GeneratedFiles.withFolder { folder in
+            var data = try Data(contentsOf: format.fixtureURL)
+            data.append(Data("this line is not JSON\n".utf8))
+            let file = folder.appendingPathComponent("with-a-bad-line.jsonl")
+            try data.write(to: file)
+
+            let session = try format.read(
+                from: try FileByteSource(forReadingFrom: file), blockSize: Self.smallBlockSize)
+
+            let full = try format.fullRead(data)
+            #expect(session == full)
+            #expect(session.skippedRecordCount > 0)
+        }
+    }
+
     /// A file whose last record has no line break gives that record, as a
     /// full read does.
     @Test(arguments: SessionFormat.allCases)

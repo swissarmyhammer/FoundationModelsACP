@@ -130,6 +130,22 @@ enum SessionFormat: String, CaseIterable, Sendable {
         }
     }
 
+    /// The session of a full read with the old API.
+    func fullRead(_ data: Data) throws -> ImportedSession {
+        switch self {
+        case .claudeCode: try ClaudeCodeSessionReader().read(data)
+        case .codex: try CodexSessionReader().read(data)
+        }
+    }
+
+    /// The session of the block read of the copy.
+    func read(from source: some SessionByteSource, blockSize: Int) throws -> ImportedSession {
+        switch self {
+        case .claudeCode: try ClaudeCodeSessionReader().read(from: source, blockSize: blockSize)
+        case .codex: try CodexSessionReader().read(from: source, blockSize: blockSize)
+        }
+    }
+
     /// The batches of the streaming reader.
     func updates(from source: some SessionByteSource, blockSize: Int = SessionUpdateBatches.defaultBlockSize) -> SessionUpdateBatches {
         switch self {

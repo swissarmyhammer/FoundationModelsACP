@@ -64,6 +64,36 @@ public struct CodexSessionReader: Sendable {
         )
     }
 
+    /// Reads a session file one block at a time: its metadata, each
+    /// update, and the count of the records that the reader did not read.
+    /// The copy of a session uses it. The memory holds the updates, one
+    /// block and one line, never the bytes of the whole file.
+    ///
+    /// - Parameters:
+    ///   - source: The bytes of the file.
+    ///   - blockSize: The number of bytes of each read.
+    /// - Returns: The session.
+    /// - Throws: ``ImportReadError/notThisFormat`` when no record is a Codex
+    ///   record, ``ImportReadError/noReadableRecord`` when no record
+    ///   gives an update, a `CancellationError` when the task is cancelled,
+    ///   or the error of a read.
+    public func read(
+        from source: some SessionByteSource,
+        blockSize: Int = SessionUpdateBatches.defaultBlockSize
+    ) throws -> ImportedSession {
+        var state = ReadState()
+        try state.readAll(from: source, blockSize: blockSize)
+        if let error = state.endOfFileError {
+            throw error
+        }
+        return ImportedSession(
+            metadata: state.metadata(sourceID: sourceID),
+            updates: state.updates,
+            skippedRecordCount: state.skipped.total,
+            skippedKinds: state.skipped.kinds
+        )
+    }
+
     /// Scans a session file for its metadata only. The scan parses only the
     /// records that the metadata needs, so it is fast on a large file.
     ///

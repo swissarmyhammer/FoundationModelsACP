@@ -21,6 +21,30 @@ protocol SessionRecordParser: Sendable {
 }
 
 extension SessionRecordParser {
+    /// Reads each line of a whole file, one block at a time, and keeps each
+    /// update. The memory holds the updates, one block and one line, never
+    /// the bytes of the whole file.
+    ///
+    /// - Parameters:
+    ///   - source: The bytes of the file.
+    ///   - blockSize: The number of bytes of each read.
+    /// - Throws: A `CancellationError` when the task is cancelled, or the
+    ///   error of a read.
+    mutating func readAll(from source: some SessionByteSource, blockSize: Int) throws {
+        var lines = LineReader(source: source, blockSize: blockSize)
+        while !lines.isAtEnd {
+            try Task.checkCancellation()
+            for line in try lines.nextLines() {
+                read(line: line)
+            }
+        }
+        // A last line with no line break is a record when it is complete
+        // JSON, as in the batches.
+        if let last = lines.takeLastLine() {
+            read(line: last[...])
+        }
+    }
+
     /// Gives the updates of the lines read since the last call, and forgets
     /// them.
     mutating func takeUpdates() -> [SessionUpdate] {
