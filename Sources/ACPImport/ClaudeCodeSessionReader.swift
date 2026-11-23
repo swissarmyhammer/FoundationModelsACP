@@ -37,29 +37,6 @@ public struct ClaudeCodeSessionReader: Sendable {
         self.sourceID = sourceID
     }
 
-    /// Reads a session file.
-    ///
-    /// - Parameter data: The bytes of the file.
-    /// - Returns: The session.
-    /// - Throws: ``ImportReadError/notThisFormat`` when no record is a Claude
-    ///   Code record, ``ImportReadError/noReadableRecord`` when no record
-    ///   gives an update.
-    public func read(_ data: Data) throws -> ImportedSession {
-        var state = ReadState()
-        for line in ImportSupport.lines(of: data) {
-            state.read(line: line)
-        }
-        if let error = state.endOfFileError {
-            throw error
-        }
-        return ImportedSession(
-            metadata: state.metadata(sourceID: sourceID),
-            updates: state.updates,
-            skippedRecordCount: state.skipped.total,
-            skippedKinds: state.skipped.kinds
-        )
-    }
-
     /// Reads a session file one block at a time: its metadata, each
     /// update, and the count of the records that the reader did not read.
     /// The copy of a session uses it. The memory holds the updates, one
@@ -87,32 +64,6 @@ public struct ClaudeCodeSessionReader: Sendable {
             updates: state.updates,
             skippedRecordCount: state.skipped.total,
             skippedKinds: state.skipped.kinds
-        )
-    }
-
-    /// Scans a session file for its metadata only. The scan parses only the
-    /// records that the metadata needs, so it is fast on a large file.
-    ///
-    /// - Parameter data: The bytes of the file.
-    /// - Returns: The metadata.
-    /// - Throws: ``ImportReadError/notThisFormat`` when no record is a Claude
-    ///   Code record.
-    public func metadata(_ data: Data) throws -> ImportedSessionMetadata {
-        var scan = MetadataScan()
-        for line in ImportSupport.lines(of: data) {
-            scan.add(line)
-        }
-        guard scan.recognized else {
-            throw scan.sawJSON ? ImportReadError.notThisFormat : ImportReadError.noReadableRecord
-        }
-        return ImportedSessionMetadata(
-            agent: .claudeCode,
-            sourceID: sourceID ?? scan.sessionID ?? "",
-            cwd: scan.cwd.map { URL(fileURLWithPath: $0) },
-            title: scan.titles.best,
-            firstDate: scan.dates.first,
-            lastDate: scan.dates.last,
-            turnCount: scan.turnCount
         )
     }
 
@@ -149,7 +100,7 @@ public struct ClaudeCodeSessionReader: Sendable {
     }
 
     /// Reads the session updates of a full session file in batches, one
-    /// block at a time. The updates are the updates of ``read(_:)``.
+    /// block at a time. The updates are the updates of ``read(from:blockSize:)``.
     ///
     /// - Parameters:
     ///   - source: The bytes of the file.
@@ -477,73 +428,6 @@ extension ClaudeCodeSessionReader {
                 return nil
             }
             return ImportSupport.image(data: data, mimeType: mimeType)
-        }
-    }
-}
-
-// MARK: - The metadata scan
-
-extension ClaudeCodeSessionReader {
-    /// The scan of the metadata. It parses only the lines that can change
-    /// the metadata, and reads the dates with a byte search.
-    private struct MetadataScan {
-        var dates = DateRange()
-        var titles = ClaudeTitles()
-        var cwd: String?
-        var sessionID: String?
-        var turnCount = 0
-        var recognized = false
-        var sawJSON = false
-
-        private static let timestampKey = Array(#""timestamp":""#.utf8)
-        private static let userType = Array(#""type":"user""#.utf8)
-        private static let toolUseID = Array(#""tool_use_id""#.utf8)
-        private static let titleMarkers = [Array(#""type":"custom-title""#.utf8), Array(#""type":"ai-title""#.utf8), Array(#""type":"summary""#.utf8)]
-        private static let sessionKey = Array(#""sessionId""#.utf8)
-
-        mutating func add(_ line: Data.SubSequence) {
-            if line.first == UInt8(ascii: "{") { sawJSON = true }
-            if let date = Self.timestamp(in: line) {
-                dates.add(date)
-            }
-            let isUser = ImportSupport.contains(line, Self.userType)
-            let isTitle = Self.titleMarkers.contains { ImportSupport.contains(line, $0) }
-            let needsIdentity = cwd == nil || sessionID == nil || !recognized
-            guard isTitle || (isUser && !ImportSupport.contains(line, Self.toolUseID)) || (needsIdentity && ImportSupport.contains(line, Self.sessionKey)) else {
-                return
-            }
-            guard let record = ImportSupport.record(line) else { return }
-            if titles.read(record) {
-                recognized = true
-                return
-            }
-            guard record["sessionId"] != nil || record["uuid"] != nil else { return }
-            recognized = true
-            if cwd == nil, let value = record["cwd"] as? String, !value.isEmpty { cwd = value }
-            if sessionID == nil, let value = record["sessionId"] as? String { sessionID = value }
-            guard record["type"] as? String == "user", record["isSidechain"] as? Bool != true,
-                record["isMeta"] as? Bool != true, record["isCompactSummary"] as? Bool != true,
-                let message = record["message"] as? Record
-            else {
-                return
-            }
-            if let text = message["content"] as? String, !text.isEmpty {
-                turnCount += 1
-            } else if let blocks = message["content"] as? [Record],
-                blocks.contains(where: { ["text", "image"].contains($0["type"] as? String) })
-            {
-                turnCount += 1
-            }
-        }
-
-        /// Reads the value of `"timestamp":"…"` with no parse of the line.
-        static func timestamp(in line: Data.SubSequence) -> Date? {
-            guard let start = line.firstRange(of: timestampKey)?.upperBound,
-                let end = line[start...].firstIndex(of: UInt8(ascii: "\""))
-            else {
-                return nil
-            }
-            return ImportSupport.date(String(decoding: line[start..<end], as: UTF8.self))
         }
     }
 }

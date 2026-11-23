@@ -41,29 +41,6 @@ public struct CodexSessionReader: Sendable {
         self.sourceID = sourceID
     }
 
-    /// Reads a session file.
-    ///
-    /// - Parameter data: The bytes of the file.
-    /// - Returns: The session.
-    /// - Throws: ``ImportReadError/notThisFormat`` when no record is a Codex
-    ///   record, ``ImportReadError/noReadableRecord`` when no record gives
-    ///   an update.
-    public func read(_ data: Data) throws -> ImportedSession {
-        var state = ReadState()
-        for line in ImportSupport.lines(of: data) {
-            state.read(line: line)
-        }
-        if let error = state.endOfFileError {
-            throw error
-        }
-        return ImportedSession(
-            metadata: state.metadata(sourceID: sourceID),
-            updates: state.updates,
-            skippedRecordCount: state.skipped.total,
-            skippedKinds: state.skipped.kinds
-        )
-    }
-
     /// Reads a session file one block at a time: its metadata, each
     /// update, and the count of the records that the reader did not read.
     /// The copy of a session uses it. The memory holds the updates, one
@@ -94,32 +71,6 @@ public struct CodexSessionReader: Sendable {
         )
     }
 
-    /// Scans a session file for its metadata only. The scan parses only the
-    /// records that the metadata needs, so it is fast on a large file.
-    ///
-    /// - Parameter data: The bytes of the file.
-    /// - Returns: The metadata.
-    /// - Throws: ``ImportReadError/notThisFormat`` when no record is a Codex
-    ///   record.
-    public func metadata(_ data: Data) throws -> ImportedSessionMetadata {
-        var scan = MetadataScan()
-        for line in ImportSupport.lines(of: data) {
-            scan.add(line)
-        }
-        guard scan.recognized else {
-            throw scan.sawJSON ? ImportReadError.notThisFormat : ImportReadError.noReadableRecord
-        }
-        return ImportedSessionMetadata(
-            agent: .codex,
-            sourceID: sourceID ?? scan.meta.id ?? "",
-            cwd: scan.meta.cwd.map { URL(fileURLWithPath: $0) },
-            title: scan.meta.title,
-            firstDate: scan.dates.first,
-            lastDate: scan.dates.last,
-            turnCount: scan.turnCount
-        )
-    }
-
     /// Reads the metadata of a session file from some windows of the file
     /// only, as `ClaudeCodeSessionReader.metadata(from:)` does. (D212 of
     /// Testudo, section 4.3.)
@@ -145,7 +96,7 @@ public struct CodexSessionReader: Sendable {
     }
 
     /// Reads the session updates of a full session file in batches, one
-    /// block at a time. The updates are the updates of ``read(_:)``.
+    /// block at a time. The updates are the updates of ``read(from:blockSize:)``.
     ///
     /// - Parameters:
     ///   - source: The bytes of the file.
@@ -448,61 +399,6 @@ extension CodexSessionReader {
                 }
             default:
                 skipped.skip("response_item:" + itemType)
-            }
-        }
-    }
-}
-
-// MARK: - The metadata scan
-
-extension CodexSessionReader {
-    private struct MetadataScan {
-        var dates = DateRange()
-        var meta = CodexMeta()
-        var turnCount = 0
-        var recognized = false
-        var sawJSON = false
-
-        private static let timestampKey = Array(#""timestamp":""#.utf8)
-        private static let metaMarker = Array(#""session_meta""#.utf8)
-        private static let userRole = Array(#""role":"user""#.utf8)
-        private static let threadMarker = Array(#"thread_name"#.utf8)
-        private static let payloadKey = Array(#""payload""#.utf8)
-        private static let instructionsKey = Array(#""instructions""#.utf8)
-
-        mutating func add(_ line: Data.SubSequence) {
-            if line.first == UInt8(ascii: "{") { sawJSON = true }
-            if let start = line.firstRange(of: Self.timestampKey)?.upperBound,
-                let end = line[start...].firstIndex(of: UInt8(ascii: "\""))
-            {
-                dates.add(ImportSupport.date(String(decoding: line[start..<end], as: UTF8.self)))
-            }
-            let isMeta = ImportSupport.contains(line, Self.metaMarker)
-                || (!recognized && ImportSupport.contains(line, Self.instructionsKey))
-            let isUser = ImportSupport.contains(line, Self.userRole)
-            let isTitle = ImportSupport.contains(line, Self.threadMarker)
-            if !recognized, ImportSupport.contains(line, Self.payloadKey) {
-                recognized = true
-            }
-            guard isMeta || isUser || isTitle else { return }
-            guard let record = ImportSupport.record(line), let (type, payload) = CodexSessionReader.split(record) else {
-                return
-            }
-            recognized = true
-            switch type {
-            case "session_meta":
-                meta.read(meta: payload)
-            case "event_msg":
-                meta.read(event: payload)
-            case "response_item":
-                if payload["type"] as? String == "message", payload["role"] as? String == "user" {
-                    let text = CodexSessionReader.text(of: payload["content"])
-                    if !text.isEmpty, !CodexSessionReader.isContext(text) {
-                        turnCount += 1
-                    }
-                }
-            default:
-                break
             }
         }
     }

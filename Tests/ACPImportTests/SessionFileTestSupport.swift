@@ -114,28 +114,17 @@ enum SessionFormat: String, CaseIterable, Sendable {
         }
     }
 
-    /// The metadata of a full read with the old API.
-    func fullMetadata(_ data: Data) throws -> ImportedSessionMetadata {
-        switch self {
-        case .claudeCode: try ClaudeCodeSessionReader().metadata(data)
-        case .codex: try CodexSessionReader().metadata(data)
-        }
-    }
-
-    /// The updates of a full read with the old API.
-    func fullUpdates(_ data: Data) throws -> [SessionUpdate] {
-        switch self {
-        case .claudeCode: try ClaudeCodeSessionReader().read(data).updates
-        case .codex: try CodexSessionReader().read(data).updates
-        }
-    }
-
-    /// The session of a full read with the old API.
+    /// The session of a full read: all the bytes in one block.
     func fullRead(_ data: Data) throws -> ImportedSession {
         switch self {
-        case .claudeCode: try ClaudeCodeSessionReader().read(data)
-        case .codex: try CodexSessionReader().read(data)
+        case .claudeCode: try ClaudeCodeSessionReader().readWhole(data)
+        case .codex: try CodexSessionReader().readWhole(data)
         }
+    }
+
+    /// The updates of a full read.
+    func fullUpdates(_ data: Data) throws -> [SessionUpdate] {
+        try fullRead(data).updates
     }
 
     /// The session of the block read of the copy.
@@ -274,5 +263,32 @@ enum SessionFormat: String, CaseIterable, Sendable {
 
     static func date(_ text: String) -> Date {
         ImportFixtures.date(text)
+    }
+}
+
+/// The bytes of a file in memory, for a test.
+struct DataByteSource: SessionByteSource {
+    /// The bytes.
+    let data: Data
+
+    var size: Int { data.count }
+
+    func read(offset: Int, length: Int) throws -> Data {
+        let start = min(offset, data.count)
+        return data.subdata(in: start..<min(start + length, data.count))
+    }
+}
+
+extension ClaudeCodeSessionReader {
+    /// Reads bytes in memory as one block with ``read(from:blockSize:)``.
+    func readWhole(_ data: Data) throws -> ImportedSession {
+        try read(from: DataByteSource(data: data), blockSize: max(data.count, 1))
+    }
+}
+
+extension CodexSessionReader {
+    /// Reads bytes in memory as one block with ``read(from:blockSize:)``.
+    func readWhole(_ data: Data) throws -> ImportedSession {
+        try read(from: DataByteSource(data: data), blockSize: max(data.count, 1))
     }
 }

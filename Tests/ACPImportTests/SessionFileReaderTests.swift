@@ -59,7 +59,7 @@ import Testing
         try await GeneratedFiles.withFolder { folder in
             let file = try GeneratedFiles.file(format.largeSession(automated: automated), in: folder)
             let metadata = try format.metadata(from: try FileByteSource(forReadingFrom: file))
-            let full = try format.fullMetadata(Data(contentsOf: file))
+            let full = try format.fullRead(Data(contentsOf: file)).metadata
             #expect(metadata.sourceID == full.sourceID)
             #expect(metadata.cwd == full.cwd)
             #expect(metadata.title == full.title)

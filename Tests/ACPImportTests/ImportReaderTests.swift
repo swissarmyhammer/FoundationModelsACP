@@ -44,7 +44,7 @@ enum ImportFixtures {
 /// `ClaudeCodeSessionReader`.
 @Suite struct ClaudeCodeSessionReaderTests {
     private static func read() throws -> ImportedSession {
-        try ClaudeCodeSessionReader(sourceID: ImportFixtures.claudeSource).read(ImportFixtures.data("claude-code-basic.jsonl"))
+        try ClaudeCodeSessionReader(sourceID: ImportFixtures.claudeSource).readWhole(ImportFixtures.data("claude-code-basic.jsonl"))
     }
 
     @Test func theUpdatesAreTheGoldenUpdates() throws {
@@ -68,13 +68,6 @@ enum ImportFixtures {
         #expect(metadata.turnCount == 2)
     }
 
-    @Test func theScanGivesTheSameMetadataAsTheRead() throws {
-        let data = try ImportFixtures.data("claude-code-basic.jsonl")
-        let reader = ClaudeCodeSessionReader(sourceID: ImportFixtures.claudeSource)
-        #expect(try reader.metadata(data) == reader.read(data).metadata)
-        #expect(try ClaudeCodeSessionReader().metadata(data).sourceID == ImportFixtures.claudeSource)
-    }
-
     @Test func theSkippedRecordsAreCounted() throws {
         let session = try Self.read()
         #expect(session.skippedKinds == [
@@ -92,15 +85,14 @@ enum ImportFixtures {
     @Test func anAiTitleIsTheTitleWhenThereIsNoCustomTitle() throws {
         let data = Data((#"{"type":"ai-title","aiTitle":"From the model","sessionId":"s"}"# + "\n"
             + #"{"type":"user","uuid":"u","sessionId":"s","message":{"role":"user","content":"Hi"}}"#).utf8)
-        #expect(try ClaudeCodeSessionReader().read(data).metadata.title == "From the model")
-        #expect(try ClaudeCodeSessionReader().metadata(data).title == "From the model")
+        #expect(try ClaudeCodeSessionReader().readWhole(data).metadata.title == "From the model")
     }
 }
 
 /// `CodexSessionReader`.
 @Suite struct CodexSessionReaderTests {
     private static func read() throws -> ImportedSession {
-        try CodexSessionReader().read(ImportFixtures.data("codex-basic.jsonl"))
+        try CodexSessionReader().readWhole(ImportFixtures.data("codex-basic.jsonl"))
     }
 
     @Test func theUpdatesAreTheGoldenUpdates() throws {
@@ -122,11 +114,6 @@ enum ImportFixtures {
         #expect(metadata.firstDate == ImportFixtures.date("2026-11-02T09:00:00.000Z"))
         #expect(metadata.lastDate == ImportFixtures.date("2026-11-02T09:00:15.000Z"))
         #expect(metadata.turnCount == 2)
-    }
-
-    @Test func theScanGivesTheSameMetadataAsTheRead() throws {
-        let data = try ImportFixtures.data("codex-basic.jsonl")
-        #expect(try CodexSessionReader().metadata(data) == CodexSessionReader().read(data).metadata)
     }
 
     @Test func theSkippedRecordsAreCounted() throws {
@@ -159,15 +146,15 @@ enum ImportFixtures {
 
         func read(_ data: Data) throws -> ImportedSession {
             switch self {
-            case .claudeCode: try ClaudeCodeSessionReader().read(data)
-            case .codex: try CodexSessionReader().read(data)
+            case .claudeCode: try ClaudeCodeSessionReader().readWhole(data)
+            case .codex: try CodexSessionReader().readWhole(data)
             }
         }
 
-        func metadata(_ data: Data) throws -> ImportedSessionMetadata {
+        func metadata(_ data: Data) throws -> SessionFileMetadata {
             switch self {
-            case .claudeCode: try ClaudeCodeSessionReader().metadata(data)
-            case .codex: try CodexSessionReader().metadata(data)
+            case .claudeCode: try ClaudeCodeSessionReader().metadata(from: DataByteSource(data: data))
+            case .codex: try CodexSessionReader().metadata(from: DataByteSource(data: data))
             }
         }
 
@@ -215,15 +202,15 @@ enum ImportFixtures {
 
     @Test func aFileWithOnlyATitleHasNoReadableRecord() throws {
         let data = Data(#"{"type":"custom-title","customTitle":"Only a title","sessionId":"s"}"#.utf8)
-        #expect(throws: ImportReadError.noReadableRecord) { try ClaudeCodeSessionReader().read(data) }
+        #expect(throws: ImportReadError.noReadableRecord) { try ClaudeCodeSessionReader().readWhole(data) }
         let codex = Data(#"{"timestamp":"2026-11-02T09:00:00Z","type":"session_meta","payload":{"id":"x","cwd":"/w"}}"#.utf8)
-        #expect(throws: ImportReadError.noReadableRecord) { try CodexSessionReader().read(codex) }
+        #expect(throws: ImportReadError.noReadableRecord) { try CodexSessionReader().readWhole(codex) }
     }
 
     @Test func aLongToolTitleIsCut() throws {
         let command = String(repeating: "echo word ", count: 30)
         let line = #"{"type":"assistant","uuid":"a","sessionId":"s","message":{"id":"m","role":"assistant","content":[{"type":"tool_use","id":"t","name":"Bash","input":{"command":"\#(command)"}}]}}"#
-        let updates = try ClaudeCodeSessionReader().read(Data(line.utf8)).updates
+        let updates = try ClaudeCodeSessionReader().readWhole(Data(line.utf8)).updates
         guard case .toolCallUpdate(let call)? = updates.first, case .value(let title) = call.title else {
             Issue.record("no tool call")
             return
@@ -231,58 +218,5 @@ enum ImportFixtures {
         #expect(title.count == 80)
         #expect(title.hasPrefix("Bash: echo word"))
         #expect(title.hasSuffix("…"))
-    }
-}
-
-/// The metadata scan is fast on a large file.
-@Suite struct ImportMetadataScanSpeedTests {
-    /// About 50 MB of records: many large agent and tool records, few
-    /// prompts.
-    private static func claudeFile() -> Data {
-        let text = String(repeating: "x", count: 50_000)
-        var lines: [String] = []
-        for index in 0..<1_000 {
-            if index % 100 == 0 {
-                lines.append(#"{"type":"user","uuid":"u\#(index)","sessionId":"s","timestamp":"2026-11-01T10:00:00.000Z","cwd":"/w","message":{"role":"user","content":"Prompt \#(index)"}}"#)
-            }
-            lines.append(#"{"type":"assistant","uuid":"a\#(index)","sessionId":"s","timestamp":"2026-11-01T10:00:01.000Z","cwd":"/w","message":{"id":"m\#(index)","role":"assistant","content":[{"type":"text","text":"\#(text)"}]}}"#)
-        }
-        return Data(lines.joined(separator: "\n").utf8)
-    }
-
-    private static func codexFile() -> Data {
-        let text = String(repeating: "y", count: 50_000)
-        var lines = [#"{"timestamp":"2026-11-02T09:00:00.000Z","type":"session_meta","payload":{"id":"c","cwd":"/w"}}"#]
-        for index in 0..<1_000 {
-            if index % 100 == 0 {
-                lines.append(#"{"timestamp":"2026-11-02T09:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Prompt \#(index)"}]}}"#)
-            }
-            lines.append(#"{"timestamp":"2026-11-02T09:00:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"\#(text)"}]}}"#)
-        }
-        return Data(lines.joined(separator: "\n").utf8)
-    }
-
-    /// The bound of one scan of 50 MB. A debug build scans in well under
-    /// it; a full parse of each line takes longer.
-    private static let bound = Duration.seconds(4)
-
-    @Test func theClaudeCodeScanIsFast() throws {
-        let data = Self.claudeFile()
-        #expect(data.count > 50_000_000)
-        let clock = ContinuousClock()
-        var metadata: ImportedSessionMetadata?
-        let elapsed = try clock.measure { metadata = try ClaudeCodeSessionReader().metadata(data) }
-        #expect(metadata?.turnCount == 10)
-        #expect(elapsed < Self.bound, "the scan took \(elapsed)")
-    }
-
-    @Test func theCodexScanIsFast() throws {
-        let data = Self.codexFile()
-        #expect(data.count > 50_000_000)
-        let clock = ContinuousClock()
-        var metadata: ImportedSessionMetadata?
-        let elapsed = try clock.measure { metadata = try CodexSessionReader().metadata(data) }
-        #expect(metadata?.turnCount == 10)
-        #expect(elapsed < Self.bound, "the scan took \(elapsed)")
     }
 }
