@@ -22,6 +22,47 @@ enum ImportSupport {
             .filter { !$0.allSatisfy { $0 == UInt8(ascii: " ") || $0 == UInt8(ascii: "\t") } }
     }
 
+    /// The complete lines of a window of a file, with no line end. Empty
+    /// lines are not given.
+    ///
+    /// A line is complete only with its line break, thus the bytes after the
+    /// last line break are dropped: the window ends in a line, or the file
+    /// ends in a line that the agent writes now. A window that does not
+    /// start at the start of a line also drops the bytes before its first
+    /// line break. A line break byte is never a part of a UTF-8 character,
+    /// thus a window that starts or ends in a character gives no part of it.
+    ///
+    /// - Parameters:
+    ///   - window: The bytes of the window.
+    ///   - startsAtLineStart: `true` when the window starts at the start of
+    ///     the file.
+    static func completeLines(in window: Data, startsAtLineStart: Bool) -> [Data.SubSequence] {
+        let lineBreak = UInt8(ascii: "\n")
+        guard let lastBreak = window.lastIndex(of: lineBreak) else {
+            return []
+        }
+        var start = window.startIndex
+        if !startsAtLineStart, let firstBreak = window.firstIndex(of: lineBreak) {
+            start = firstBreak + 1
+        }
+        guard start < lastBreak else {
+            return []
+        }
+        return lines(of: window[start..<lastBreak])
+    }
+
+    /// A prompt on one line, cut at
+    /// ``SessionFileMetadata/maximumPromptLength`` characters.
+    ///
+    /// - Returns: The prompt, or `nil` when it has only white space.
+    static func promptPreview(_ text: String) -> String? {
+        let line = singleLine(text)
+        guard !line.isEmpty else {
+            return nil
+        }
+        return String(line.prefix(SessionFileMetadata.maximumPromptLength))
+    }
+
     /// Parses one line as a JSON object.
     ///
     /// - Returns: The object, or `nil` when the line is not a JSON object.

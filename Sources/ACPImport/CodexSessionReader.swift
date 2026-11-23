@@ -50,15 +50,11 @@ public struct CodexSessionReader: Sendable {
     ///   an update.
     public func read(_ data: Data) throws -> ImportedSession {
         var state = ReadState()
-        for (index, line) in ImportSupport.lines(of: data).enumerated() {
-            guard let record = ImportSupport.record(line) else {
-                state.skipped.skip(ImportSupport.invalidJSONKind)
-                continue
-            }
-            state.read(record, line: index)
+        for line in ImportSupport.lines(of: data) {
+            state.read(line: line)
         }
-        guard !state.updates.isEmpty else {
-            throw state.recognized == 0 && state.jsonRecords > 0 ? ImportReadError.notThisFormat : ImportReadError.noReadableRecord
+        if let error = state.endOfFileError {
+            throw error
         }
         return ImportedSession(
             metadata: state.metadata(sourceID: sourceID),
@@ -93,6 +89,44 @@ public struct CodexSessionReader: Sendable {
             turnCount: scan.turnCount
         )
     }
+
+    /// Reads the metadata of a session file from some windows of the file
+    /// only, as `ClaudeCodeSessionReader.metadata(from:)` does. (D212 of
+    /// Testudo, section 4.3.)
+    ///
+    /// The fields:
+    ///
+    /// - `sourceID`, `gitBranch` (`git.branch`): the `session_meta` record.
+    /// - `cwd`: the last `cwd` of a `turn_context` or `session_meta` record.
+    /// - `isAutomated`: `true` when the `originator` of the `session_meta`
+    ///   record has the word `exec` (the `codex exec` command). The tail of
+    ///   a Codex file does not tell, thus the reader reads the head.
+    /// - `firstPrompt`, `lastPrompt`: the first and the last user message
+    ///   that is not the context that Codex adds.
+    /// - `title`: the last thread name.
+    ///
+    /// - Parameter source: The bytes of the file.
+    /// - Returns: The metadata.
+    /// - Throws: ``ImportReadError/notThisFormat`` when no record of the
+    ///   windows is a Codex record, ``ImportReadError/noReadableRecord`` when
+    ///   the windows have no JSON record, or the error of a read.
+    public func metadata(from source: some SessionByteSource) throws -> SessionFileMetadata {
+        try MetadataWindows.read(source, scan: Self.scanMetadata).metadata(agent: .codex, sourceID: sourceID)
+    }
+
+    /// Reads the session updates of a full session file in batches, one
+    /// block at a time. The updates are the updates of ``read(_:)``.
+    ///
+    /// - Parameters:
+    ///   - source: The bytes of the file.
+    ///   - blockSize: The number of bytes of each read.
+    /// - Returns: The batches.
+    public func updates(
+        from source: some SessionByteSource,
+        blockSize: Int = SessionUpdateBatches.defaultBlockSize
+    ) -> SessionUpdateBatches {
+        SessionUpdateBatches(source: source, blockSize: blockSize, parser: ReadState())
+    }
 }
 
 // MARK: - Shared rules
@@ -107,23 +141,28 @@ struct CodexMeta {
     mutating func read(meta payload: Record) {
         if id == nil, let value = payload["id"] as? String { id = value }
         if cwd == nil, let value = payload["cwd"] as? String, !value.isEmpty { cwd = value }
-        for key in ["thread_name", "title", "name"] {
-            if let value = payload[key] as? String, !ImportSupport.singleLine(value).isEmpty {
-                title = ImportSupport.singleLine(value)
-            }
-        }
+        title = Self.title(of: payload) ?? title
     }
 
     /// Reads an `event_msg` payload for a new thread name.
     mutating func read(event payload: Record) {
+        title = Self.threadName(ofEvent: payload) ?? title
+    }
+
+    /// The new thread name of an `event_msg` payload, or `nil` when the
+    /// event does not name the thread.
+    static func threadName(ofEvent payload: Record) -> String? {
         guard let type = payload["type"] as? String, type.contains("thread_name") || type.contains("title") else {
-            return
+            return nil
         }
-        for key in ["thread_name", "title", "name"] {
-            if let value = payload[key] as? String, !ImportSupport.singleLine(value).isEmpty {
-                title = ImportSupport.singleLine(value)
-            }
-        }
+        return title(of: payload)
+    }
+
+    /// The last title member of a payload: `thread_name`, `title` or `name`.
+    static func title(of payload: Record) -> String? {
+        ["thread_name", "title", "name"]
+            .compactMap { (payload[$0] as? String).map(ImportSupport.singleLine) }
+            .last { !$0.isEmpty }
     }
 }
 
@@ -237,8 +276,12 @@ extension CodexSessionReader {
 // MARK: - The read
 
 extension CodexSessionReader {
-    private struct ReadState {
+    private struct ReadState: SessionRecordParser {
         var updates: [SessionUpdate] = []
+        var emittedCount = 0
+        /// The place of the next line among the lines that are not blank.
+        /// The wire ids of the messages use it.
+        var lineIndex = 0
         var skipped = SkipCounter()
         var dates = DateRange()
         var meta = CodexMeta()
@@ -260,8 +303,18 @@ extension CodexSessionReader {
             )
         }
 
+        mutating func read(line: Data.SubSequence) {
+            defer { lineIndex += 1 }
+            guard let record = ImportSupport.record(line) else {
+                skipped.skip(ImportSupport.invalidJSONKind)
+                return
+            }
+            read(record, line: lineIndex)
+        }
+
         mutating func emit(_ update: SessionUpdate) {
             updates.append(update)
+            emittedCount += 1
             if case .compactionUpdate = update { lastWasCompaction = true } else { lastWasCompaction = false }
         }
 
@@ -422,5 +475,67 @@ extension CodexSessionReader {
                 break
             }
         }
+    }
+}
+
+// MARK: - The bounded metadata scan
+
+extension CodexSessionReader {
+    /// The word of an `originator` value of a session that a program
+    /// started: `codex_exec` or `codex-exec`, the `codex exec` command.
+    static let automatedOriginatorWord = "exec"
+
+    /// The rank of a thread name. A Codex file has one kind of title, thus
+    /// the last thread name is the title.
+    static let threadNameRank = 0
+
+    /// Reads one record of a window into the metadata fields.
+    static func scanMetadata(_ record: Record, into fields: inout MetadataFields) {
+        guard let (type, payload) = split(record) else {
+            return
+        }
+        fields.isRecognized = true
+        fields.dates.add(ImportSupport.date(record["timestamp"] ?? payload["timestamp"]))
+        switch type {
+        case "session_meta":
+            fields.noteSourceID(payload["id"])
+            fields.noteCwd(payload["cwd"])
+            fields.noteGitBranch((payload["git"] as? Record)?["branch"])
+            if let originator = payload["originator"] as? String, !originator.isEmpty {
+                fields.isAutomated = originator.lowercased().contains(automatedOriginatorWord)
+            }
+            noteThreadName(CodexMeta.title(of: payload), in: &fields)
+        case "turn_context":
+            fields.noteCwd(payload["cwd"])
+        case "event_msg":
+            noteThreadName(CodexMeta.threadName(ofEvent: payload), in: &fields)
+        case "response_item":
+            if let text = userPrompt(of: payload) {
+                fields.notePrompt(text)
+            }
+        default:
+            break
+        }
+    }
+
+    /// Keeps a thread name as the title.
+    private static func noteThreadName(_ name: String?, in fields: inout MetadataFields) {
+        guard let name else {
+            return
+        }
+        fields.noteTitle(RankedTitle(text: name, rank: threadNameRank))
+    }
+
+    /// The text of a user message that is not the context of Codex, or
+    /// `nil` when the item is not one.
+    static func userPrompt(of item: Record) -> String? {
+        guard item["type"] as? String == "message", item["role"] as? String == "user" else {
+            return nil
+        }
+        let text = text(of: item["content"])
+        guard !text.isEmpty, !isContext(text) else {
+            return nil
+        }
+        return text
     }
 }

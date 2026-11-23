@@ -54,6 +54,80 @@ public struct ImportedSessionMetadata: Sendable, Hashable {
     }
 }
 
+/// What the bounded metadata reader gives for a session file. (D212 of
+/// Testudo, section 4.2.)
+///
+/// The reader reads only some windows of the file (see
+/// `ClaudeCodeSessionReader.metadata(from:)`), thus the metadata has no
+/// count of the prompts.
+public struct SessionFileMetadata: Sendable, Hashable {
+    /// The agent that wrote the file.
+    public var agent: ImportSourceAgent
+
+    /// The identifier of the session in the source agent.
+    public var sourceID: String
+
+    /// The last working folder of the session, or `nil` when the windows do
+    /// not give it.
+    public var cwd: URL?
+
+    /// The last git branch of the session, or `nil` when the windows do not
+    /// give it.
+    public var gitBranch: String?
+
+    /// `true` when a program started the session, `false` when a person
+    /// typed it. A file that does not tell is typed.
+    public var isAutomated: Bool
+
+    /// The title of the session, or `nil` when the windows have no title.
+    public var title: String?
+
+    /// The first prompt, on one line and cut at
+    /// ``maximumPromptLength`` characters. It is `nil` for an automated
+    /// session and when the head of the file does not give it.
+    public var firstPrompt: String?
+
+    /// The last prompt, on one line and cut at ``maximumPromptLength``
+    /// characters, or `nil` when the tail of the file does not give it.
+    public var lastPrompt: String?
+
+    /// The date of the first record of the head of the file. It is `nil`
+    /// when the reader did not read the head.
+    public var firstDate: Date?
+
+    /// The date of the last record of the tail of the file that has a date.
+    public var lastDate: Date?
+
+    /// The maximum length of ``firstPrompt`` and ``lastPrompt``, in
+    /// characters.
+    public static let maximumPromptLength = 200
+
+    /// Makes the metadata.
+    public init(
+        agent: ImportSourceAgent,
+        sourceID: String,
+        cwd: URL? = nil,
+        gitBranch: String? = nil,
+        isAutomated: Bool = false,
+        title: String? = nil,
+        firstPrompt: String? = nil,
+        lastPrompt: String? = nil,
+        firstDate: Date? = nil,
+        lastDate: Date? = nil
+    ) {
+        self.agent = agent
+        self.sourceID = sourceID
+        self.cwd = cwd
+        self.gitBranch = gitBranch
+        self.isAutomated = isAutomated
+        self.title = title
+        self.firstPrompt = firstPrompt
+        self.lastPrompt = lastPrompt
+        self.firstDate = firstDate
+        self.lastDate = lastDate
+    }
+}
+
 /// A session that a reader read from a file.
 public struct ImportedSession: Sendable, Hashable {
     /// The metadata of the session.

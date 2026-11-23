@@ -47,14 +47,10 @@ public struct ClaudeCodeSessionReader: Sendable {
     public func read(_ data: Data) throws -> ImportedSession {
         var state = ReadState()
         for line in ImportSupport.lines(of: data) {
-            guard let record = ImportSupport.record(line) else {
-                state.skipped.skip(ImportSupport.invalidJSONKind)
-                continue
-            }
-            state.read(record)
+            state.read(line: line)
         }
-        guard !state.updates.isEmpty else {
-            throw state.recognized == 0 && state.jsonRecords > 0 ? ImportReadError.notThisFormat : ImportReadError.noReadableRecord
+        if let error = state.endOfFileError {
+            throw error
         }
         return ImportedSession(
             metadata: state.metadata(sourceID: sourceID),
@@ -89,6 +85,52 @@ public struct ClaudeCodeSessionReader: Sendable {
             turnCount: scan.turnCount
         )
     }
+
+    /// Reads the metadata of a session file from some windows of the file
+    /// only. (D212 of Testudo, section 4.3.)
+    ///
+    /// The reader reads the last 64 KB; the last 256 KB one time when the
+    /// tail gives no working folder; and the first 64 KB when the session
+    /// is not automated. Thus it reads at most 384 KB of a file. A file of
+    /// 64 KB or less is read in full, one time, and a file of 256 KB or less
+    /// can be read in full by the long tail. A larger file is never read in
+    /// full. A partial line at the edge of a window is not read, and a last
+    /// line with no line break is not read.
+    ///
+    /// The fields:
+    ///
+    /// - `cwd`, `gitBranch`: the last values of the records.
+    /// - `isAutomated`: `true` when the last `entrypoint` value starts with
+    ///   `sdk`. A file with no `entrypoint` value is typed.
+    /// - `firstPrompt`: the first prompt of the head, from a
+    ///   `queue-operation` record or a `user` record.
+    /// - `lastPrompt`: the last prompt, from a `last-prompt` record or a
+    ///   `user` record.
+    /// - `title`: the last `custom-title`, else the last `ai-title`, else
+    ///   the last `summary` of the windows.
+    ///
+    /// - Parameter source: The bytes of the file.
+    /// - Returns: The metadata.
+    /// - Throws: ``ImportReadError/notThisFormat`` when no record of the
+    ///   windows is a Claude Code record, ``ImportReadError/noReadableRecord``
+    ///   when the windows have no JSON record, or the error of a read.
+    public func metadata(from source: some SessionByteSource) throws -> SessionFileMetadata {
+        try MetadataWindows.read(source, scan: Self.scanMetadata).metadata(agent: .claudeCode, sourceID: sourceID)
+    }
+
+    /// Reads the session updates of a full session file in batches, one
+    /// block at a time. The updates are the updates of ``read(_:)``.
+    ///
+    /// - Parameters:
+    ///   - source: The bytes of the file.
+    ///   - blockSize: The number of bytes of each read.
+    /// - Returns: The batches.
+    public func updates(
+        from source: some SessionByteSource,
+        blockSize: Int = SessionUpdateBatches.defaultBlockSize
+    ) -> SessionUpdateBatches {
+        SessionUpdateBatches(source: source, blockSize: blockSize, parser: ReadState())
+    }
 }
 
 // MARK: - Titles
@@ -102,19 +144,44 @@ struct ClaudeTitles {
 
     var best: String? { custom ?? ai ?? summary }
 
+    /// The rank of a `custom-title`, an `ai-title` and a `summary` record.
+    private static let customRank = 2
+    private static let aiRank = 1
+    private static let summaryRank = 0
+
+    /// The members that hold the text of each type of title record, and
+    /// the rank of the type.
+    private static let kinds: [String: (keys: [String], rank: Int)] = [
+        "custom-title": (["customTitle", "title"], customRank),
+        "ai-title": (["aiTitle", "title"], aiRank),
+        "summary": (["summary", "title"], summaryRank),
+    ]
+
+    /// The types of the title records.
+    static let types = Set(kinds.keys)
+
     /// Reads a title record. Returns `false` when the record is not one.
     mutating func read(_ record: Record) -> Bool {
         switch record["type"] as? String {
         case "custom-title":
-            custom = Self.text(record, keys: ["customTitle", "title"]) ?? custom
+            custom = Self.rankedTitle(of: record)?.text ?? custom
         case "ai-title":
-            ai = Self.text(record, keys: ["aiTitle", "title"]) ?? ai
+            ai = Self.rankedTitle(of: record)?.text ?? ai
         case "summary":
-            summary = Self.text(record, keys: ["summary", "title"]) ?? summary
+            summary = Self.rankedTitle(of: record)?.text ?? summary
         default:
             return false
         }
         return true
+    }
+
+    /// The title of a title record with its rank, or `nil` when the record
+    /// is not a title record or has no text.
+    static func rankedTitle(of record: Record) -> RankedTitle? {
+        guard let type = record["type"] as? String, let kind = kinds[type], let text = text(record, keys: kind.keys) else {
+            return nil
+        }
+        return RankedTitle(text: text, rank: kind.rank)
     }
 
     private static func text(_ record: Record, keys: [String]) -> String? {
@@ -132,8 +199,9 @@ struct ClaudeTitles {
 
 extension ClaudeCodeSessionReader {
     /// The state of one read.
-    private struct ReadState {
+    private struct ReadState: SessionRecordParser {
         var updates: [SessionUpdate] = []
+        var emittedCount = 0
         var skipped = SkipCounter()
         var dates = DateRange()
         var titles = ClaudeTitles()
@@ -159,8 +227,17 @@ extension ClaudeCodeSessionReader {
             )
         }
 
+        mutating func read(line: Data.SubSequence) {
+            guard let record = ImportSupport.record(line) else {
+                skipped.skip(ImportSupport.invalidJSONKind)
+                return
+            }
+            read(record)
+        }
+
         mutating func emit(_ update: SessionUpdate) {
             updates.append(update)
+            emittedCount += 1
             if case .compactionUpdate = update {
                 lastWasCompaction = true
             } else {
@@ -170,7 +247,7 @@ extension ClaudeCodeSessionReader {
 
         mutating func read(_ record: Record) {
             jsonRecords += 1
-            guard let type = record["type"] as? String, record["sessionId"] != nil || record["uuid"] != nil || Self.titleTypes.contains(type) else {
+            guard let type = record["type"] as? String, record["sessionId"] != nil || record["uuid"] != nil || ClaudeTitles.types.contains(type) else {
                 skipped.skip((record["type"] as? String) ?? "unknown")
                 return
             }
@@ -191,7 +268,7 @@ extension ClaudeCodeSessionReader {
             case "assistant":
                 readAssistant(record)
             case "system" where record["subtype"] as? String == "compact_boundary":
-                addCompaction(id: "compact-" + ((record["uuid"] as? String) ?? String(updates.count)))
+                addCompaction(id: "compact-" + ((record["uuid"] as? String) ?? String(emittedCount)))
             case "system":
                 skipped.skip("system:" + ((record["subtype"] as? String) ?? "unknown"))
             default:
@@ -199,15 +276,13 @@ extension ClaudeCodeSessionReader {
             }
         }
 
-        static let titleTypes: Set<String> = ["custom-title", "ai-title", "summary"]
-
         mutating func addCompaction(id: String) {
             guard !lastWasCompaction else { return }
             emit(ImportSupport.compaction(id: id))
         }
 
         mutating func readUser(_ record: Record) {
-            let uuid = (record["uuid"] as? String) ?? "user-\(updates.count)"
+            let uuid = (record["uuid"] as? String) ?? "user-\(emittedCount)"
             if record["isCompactSummary"] as? Bool == true {
                 addCompaction(id: "compact-" + uuid)
                 return
@@ -288,7 +363,7 @@ extension ClaudeCodeSessionReader {
                 skipped.skip("assistant:no-content")
                 return
             }
-            let messageId = (message["id"] as? String) ?? (record["uuid"] as? String) ?? "assistant-\(updates.count)"
+            let messageId = (message["id"] as? String) ?? (record["uuid"] as? String) ?? "assistant-\(emittedCount)"
             for block in blocks {
                 switch block["type"] as? String {
                 case "text":
@@ -440,5 +515,66 @@ extension ClaudeCodeSessionReader {
             }
             return ImportSupport.date(String(decoding: line[start..<end], as: UTF8.self))
         }
+    }
+}
+
+// MARK: - The bounded metadata scan
+
+extension ClaudeCodeSessionReader {
+    /// The start of an `entrypoint` value of a session that a program
+    /// started, such as `sdk-cli` or `sdk-ts`.
+    static let automatedEntrypointPrefix = "sdk"
+
+    /// Reads one record of a window into the metadata fields.
+    static func scanMetadata(_ record: Record, into fields: inout MetadataFields) {
+        guard let type = record["type"] as? String,
+            record["sessionId"] != nil || record["uuid"] != nil || ClaudeTitles.types.contains(type)
+        else {
+            return
+        }
+        fields.isRecognized = true
+        fields.dates.add(ImportSupport.date(record["timestamp"]))
+        if let title = ClaudeTitles.rankedTitle(of: record) {
+            fields.noteTitle(title)
+            return
+        }
+        fields.noteSourceID(record["sessionId"])
+        fields.noteCwd(record["cwd"])
+        fields.noteGitBranch(record["gitBranch"])
+        if let entrypoint = record["entrypoint"] as? String, !entrypoint.isEmpty {
+            fields.isAutomated = entrypoint.hasPrefix(automatedEntrypointPrefix)
+        }
+        switch type {
+        case "queue-operation":
+            if let content = record["content"] as? String {
+                fields.notePrompt(content)
+            }
+        case "last-prompt":
+            if let text = record["lastPrompt"] as? String {
+                fields.noteLastPrompt(text)
+            }
+        case "user":
+            if let text = promptText(of: record) {
+                fields.notePrompt(text)
+            }
+        default:
+            break
+        }
+    }
+
+    /// The text of a prompt of the user: a string content, else the first
+    /// text block. A record of a sub-agent, a meta record, a summary of a
+    /// compaction and a record with only tool results give no prompt.
+    static func promptText(of record: Record) -> String? {
+        guard record["isSidechain"] as? Bool != true, record["isMeta"] as? Bool != true,
+            record["isCompactSummary"] as? Bool != true, let message = record["message"] as? Record
+        else {
+            return nil
+        }
+        if let text = message["content"] as? String {
+            return text
+        }
+        let blocks = (message["content"] as? [Record]) ?? []
+        return blocks.first { $0["type"] as? String == "text" }?["text"] as? String
     }
 }
