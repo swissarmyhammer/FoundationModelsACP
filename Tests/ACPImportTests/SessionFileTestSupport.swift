@@ -36,12 +36,13 @@ final class CountingByteSource: SessionByteSource {
     var byteCount: Int { readRanges.reduce(0) { $0 + $1.count } }
 }
 
-/// A temporary folder for the generated session files. The folder is
-/// removed when the body ends.
+/// A temporary folder for the generated session files, in the test folder of
+/// this process (``TestRunFolder/temporary``). The folder is removed when the
+/// body ends.
 enum GeneratedFiles {
     /// Runs a body with a new empty folder, and removes the folder after it.
     static func withFolder<Result>(_ body: (URL) async throws -> Result) async throws -> Result {
-        let folder = FileManager.default.temporaryDirectory
+        let folder = TestRunFolder.temporary
             .appendingPathComponent("ACPImportTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
