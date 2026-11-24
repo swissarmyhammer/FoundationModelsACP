@@ -18,6 +18,9 @@ public enum ConformanceCommand {
         var configuration: ConformanceConfiguration
         var json: Bool
         var trace = false
+        /// The working folder that ``parse(_:)`` made because no `--cwd` was given, or `nil`.
+        /// ``main(arguments:)`` removes it after the run.
+        var madeWorkingFolder: String?
     }
 
     static let usage = """
@@ -73,7 +76,8 @@ public enum ConformanceCommand {
         var configuration = ConformanceConfiguration(
             executable: try resolve(program), arguments: Array(command.dropFirst()))
         if !overrides.isEmpty { configuration.environment = ProcessInfo.processInfo.environment.merging(overrides) { $1 } }
-        configuration.cwd = try cwd ?? makeEmptyFolder()
+        let madeWorkingFolder = cwd == nil ? try makeEmptyFolder() : nil
+        configuration.cwd = cwd ?? madeWorkingFolder ?? configuration.cwd
         if let quiet { configuration.quiet = .seconds(quiet) }
         if let timeout { configuration.timeout = .seconds(timeout) }
         if let scriptPath {
@@ -84,7 +88,8 @@ public enum ConformanceCommand {
                 throw UsageError(description: "cannot read the script \(scriptPath): \(error)")
             }
         }
-        return Options(configuration: configuration, json: json, trace: trace)
+        return Options(
+            configuration: configuration, json: json, trace: trace, madeWorkingFolder: madeWorkingFolder)
     }
 
     /// A new empty folder for the working directory of the sessions. A cwd such as
@@ -120,6 +125,9 @@ public enum ConformanceCommand {
         } catch {
             FileHandle.standardError.write(Data("acp-conformance: \(error)\n\(usage)\n".utf8))
             return usageExitCode
+        }
+        defer {
+            if let folder = options.madeWorkingFolder { try? FileManager.default.removeItem(atPath: folder) }
         }
         let report = await ConformanceRunner.run(options.configuration)
         if options.trace { FileHandle.standardError.write(Data((report.traceText + "\n").utf8)) }

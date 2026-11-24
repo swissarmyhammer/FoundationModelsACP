@@ -42,14 +42,22 @@ import Testing
         #expect(options.configuration.script?.resumes.first?.untilToolCall == "c1")
     }
 
+    @Test func aGivenCwdIsNotAFolderThatTheRunRemoves() throws {
+        let options = try ConformanceCommand.parse(Self.cwdArguments + ["--", "/bin/agent"])
+        #expect(options.madeWorkingFolder == nil)
+    }
+
     @Test func aBareCommandNameIsFoundOnThePath() throws {
         let options = try ConformanceCommand.parse(Self.cwdArguments + ["--", "true"])
         #expect(options.configuration.executable.path.hasSuffix("/true"))
     }
 
     @Test func withoutCwdTheRunnerUsesAnExistingEmptyTemporaryFolder() throws {
-        let cwd = try ConformanceCommand.parse(["--", "/bin/agent"]).configuration.cwd
+        let options = try ConformanceCommand.parse(["--", "/bin/agent"])
+        let cwd = options.configuration.cwd
         defer { try? FileManager.default.removeItem(atPath: cwd) }
+        // The run removes the folder that the parse made.
+        #expect(options.madeWorkingFolder == cwd)
         var isDirectory: ObjCBool = false
         #expect(FileManager.default.fileExists(atPath: cwd, isDirectory: &isDirectory) && isDirectory.boolValue)
         #expect(try FileManager.default.contentsOfDirectory(atPath: cwd).isEmpty)
